@@ -424,6 +424,8 @@ public struct ControlConfiguration: Codable, Equatable, Sendable {
   public var autocompleteCandidatePanel: AutocompleteCandidatePanel? = .escape
   public var autocompleteInlineSuggestion: Bool? = true
   public var autocompleteOnDeviceLearning: Bool? = true
+  /// 命令里带凭据时整条不学习、不纠错；默认关，关时仍只删 `--password` 等选项值。
+  public var autocompleteSkipSecrets: Bool? = false
   public var autocompleteHistoryIgnore: [String]? = []
   public var autocompleteDescriptionLanguage: AutocompleteDescriptionLanguage? = .system
   /// 复制内容后在空提示符上以 ghost 提示剪贴板内容，回车只写入不执行。
@@ -532,6 +534,10 @@ public struct ControlConfiguration: Codable, Equatable, Sendable {
 
   public var resolvedAutocompleteHistoryIgnore: [String] {
     autocompleteHistoryIgnore ?? []
+  }
+
+  public var resolvedAutocompleteSkipSecrets: Bool {
+    autocompleteSkipSecrets ?? false
   }
 
   public var resolvedAutocompleteDescriptionLanguage: AutocompleteDescriptionLanguage {

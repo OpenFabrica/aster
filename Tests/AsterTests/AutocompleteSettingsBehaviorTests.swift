@@ -38,6 +38,22 @@ func autocompleteSettingsRoundTripEveryOption() throws {
   }
 }
 
+@Test("跳过含凭据的命令：默认关，写入后快照回传")
+@MainActor
+func autocompleteSkipSecretsSettingRoundTrip() throws {
+  let suite = "AutocompleteSettings.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let preferences = AppPreferences(defaults: defaults)
+  let controller = SettingsViewController(preferences: preferences)
+  controller.loadViewIfNeeded()
+  #expect(!preferences.configuration.controls.resolvedAutocompleteSkipSecrets)
+  try controller.applySettingForTesting(key: "controls.autocompleteSkipSecrets", value: true)
+  #expect(preferences.configuration.controls.resolvedAutocompleteSkipSecrets)
+  let values = try #require(controller.settingsSnapshotForTesting()["values"] as? [String: Any])
+  #expect(values["controls.autocompleteSkipSecrets"] as? Bool == true)
+}
+
 // MARK: - 按键识别
 
 @Test("Control-Space 与 Option-Esc 从真实键盘事件识别为对应意图")

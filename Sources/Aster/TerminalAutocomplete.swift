@@ -901,6 +901,11 @@ final class TerminalAutocompleteController {
       pendingCorrections = []
       return
     }
+    // 开启「跳过含凭据的命令」时整条不进历史，也不纠错：纠错要读输出，输出可能回显秘密。
+    if configuration.resolvedAutocompleteSkipSecrets, AutocompleteSecretDetector.containsSecret(command) {
+      pendingCorrections = []
+      return
+    }
     let executable = ShellCommandTokenizer.tokenize(command).tokens.first ?? ""
     let output = ANSICleaner.visibleText(from: completedCommandOutput?.text ?? "")
     // 只学习真正执行过的命令：`runningCommand` 本身只来自回车提交的行，这里再把

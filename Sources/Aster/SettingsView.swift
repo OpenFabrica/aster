@@ -1218,6 +1218,12 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
         ) { [weak self] value in
           self?.preferences.configuration.controls.autocompleteOnDeviceLearning = value
         },
+        toggleRow(
+          L("跳过含凭据的命令"), L("命令里出现密码、令牌或密钥时整条不记录、不纠错"),
+          value: preferences.configuration.controls.resolvedAutocompleteSkipSecrets
+        ) { [weak self] value in
+          self?.preferences.configuration.controls.autocompleteSkipSecrets = value
+        },
         textRow(
           L("历史忽略模式"), L("逗号分隔的 glob，例如 ssh *,mysql *；匹配命令不会保存"),
           value: preferences.configuration.controls.resolvedAutocompleteHistoryIgnore
@@ -3374,6 +3380,7 @@ extension SettingsViewController: WKNavigationDelegate {
       "controls.autocompleteInlineSuggestion": configuration.controls.resolvedAutocompleteInlineSuggestion,
       "controls.clipboardSuggestion": configuration.controls.resolvedClipboardSuggestion,
       "controls.autocompleteOnDeviceLearning": configuration.controls.resolvedAutocompleteOnDeviceLearning,
+      "controls.autocompleteSkipSecrets": configuration.controls.resolvedAutocompleteSkipSecrets,
       "controls.autocompleteDatabaseStatus": autocompleteDatabaseStatus,
       "controls.autocompleteHistoryIgnore": configuration.controls.resolvedAutocompleteHistoryIgnore.joined(separator: ", "),
       "controls.autocompleteDescriptionLanguage": configuration.controls.resolvedAutocompleteDescriptionLanguage.rawValue,
@@ -3930,6 +3937,7 @@ extension SettingsViewController: WKNavigationDelegate {
     case "controls.autocompleteInlineSuggestion": preferences.configuration.controls.autocompleteInlineSuggestion = try bool()
     case "controls.clipboardSuggestion": preferences.configuration.controls.clipboardSuggestion = try bool()
     case "controls.autocompleteOnDeviceLearning": preferences.configuration.controls.autocompleteOnDeviceLearning = try bool()
+    case "controls.autocompleteSkipSecrets": preferences.configuration.controls.autocompleteSkipSecrets = try bool()
     case "controls.autocompleteHistoryIgnore":
       preferences.configuration.controls.autocompleteHistoryIgnore = try string().split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     case "controls.autocompleteDescriptionLanguage": preferences.configuration.controls.autocompleteDescriptionLanguage = try enumValue(string(), as: AutocompleteDescriptionLanguage.self)

@@ -199,6 +199,7 @@
           row("controls.autocompleteInlineSuggestion", "Inline suggestion", t("在终端光标后显示候选后缀")),
           row("controls.clipboardSuggestion", t("剪贴板建议"), t("复制内容后，在空提示符上以灰字提示剪贴板内容，回车只粘贴不执行")),
           row("controls.autocompleteOnDeviceLearning", t("本机学习"), t("只保存脱敏后的本机历史")),
+          row("controls.autocompleteSkipSecrets", t("跳过含凭据的命令"), t("命令里出现密码、令牌或密钥时整条不记录、不纠错")),
           row("controls.autocompleteDatabaseStatus", t("补全数据库"), t("上游 Fig 规格版本与已安装的命令数量"), "readonly"),
           action("updateAutocomplete", t("更新补全数据库"), t("从 Aster 仓库拉取最新的命令规格文件"), t("立即更新")),
           action("clearAutocomplete", t("清除补全数据"), t("选择清除历史、固定命令或目录频率数据"), t("清除…"), { danger: true }),

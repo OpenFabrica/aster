@@ -1258,6 +1258,8 @@
 "本机 ssh 命令通过 OpenSSH ControlMaster 复用已认证连接；详情面板的远端文件与服务器监控借用它，不需要再次认证。只影响之后新建的终端" = "Lokale ssh-Befehle verwenden über OpenSSH ControlMaster eine bereits authentifizierte Verbindung erneut. Remote-Dateien und Server-Monitor im Detailbereich nutzen sie mit, eine erneute Authentifizierung entfällt. Gilt nur für danach erstellte Terminals";
 "本机后台保活" = "Lokale Shells im Hintergrund am Leben halten";
 "本机学习" = "Lokales Lernen";
+"跳过含凭据的命令" = "Befehle mit Zugangsdaten überspringen";
+"命令里出现密码、令牌或密钥时整条不记录、不纠错" = "Befehle mit Passwort, Token oder Schlüssel werden weder aufgezeichnet noch korrigiert";
 "本机学习数据" = "Lokale Lerndaten";
 "本机工作区是当前窗口里的一组标签，切走后里面的终端照常运行。远端工作区建在所选机器上。" = "Ein lokaler Arbeitsbereich ist eine Gruppe von Tabs im aktuellen Fenster; seine Terminals laufen weiter, wenn Sie wechseln. Entfernte Arbeitsbereiche werden auf dem gewählten Rechner angelegt.";
 "本机新建的终端交给后台会话服务托管，退出或崩溃后 Shell 继续运行；只影响之后新建的终端" = "Neue lokale Terminals an den Hintergrund-Sitzungsdienst übergeben, damit Shells Beenden oder Absturz überleben; betrifft nur danach erstellte Terminals";

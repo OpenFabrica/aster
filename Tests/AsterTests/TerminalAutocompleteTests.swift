@@ -924,6 +924,43 @@ func terminalAutocompleteContextPreviewsSelectedCandidate() async throws {
   #expect(ghost.stringValue == "erry-pick")
 }
 
+@Test("开启跳过含凭据的命令后整条不进历史也不纠错；关闭时沿用旧行为")
+@MainActor
+func terminalAutocompleteSkipsSecretCommandsWhenEnabled() throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
+  let controller = makeController(fixture)
+  controller.attach(to: view)
+  func run(_ command: String, exitStatus: Int = 0, output: String = "") {
+    controller.receive(.promptStart)
+    controller.receive(.inputStart)
+    controller.receiveInput(Array("\(command)\n".utf8)[...])
+    controller.receive(.commandStart)
+    if !output.isEmpty { controller.receiveOutput(Array(output.utf8)[...]) }
+    controller.receive(.commandFinished(exitStatus: exitStatus))
+  }
+  func learned(_ prefix: String) -> [String] {
+    fixture.service.suggestions(
+      line: prefix, directory: "/project", sessionIdentifier: "session", controls: fixture.controls.value
+    ).candidates.filter { $0.kind == .learnedCommand }.map(\.insertText)
+  }
+
+  fixture.controls.value.autocompleteSkipSecrets = true
+  run("export DEPLOY_TOKEN=abcdef123456")
+  #expect(learned("export").isEmpty)
+  // 失败的凭据命令也不纠错：输出里可能带着秘密。
+  run("gti push --token abcdef", exitStatus: 127, output: "zsh: command not found: gti")
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.refreshNow()
+  #expect(!controller.currentResult.candidates.contains { $0.kind == .correction })
+
+  fixture.controls.value.autocompleteSkipSecrets = false
+  run("export DEPLOY_TOKEN=abcdef123456")
+  #expect(learned("export") == ["export DEPLOY_TOKEN=abcdef123456"])
+}
+
 @Test("多条同样可能的历史整行只预览共同的下一个词，Tab 只接受这个词")
 @MainActor
 func terminalAutocompletePreviewsSharedPrefixOfConflictingHistory() async throws {

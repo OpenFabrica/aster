@@ -353,7 +353,7 @@ func legacyControlConfigurationDefaultsAutocomplete() throws {
   var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
   for key in [
     "autocompleteShortcut", "autocompleteCandidatePanel", "autocompleteInlineSuggestion",
-    "autocompleteOnDeviceLearning", "autocompleteHistoryIgnore",
+    "autocompleteOnDeviceLearning", "autocompleteHistoryIgnore", "autocompleteSkipSecrets",
     "autocompleteDescriptionLanguage", "clipboardSuggestion",
   ] {
     object.removeValue(forKey: key)
