@@ -119,6 +119,7 @@ token 替换类建议（拼写、目录）用解引号 token 重建。
 - 历史参数从已脱敏的现有记录按目录、命令路径、参数槽位推导，不新建原始历史副本。
   选项顺序变化不改变位置参数槽位；不同命令/选项值不会混用。最多扫描排名靠前的 256 条，每条 64 个 token。
 - 自动面板初始不预览首项；Down/Up 明确选择后，预览与说明同步切换。
+- 冲突历史只预览共同前缀（`AutocompleteSharedPrefix`）：前 8 条里有 ≥ 2 条分差 ≤ 15 的整行历史（learnedCommand / readmeCommand / snippet），且首项是其中一条或是正好等于共同词的 token 候选（槽位学习的 `commit`）时，ghost 画它们后缀的最长公共前缀，修剪到最后一个完整词（含空格）；公共部分停在半个词里则不画。控制器的 `InlineSuggestion.sharedPrefix` 接受时只发这一个词，不接受任何一条候选。规格 token 候选不参与，`git ch` 的 checkout / cherry-pick 继续只进面板。
 
 ## 使用习惯与上下文排序
 

@@ -924,6 +924,44 @@ func terminalAutocompleteContextPreviewsSelectedCandidate() async throws {
   #expect(ghost.stringValue == "erry-pick")
 }
 
+@Test("多条同样可能的历史整行只预览共同的下一个词，Tab 只接受这个词")
+@MainActor
+func terminalAutocompletePreviewsSharedPrefixOfConflictingHistory() async throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
+  let controller = makeController(fixture)
+  controller.attach(to: view)
+  var sent: [UInt8] = []
+  view.onEncodedInput = { sent.append(contentsOf: $0) }
+  view.onAutocompleteOutput = { controller.receiveOutput($0) }
+  func run(_ command: String) {
+    controller.receive(.promptStart)
+    controller.receive(.inputStart)
+    controller.receiveInput(Array("\(command)\n".utf8)[...])
+    controller.receive(.commandStart)
+    controller.receive(.commandFinished(exitStatus: 0))
+  }
+  // 两条整行历史在同一目录各执行两次，分数相同，谁也不领先。
+  for _ in 0..<2 {
+    run("git commit -m wip")
+    run("git commit --amend")
+  }
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.receiveInput(Array("git ".utf8)[...])
+  controller.refreshNow()
+  let lines = controller.currentResult.candidates.filter { $0.kind == .learnedCommand }.map(\.insertText)
+  #expect(lines.contains("git commit -m wip") && lines.contains("git commit --amend"))
+  #expect(controller.inlineSuggestion == .sharedPrefix("commit "))
+  #expect(controller.inlineGhostText == "commit ")
+
+  view.dataReceived(slice: Array("git ".utf8)[...])
+  await Task.yield()
+  #expect(controller.handle(.tab))
+  #expect(String(decoding: sent, as: UTF8.self) == "commit ")
+}
+
 @Test("自动面板未选中时 Tab 接受已经可见的首项")
 @MainActor
 func terminalAutocompleteContextTabAcceptsVisibleFirstRow() throws {

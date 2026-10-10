@@ -583,8 +583,18 @@ final class TerminalAutocompleteController {
     // 只允许接受屏幕上真正显示的 ghost。等待回显期间（含 zsh-autosuggestions 等
     // shell 端建议占据行尾、导致回显校验一直不通过的场景）候选是不可见的；此时吞掉
     // Tab 会插入用户从未见过的文本，必须把按键放行给 Shell 自己的补全。
-    if acceptsInline, currentResult.ghostText != nil, inlineSuggestionDisplayable {
-      return acceptCandidate(at: inlineCandidateIndex ?? 0)
+    if acceptsInline, inlineSuggestionDisplayable {
+      switch inlineSuggestion {
+      case .candidate(let index) where currentResult.ghostText != nil:
+        return acceptCandidate(at: index)
+      case .sharedPrefix(let shared):
+        // 共同前缀不是某一条候选：只写入这一个词，面板与剩余候选在下一轮按新前缀重算。
+        guard let terminalView else { return false }
+        dismiss()
+        return terminalView.sendAutocompleteBytes(Array(shared.utf8)[...])
+      default:
+        break
+      }
     }
     // Shell 插件已经画出的后缀也是用户可见的建议。接受它时只发文字，绝不发送 Tab，
     // 避免落入 zsh 的 “show all possibilities” 分支或再次打开 Aster 面板。
@@ -613,7 +623,7 @@ final class TerminalAutocompleteController {
       return true
     }
 
-    if key == .escape, currentResult.ghostText != nil, inlineSuggestionDisplayable {
+    if key == .escape, inlineGhostText != nil, inlineSuggestionDisplayable {
       // Esc 关掉剪贴板 ghost 就是「我不要这份内容」，同一份内容不再在任何 Pane 上出现。
       if currentResult.candidates.first?.kind == .clipboard { onClipboardSuggestionConsumed?() }
       inlineDismissed = true
@@ -1038,23 +1048,47 @@ final class TerminalAutocompleteController {
     kind == .correction || kind == .clipboard || kind == .followUp
   }
 
-  /// Otty 的预览语义：只有一个候选，或用户已明确选中某条候选时，才画灰色后缀。
-  private var inlineCandidateIndex: Int? {
+  /// 行内 ghost 的来源：某一条候选的后缀，或多条冲突历史共同的下一个词。
+  enum InlineSuggestion: Equatable {
+    case candidate(Int)
+    case sharedPrefix(String)
+  }
+
+  /// Otty 的预览语义：只有一个候选，或用户已明确选中某条候选时，才画那条候选的灰色
+  /// 后缀；多条同样可能的整行历史只预览共同的下一个词，不替用户挑一条。
+  var inlineSuggestion: InlineSuggestion? {
     if panelVisible, hasUserSelection, currentResult.candidates.indices.contains(selectedIndex) {
-      return selectedIndex
+      return .candidate(selectedIndex)
     }
     // 工具明确给出的失败纠错是一个确定建议，不被同时存在的历史候选稀释。
     if let kind = currentResult.candidates.first?.kind, Self.isStrongIntentKind(kind) {
-      return 0
+      return .candidate(0)
     }
-    return currentResult.candidates.count == 1 ? 0 : nil
+    if currentResult.candidates.count == 1 { return .candidate(0) }
+    if let shared = AutocompleteSharedPrefix.ghost(candidates: currentResult.candidates, line: tracker.line) {
+      return .sharedPrefix(shared)
+    }
+    return nil
+  }
+
+  private var inlineCandidateIndex: Int? {
+    if case .candidate(let index) = inlineSuggestion { index } else { nil }
+  }
+
+  /// 当前 ghost 应显示的文本（不含可见性判定），测试用它核对预览内容。
+  var inlineGhostText: String? {
+    switch inlineSuggestion {
+    case .candidate(let index): currentResult.candidates[index].appendableSuffix(from: tracker.line)
+    case .sharedPrefix(let shared): shared
+    case nil: nil
+    }
   }
 
   /// Inline ghost 当前是否具备显示条件；接受候选与渲染必须共用同一判定，
   /// 否则会出现“接受了一个不可见 ghost”的错乱（Tab 插入用户没看到的文本）。
   private var inlineSuggestionDisplayable: Bool {
     controls().resolvedAutocompleteInlineSuggestion
-      && inlineCandidateIndex != nil
+      && inlineSuggestion != nil
       && !inlineDismissed
       && !awaitingInputEcho
       && currentPromptIsEchoed()
@@ -1066,7 +1100,7 @@ final class TerminalAutocompleteController {
     let showsClipboard = candidate?.kind == .clipboard && inlineSuggestionDisplayable
     let displayResult = AutocompleteResult(
       candidates: currentResult.candidates,
-      ghostText: candidate?.appendableSuffix(from: tracker.line),
+      ghostText: inlineGhostText,
       replacementStart: candidate?.replacement.start ?? currentResult.replacementStart)
     let inlineFits = overlay.render(
       result: displayResult,
