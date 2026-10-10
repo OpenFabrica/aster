@@ -999,6 +999,44 @@ func terminalAutocompletePreviewsSharedPrefixOfConflictingHistory() async throws
   #expect(String(decoding: sent, as: UTF8.self) == "commit ")
 }
 
+@Test("多个候选时首条历史用得更多且最近用过，直接预览整行，Tab 接受它")
+@MainActor
+func terminalAutocompletePreviewsClearlyLeadingHistory() async throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
+  let controller = makeController(fixture)
+  controller.attach(to: view)
+  var sent: [UInt8] = []
+  view.onEncodedInput = { sent.append(contentsOf: $0) }
+  view.onAutocompleteOutput = { controller.receiveOutput($0) }
+  func run(_ command: String) {
+    controller.receive(.promptStart)
+    controller.receive(.inputStart)
+    controller.receiveInput(Array("\(command)\n".utf8)[...])
+    controller.receive(.commandStart)
+    controller.receive(.commandFinished(exitStatus: 0))
+  }
+  // fix 先用一次，wip 随后用两次：后者次数更多且最近用过。提交信息是自由文本，
+  // 不会和规格选项归并加分，排序只由学习历史决定。
+  run("git commit -m fix")
+  run("git commit -m wip")
+  run("git commit -m wip")
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.receiveInput(Array("git commit -m ".utf8)[...])
+  controller.refreshNow()
+  #expect(controller.currentResult.candidates.count > 1)
+  #expect(controller.currentResult.candidates.first?.insertText == "git commit -m wip")
+  #expect(controller.inlineSuggestion == .candidate(0))
+  #expect(controller.inlineGhostText == "wip")
+
+  view.dataReceived(slice: Array("git commit -m ".utf8)[...])
+  await Task.yield()
+  #expect(controller.handle(.tab))
+  #expect(String(decoding: sent, as: UTF8.self) == "wip")
+}
+
 @Test("自动面板未选中时 Tab 接受已经可见的首项")
 @MainActor
 func terminalAutocompleteContextTabAcceptsVisibleFirstRow() throws {

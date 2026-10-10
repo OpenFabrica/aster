@@ -704,19 +704,27 @@ public struct AutocompleteLearnedSuggestion: Equatable, Sendable {
   public let frecency: Double
   public let isSessionMatch: Bool
   public let pinCount: Int
+  /// 原始使用次数与最后使用时间，供 `AutocompleteInlineLead` 判断这条历史是否明显领先。
+  /// 时间为 nil 表示调用方没有提供统计，判定时按「不明显领先」处理。
+  public let useCount: Int
+  public let lastUsedAt: Date?
 
   public init(
     command: String,
     score: Double,
     frecency: Double = 0,
     isSessionMatch: Bool = false,
-    pinCount: Int = 0
+    pinCount: Int = 0,
+    useCount: Int = 0,
+    lastUsedAt: Date? = nil
   ) {
     self.command = command
     self.score = score
     self.frecency = frecency
     self.isSessionMatch = isSessionMatch
     self.pinCount = pinCount
+    self.useCount = useCount
+    self.lastUsedAt = lastUsedAt
   }
 }
 
@@ -898,7 +906,9 @@ public struct AutocompleteLearningDatabase: Codable, Equatable, Sendable {
           score: frecency + 2.0 * pinBoost + (isSessionMatch ? 0.6 : 0),
           frecency: frecency,
           isSessionMatch: isSessionMatch,
-          pinCount: entry.pinCount
+          pinCount: entry.pinCount,
+          useCount: entry.useCount,
+          lastUsedAt: entry.lastUsedAt
         )
       }
       .sorted {
@@ -1158,6 +1168,8 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   public let replacement: AutocompleteReplacementSpan
   /// 来自本机学习历史（整行或槽位值），面板里可用 ⇧⌫ 忘记；规格、文件、动态候选为 false。
   public let isLearned: Bool
+  /// 整行学习历史的使用统计；其它候选为 nil。只用于判定首项是否明显领先，不参与打分。
+  public let historyUsage: AutocompleteHistoryUsage?
 
   /// `replacement` 默认取 `.fullLine` 是刻意的失败安全:某个构造点漏填时,接受路径的
   /// 前缀校验会失败并拒绝接受,而不是往命令行里插入错位文本。
@@ -1168,7 +1180,8 @@ public struct AutocompleteCandidate: Equatable, Sendable {
     kind: AutocompleteCandidateKind,
     score: Double = 0,
     replacement: AutocompleteReplacementSpan = .fullLine,
-    isLearned: Bool = false
+    isLearned: Bool = false,
+    historyUsage: AutocompleteHistoryUsage? = nil
   ) {
     self.insertText = insertText
     self.displayText = displayText ?? insertText
@@ -1177,6 +1190,7 @@ public struct AutocompleteCandidate: Equatable, Sendable {
     self.score = score
     self.replacement = replacement
     self.isLearned = isLearned
+    self.historyUsage = historyUsage
   }
 
   /// 在插入文本前补一个空格，用于“命令名刚打完、还没敲空格”时直接给出下一段参数。
@@ -1184,14 +1198,16 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   func prefixedWithSeparator() -> AutocompleteCandidate {
     AutocompleteCandidate(
       insertText: " " + insertText, displayText: displayText, description: description,
-      kind: kind, score: score, replacement: replacement, isLearned: isLearned)
+      kind: kind, score: score, replacement: replacement, isLearned: isLearned,
+      historyUsage: historyUsage)
   }
 
   /// 返回同一候选但换一个分数,供排序模型和跨来源归并复用。
   public func withScore(_ score: Double) -> AutocompleteCandidate {
     AutocompleteCandidate(
       insertText: insertText, displayText: displayText, description: description,
-      kind: kind, score: score, replacement: replacement, isLearned: isLearned)
+      kind: kind, score: score, replacement: replacement, isLearned: isLearned,
+      historyUsage: historyUsage)
   }
 
   /// 接受该候选后命令行的完整文本。跨来源去重与接受路径共用它,保证“同一条命令”
@@ -1388,7 +1404,8 @@ public struct AutocompleteEngine: Sendable {
         score: AutocompleteRelevance.score(
           kind: .learnedCommand, typed: line, candidate: $0.command,
           frecency: $0.frecency, sessionBoost: $0.isSessionMatch ? 1 : 0),
-        replacement: .fullLine, isLearned: true)
+        replacement: .fullLine, isLearned: true,
+        historyUsage: AutocompleteHistoryUsage($0))
     }
     candidates += readmeCommands.filter { $0.hasPrefix(line) && $0 != line }.map {
       AutocompleteCandidate(
@@ -1530,7 +1547,8 @@ public struct AutocompleteEngine: Sendable {
       score: max(lhs.score, rhs.score) + 25,
       replacement: winner.replacement,
       // 任一来源是学习历史，归并后就仍可忘记：忘记只删历史那一半，规格候选不受影响。
-      isLearned: lhs.isLearned || rhs.isLearned
+      isLearned: lhs.isLearned || rhs.isLearned,
+      historyUsage: winner.historyUsage ?? loser.historyUsage
     )
   }
 }

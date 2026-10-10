@@ -30,7 +30,7 @@ flowchart TD
 - `TerminalAutocompleteController` 管理候选、输入生命周期、接受与可见性；两个 terminal adapter 提供网格校验。
 - Ghostty `readLine` 可限定包含端点的列范围，用于光标前缀/后缀读取。光标离开可见区或进入备用屏时拒绝行内建议。
 - IME x 为单元格中点，width 为预编辑宽度；补全从左缘绘制，保持 IME 原始坐标不变。
-- 自动面板初始没有明确选择；唯一候选或用户选中候选后才显示 inline，预览后缀跟随选中项。Esc 关闭后本轮不自动弹回，继续输入重新筛选。
+- 自动面板初始没有明确选择；唯一候选、首项明显领先或用户选中候选后才显示 inline，预览后缀跟随选中项。Esc 关闭后本轮不自动弹回，继续输入重新筛选。
 - 面板最多八行；空间不足时减少行数并跟随选中项，完全放不下一行时隐藏。面板宽度不超过 Pane。
 - 多物理行输入未能核对完整前缀时保守隐藏行内建议，候选仍可在面板选择；不按字符串长度猜 Unicode 网格列。
 
@@ -121,7 +121,11 @@ token 替换类建议（拼写、目录）用解引号 token 重建。
 - 历史参数从已脱敏的现有记录按目录、命令路径、参数槽位推导，不新建原始历史副本。
 - `controls.autocompleteSkipSecrets`（默认关）打开时，`AutocompleteSecretDetector` 在命令结束时手写扫描 token：凭据选项带值、`NAME=value` 的 NAME 含 PASSWORD/SECRET/TOKEN/API_KEY/ACCESS_KEY/PRIVATE_KEY/CREDENTIAL、`Authorization:` 头、`mysql -pXXX`、AKIA/ghp_/github_pat_/sk-/glpat-/AIza/xox?- 形态、PEM 私钥块、URL 内嵌 `user:pass@`。命中则整条不 `record` 也不跑纠错（输出可能回显秘密）。关闭时沿用只删选项值的 `sanitizedCommand`。
   选项顺序变化不改变位置参数槽位；不同命令/选项值不会混用。最多扫描排名靠前的 256 条，每条 64 个 token。
-- 自动面板初始不预览首项；Down/Up 明确选择后，预览与说明同步切换。
+- 自动面板初始不预览首项（除非首项明显领先，见下一条）；Down/Up 明确选择后，预览与说明同步切换。
+- 首项明显领先（`AutocompleteInlineLead`，对应 Otty 引擎的 `clear_leader` 标记）时多个候选也直接预览首项。Otty 1.5.4 反编译所得规则：整行历史按分数排序，首条分数 ≥ 次条 + 0.5 且是最近用过的才标记；其它候选首项分数 ≥ 次项 1.5 倍才标记。Aster 换算到自己的数据与分制：
+  - 首项是整行历史（`learnedCommand` + `.fullLine`）：它的使用次数严格多于其它每条匹配的整行历史，且最后使用时间不早于它们（`AutocompleteHistoryUsage` 由学习库的 `useCount` / `lastUsedAt` 经引擎带到候选上，归并时保留）。只和其它整行历史比；没有其它整行历史时直接领先；缺统计按不领先处理。
+  - 首项是其它候选：减去 `AutocompleteRelevance.baseWeight` 后的相关分（匹配度 + 频率/上下文加成）≥ 下一个非整行历史候选的 1.5 倍。Otty 的分数从 0 起算，Aster 的分数含按类型的基础权重，比例只对去掉基础权重的部分有意义。`git ch` 的 checkout / cherry-pick 相关分 137.5 对 130，不预览；checkout 在本目录用过两次（槽位加成约 66）后预览。
+  - 首项是 token 且共同前缀正是这个词时，优先画共同前缀（多带一个空格）；首项是明显领先的整行历史时画整行。
 - 冲突历史只预览共同前缀（`AutocompleteSharedPrefix`）：前 8 条里有 ≥ 2 条分差 ≤ 15 的整行历史（learnedCommand / readmeCommand / snippet），且首项是其中一条或是正好等于共同词的 token 候选（槽位学习的 `commit`）时，ghost 画它们后缀的最长公共前缀，修剪到最后一个完整词（含空格）；公共部分停在半个词里则不画。控制器的 `InlineSuggestion.sharedPrefix` 接受时只发这一个词，不接受任何一条候选。规格 token 候选不参与，`git ch` 的 checkout / cherry-pick 继续只进面板。
 
 ## 使用习惯与上下文排序
@@ -161,6 +165,8 @@ token 替换类建议（拼写、目录）用解引号 token 重建。
 
 2026-09-05 在本机 Otty 独立窗口中临时排除 zsh-autosuggestions 后观察：`git ` 显示子命令列表；
 `git ch` 显示 checkout/cherry-pick 两个候选但没有行内预览；Down 选中后出现对应后缀和右侧说明。
+2026-10-11 反编译 Otty 1.5.4 主二进制（Rust 引擎符号保留）确认「明显领先」的两条阈值：
+`CommandHistory::full_line_completions` 的 `fmov d2, #0.5` 与内层补全的 `fmov d2, #1.5`。
 本机设置显示内置库 711 条，而在线文档标注 715 条，说明版本存在差异；Aster 继续使用自己的
 714 条 Fig 规格，不复制 Otty 的私有数据库或把条目数相同作为质量依据。
 
@@ -193,5 +199,6 @@ Tab 接受时只把后缀发给 PTY，不发送 Tab 字节，因此不会进入 
 长空白分隔的右侧提示符不作为建议；无可见建议时才走 Aster 多候选面板或原生 Shell 补全。
 
 无论自动还是手动触发，面板只用于两个及以上候选；收窄为一个时收起面板并显示 inline。
+多个候选且首项明显领先时，ghost 可见，Tab 接受首项而不是打开面板。
 2026-09-05 真机验证 `cd ~/so` → Tab → `cd ~/source/project/` 无询问，
 `git ch` 面板 → 输入 `ec` → 唯一 inline `kout` → Tab 得到 `git checkout`。

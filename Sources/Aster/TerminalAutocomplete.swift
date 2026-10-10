@@ -1092,8 +1092,8 @@ final class TerminalAutocompleteController {
     case sharedPrefix(String)
   }
 
-  /// Otty 的预览语义：只有一个候选，或用户已明确选中某条候选时，才画那条候选的灰色
-  /// 后缀；多条同样可能的整行历史只预览共同的下一个词，不替用户挑一条。
+  /// Otty 的预览语义：只有一个候选、首项明显领先，或用户已明确选中某条候选时，才画
+  /// 那条候选的灰色后缀；多条同样可能的整行历史只预览共同的下一个词，不替用户挑一条。
   var inlineSuggestion: InlineSuggestion? {
     if panelVisible, hasUserSelection, currentResult.candidates.indices.contains(selectedIndex) {
       return .candidate(selectedIndex)
@@ -1102,11 +1102,16 @@ final class TerminalAutocompleteController {
     if let kind = currentResult.candidates.first?.kind, Self.isStrongIntentKind(kind) {
       return .candidate(0)
     }
-    if currentResult.candidates.count == 1 { return .candidate(0) }
-    if let shared = AutocompleteSharedPrefix.ghost(candidates: currentResult.candidates, line: tracker.line) {
-      return .sharedPrefix(shared)
+    let candidates = currentResult.candidates
+    let shared = AutocompleteSharedPrefix.ghost(candidates: candidates, line: tracker.line)
+    // 只剩一个候选，或首项明显领先其余候选（Otty 的 clear_leader）时直接预览首项。
+    // 首项是单个 token 时，共同前缀与它是同一个词且多带一个空格，优先用共同前缀。
+    if AutocompleteInlineLead.leaderIsClear(candidates),
+      shared == nil || candidates.first.map(AutocompleteInlineLead.isHistoryLine) == true
+    {
+      return .candidate(0)
     }
-    return nil
+    return shared.map(InlineSuggestion.sharedPrefix)
   }
 
   private var inlineCandidateIndex: Int? {
