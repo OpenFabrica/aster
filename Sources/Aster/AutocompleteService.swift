@@ -603,8 +603,12 @@ final class AutocompleteService {
   private let pathHabitsURL: URL
   /// 每个会话上一条成功执行的命令，只在内存中保留；失败或重启即断开上下文。
   private var lastCommandBySession: [String: String] = [:]
-  /// `PATH` 可执行文件查找结果的进程内缓存，见 `executableExistsOnPath`。
-  private var executableLookupCache: [String: Bool] = [:]
+  /// Shell 上报的 `$PATH` 目录建成的可执行文件名索引；没上报前用 path_helper 规则
+  /// 重建的 PATH 兜底。索引在后台线程构建，建好后整体换入。
+  private(set) var executableIndex = AutocompleteExecutableIndex.empty
+  private var executableIndexDirectories: [String] = []
+  private var executableIndexTask: Task<Void, Never>?
+  private var executableIndexCheckedAt = Date.distantPast
   private(set) var cliToken: String
   let cliRequestService: AsterCLIRequestService
   /// 动态候选(git 分支、npm script、Homebrew formula …)的按目录缓存。
@@ -686,6 +690,47 @@ final class AutocompleteService {
     {
       pathHabits = valid
     }
+    // 首个 prompt 之前先用进程自己能推出的 PATH 建一份索引，Shell 上报后再按真实 PATH 重建。
+    executableIndexDirectories = AutocompleteHelpProbe.searchPath().split(separator: ":").map(String.init)
+    rebuildExecutableIndex()
+  }
+
+  /// Shell 经 OSC 6973 `Path=` 上报当前 `$PATH`。目录集合没变就不动；变了在后台重建索引。
+  func updateSearchPath(_ directories: [String]) {
+    var unique: [String] = []
+    var seen: Set<String> = []
+    for directory in directories where directory.hasPrefix("/") && seen.insert(directory).inserted {
+      unique.append(directory)
+    }
+    guard !unique.isEmpty, unique != executableIndexDirectories else { return }
+    executableIndexDirectories = unique
+    rebuildExecutableIndex()
+  }
+
+  /// 测试用：等待正在进行的索引构建完成。
+  func executableIndexSettled() async {
+    await executableIndexTask?.value
+  }
+
+  private func rebuildExecutableIndex() {
+    executableIndexTask?.cancel()
+    executableIndexCheckedAt = Date()
+    let directories = executableIndexDirectories
+    executableIndexTask = Task.detached(priority: .utility) { [weak self] in
+      let index = AutocompleteExecutableIndex.build(directories: directories)
+      guard !Task.isCancelled else { return }
+      await MainActor.run { self?.executableIndex = index }
+    }
+  }
+
+  /// 每 60 s 最多一次按目录指纹比对：刚 `brew install` 的工具下一次补全就能看见，
+  /// 平时每次按键只是一次 Date 比较。
+  private func refreshExecutableIndexIfStale(now: Date = Date()) {
+    guard now.timeIntervalSince(executableIndexCheckedAt) >= 60 else { return }
+    executableIndexCheckedAt = now
+    guard AutocompleteExecutableIndex.fingerprints(for: executableIndexDirectories) != executableIndex.fingerprints
+    else { return }
+    rebuildExecutableIndex()
   }
 
   /// 生产环境的惰性单例。测试可注入临时目录；`swift test`/`swift run` 使用进程级
@@ -727,25 +772,8 @@ final class AutocompleteService {
     if learningDatabase.entries.contains(where: {
       $0.command == token || $0.command.hasPrefix(token + " ")
     }) { return true }
-    return executableExistsOnPath(token)
-  }
-
-  /// `PATH` 上是否存在同名可执行文件。结果缓存在进程内：同一份剪贴板内容会在每次
-  /// 候选刷新时重新问一遍，没有缓存就变成反复的磁盘 stat。
-  private func executableExistsOnPath(_ token: String) -> Bool {
-    // 带斜杠的不是 PATH 查找的对象，上面的路径分支已经处理过。
-    guard !token.contains("/") else { return false }
-    if let cached = executableLookupCache[token] { return cached }
-    let searchPaths = (ProcessInfo.processInfo.environment["PATH"] ?? "")
-      .split(separator: ":", omittingEmptySubsequences: true)
-      .prefix(32)
-    let found = searchPaths.contains { directory in
-      fileManager.isExecutableFile(atPath: "\(directory)/\(token)")
-    }
-    // 缓存满了直接清空重来：这里只是省一次磁盘查询，不值得为淘汰策略引入排序开销。
-    if executableLookupCache.count >= 256 { executableLookupCache.removeAll(keepingCapacity: true) }
-    executableLookupCache[token] = found
-    return found
+    // PATH 查找走索引而不是逐次 stat：索引由 Shell 上报的真实 PATH 建成。
+    return executableIndex.contains(token)
   }
 
   func suggestions(
@@ -756,6 +784,7 @@ final class AutocompleteService {
     aliases: [String] = []
   ) -> AutocompleteResult {
     let localLearningEnabled = controls.resolvedAutocompleteOnDeviceLearning
+    refreshExecutableIndexIfStale()
     let normalizedDirectory = directory.hasPrefix("/")
       ? URL(fileURLWithPath: directory).standardizedFileURL.path : ""
     let folderTargets = AutocompleteFolderTargets(
@@ -784,7 +813,8 @@ final class AutocompleteService {
       readmeCommands: readme,
       aliases: aliases,
       dynamic: dynamicProvider(directory: normalizedDirectory),
-      language: descriptionLanguage
+      language: descriptionLanguage,
+      executables: executableIndex
     )
     let files = fileCandidates(for: line, directory: directory)
     var learnedArguments = localLearningEnabled ? learningDatabase.argumentCandidates(

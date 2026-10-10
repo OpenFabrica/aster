@@ -232,6 +232,7 @@ func zshIntegrationEmitsCommandLifecycle() throws {
   )
   #expect(output.contains("\u{1B}]7;file://"))
   #expect(output.contains("\u{1B}]6973;Aliases=aster_test_alias"))
+  #expect(output.contains("\u{1B}]6973;Path=/usr/bin:/bin\u{7}"))
   #expect(!output.contains("%23/"))
 }
 
@@ -393,6 +394,10 @@ func bashIntegrationEmitsCommandLifecycle() throws {
     markers: ["\u{1B}]133;A\u{7}", "\u{1B}]133;B\u{7}", "\u{1B}]133;C\u{7}",
       "ASTER_BASH_BODY", "\u{1B}]133;D;0\u{7}"]
   )
+  // 登录 Shell 会经 /etc/profile 的 path_helper 改写 PATH，只断言上报存在且含系统目录。
+  let pathReport = try #require(output.range(of: "\u{1B}]6973;Path=").map { output[$0.upperBound...] })
+  #expect(pathReport.hasPrefix("/"))
+  #expect(pathReport.split(separator: "\u{7}").first?.contains("/usr/bin") == true)
 }
 
 @Test("没有 ASTER_SSH_CONTROL_DIR 时 zsh 集成不定义 ssh 包装函数")

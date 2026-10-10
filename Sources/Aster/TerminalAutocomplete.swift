@@ -507,6 +507,11 @@ final class TerminalAutocompleteController {
     if promptActive { scheduleRefresh() }
   }
 
+  /// Shell 上报的 `$PATH`：交给服务重建可执行文件索引，索引是全局的、不按 Pane 保存。
+  func receiveSearchPath(_ directories: [String]) {
+    service.updateSearchPath(directories)
+  }
+
   @discardableResult
   func handleKeyDown(_ event: NSEvent) -> Bool {
     // 只有「干净的一次回车」才可能被剪贴板建议接受：带修饰键的 Return 属于 Shell 或

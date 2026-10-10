@@ -26,10 +26,27 @@ function _aster_fish_aliases
   printf '\e]6973;Aliases=%s\a' $payload
 end
 
+function _aster_fish_path
+  # Resend only when $PATH changed; url escaping keeps ':' out of each directory.
+  set -l joined (string join ':' -- $PATH)
+  test "$joined" = "$_ASTER_LAST_PATH"; and return 0
+  set -g _ASTER_LAST_PATH $joined
+  set -l encoded
+  for dir in $PATH
+    string match -q '/*' -- $dir; or continue
+    set -a encoded (string escape --style=url -- $dir)
+    test (count $encoded) -ge 64; and break
+  end
+  set -l payload (string join ':' -- $encoded)
+  set payload (string sub --length 8000 -- $payload)
+  printf '\e]6973;Path=%s\a' $payload
+end
+
 function _aster_fish_prompt
   printf '\e]133;A\a'
   _aster_fish_osc7
   _aster_fish_aliases
+  _aster_fish_path
   _aster_user_fish_prompt
   printf '\e]133;B\a'
 end

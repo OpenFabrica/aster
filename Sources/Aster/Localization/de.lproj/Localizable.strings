@@ -1439,6 +1439,7 @@
 "登录 Shell" = "Login-Shell";
 "监听端口" = "Lauschende Ports";
 "目录" = "Verzeichnis";
+"PATH 中的程序" = "Programm im PATH";
 "SSH 配置" = "SSH-Konfiguration";
 "已知主机" = "Bekannter Host";
 "Cargo 二进制" = "Cargo-Binary";

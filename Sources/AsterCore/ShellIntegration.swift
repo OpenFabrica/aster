@@ -49,6 +49,31 @@ public struct ShellAliasReport: Equatable, Sendable {
   }
 }
 
+/// Shell 集成经 OSC 6973 `Path=` 上报的 `$PATH` 目录：每项百分号编码、以 `:` 连接。
+/// 任何一项不合法就整条拒收——这是进入磁盘扫描的入口，宁可少一次更新也不接受半截数据。
+public struct ShellSearchPathReport: Equatable, Sendable {
+  public static let maximumDirectories = 64
+  public let directories: [String]
+
+  public init?(payload: String) {
+    guard payload.hasPrefix("Path="), payload.utf8.count <= 8_192,
+      payload.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value <= 0x7E })
+    else { return nil }
+    let items = payload.dropFirst("Path=".count).split(separator: ":", omittingEmptySubsequences: true)
+    guard items.count <= Self.maximumDirectories else { return nil }
+    var result: [String] = []
+    var seen: Set<String> = []
+    for item in items {
+      guard let decoded = String(item).removingPercentEncoding, decoded.hasPrefix("/"),
+        decoded.utf8.count <= 4_096,
+        !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+      else { return nil }
+      if seen.insert(decoded).inserted { result.append(decoded) }
+    }
+    directories = result
+  }
+}
+
 /// 不依赖渲染框架的终端网格位置。row 使用包含已裁剪 scrollback 的单调绝对行号，
 /// 因而缓冲区到达上限后继续输出也不会让历史命令锚点漂移。
 public struct TerminalGridPoint: Equatable, Sendable {

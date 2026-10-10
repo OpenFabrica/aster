@@ -44,6 +44,23 @@ _aster_bash_aliases() {
   printf '\e]6973;Aliases=%s\a' "$payload"
 }
 
+_aster_bash_path() {
+  # Resend only when $PATH changed; directories are percent-encoded so ':' stays a separator.
+  [[ "$PATH" == "${_ASTER_LAST_PATH:-}" ]] && return 0
+  _ASTER_LAST_PATH="$PATH"
+  local dir payload="" separator="" count=0 encoded
+  local IFS=':'
+  for dir in $PATH; do
+    [[ "$dir" == /* ]] || continue
+    encoded="$(_aster_bash_urlencode_path "$dir")"
+    payload="${payload}${separator}${encoded}"
+    separator=":"
+    count=$((count + 1))
+    [[ $count -ge 64 || ${#payload} -ge 8000 ]] && break
+  done
+  printf '\e]6973;Path=%s\a' "$payload"
+}
+
 _aster_bash_debug_trap() {
   local prior_status=$?
   if [[ "$BASH_COMMAND" == "_aster_bash_prompt_command"* ]]; then
@@ -65,6 +82,7 @@ _aster_bash_prompt_command() {
   printf '\e]133;A\a'
   _aster_bash_osc7
   _aster_bash_aliases
+  _aster_bash_path
   _ASTER_EXPECTING_COMMAND=1
   return "$command_status"
 }

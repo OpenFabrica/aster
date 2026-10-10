@@ -599,3 +599,30 @@ func autocompleteServiceLearnsPathHabitsForUnknownCommands() throws {
   try service.clearLearning(.history)
   #expect(files("zzunknowncmd ").contains("README.md"))
 }
+
+@Test("Shell 上报 PATH 后，规格库没有的程序名可补出，knowsCommand 也认得它")
+@MainActor
+func autocompleteServiceIndexesReportedSearchPath() async throws {
+  let state = try makeAutocompleteTemporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: state) }
+  let bin = state.appendingPathComponent("bin")
+  try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+  let tool = bin.appendingPathComponent("zzquux")
+  try "#!/bin/sh\n".write(to: tool, atomically: true, encoding: .utf8)
+  try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+  let service = try AutocompleteService(baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL)
+  await service.executableIndexSettled()
+  #expect(!service.knowsCommand("zzquux"))
+
+  service.updateSearchPath([bin.path, "/usr/bin", "relative"])
+  await service.executableIndexSettled()
+  #expect(service.knowsCommand("zzquux"))
+  #expect(service.executableIndex.directories == [bin.path, "/usr/bin"])
+  let result = service.suggestions(line: "zzqu", directory: "/project", sessionIdentifier: "s", controls: ControlConfiguration())
+  let candidate = try #require(result.candidates.first { $0.insertText == "zzquux" })
+  #expect(candidate.kind == .command)
+  #expect(candidate.description == L("PATH 中的程序"))
+  // 有规格的命令（git）不重复出现为 PATH 候选。
+  let git = service.suggestions(line: "gi", directory: "/project", sessionIdentifier: "s", controls: ControlConfiguration())
+  #expect(git.candidates.filter { $0.insertText == "git" }.count <= 1)
+}

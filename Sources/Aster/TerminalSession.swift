@@ -189,6 +189,7 @@ final class AsterTerminalView: LocalProcessTerminalView {
   var onTerminalUserInput: (() -> Void)?
   var onShellIntegrationEvent: ((ShellIntegrationEvent) -> Void)?
   var onShellAliases: (([String]) -> Void)?
+  var onShellSearchPath: (([String]) -> Void)?
   var onResumeProtocol: ((String) -> Void)?
   var onAutocompleteKeyDown: ((NSEvent) -> Bool)?
   /// 进度与通知观察器只镜像状态，不覆盖 SwiftTerm 自己的 OSC 9;4 顶部进度条。
@@ -1399,11 +1400,12 @@ final class AsterTerminalView: LocalProcessTerminalView {
       self.onShellIntegrationStateChange?(self.shellCommandTimeline)
     }
     getTerminal().registerOscHandler(code: 6_973) { [weak self] bytes in
-      guard bytes.count <= 8_192,
-        let payload = String(bytes: bytes, encoding: .ascii),
-        let report = ShellAliasReport(payload: payload)
-      else { return }
-      self?.onShellAliases?(report.names)
+      guard bytes.count <= 8_192, let payload = String(bytes: bytes, encoding: .ascii) else { return }
+      if let report = ShellAliasReport(payload: payload) {
+        self?.onShellAliases?(report.names)
+      } else if let report = ShellSearchPathReport(payload: payload) {
+        self?.onShellSearchPath?(report.directories)
+      }
     }
     // OSC 88 终端恢复协议:载荷原样交给 Session 解析(query/restart=/clear)。
     getTerminal().registerOscHandler(code: 88) { [weak self] bytes in
@@ -2781,6 +2783,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
         autocomplete?.receive(event)
       }
       view.onShellAliases = { [weak autocomplete] in autocomplete?.receiveAliases($0) }
+      view.onShellSearchPath = { [weak self, weak autocomplete] directories in
+        // 远端受管 Pane 的 PATH 属于别的机器，不能拿来扫本机磁盘。
+        guard self?.remoteManagedMachineLabel == nil else { return }
+        autocomplete?.receiveSearchPath(directories)
+      }
       view.onResumeProtocol = { [weak self] in self?.handleResumeProtocol(payload: $0) }
       view.onAutocompleteKeyDown = { [weak autocomplete] in autocomplete?.handleKeyDown($0) ?? false }
       autocompleteController = autocomplete
@@ -3323,11 +3330,13 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
       guard payload.count <= TerminalResumeProtocol.maximumPayloadBytes else { return }
       handleResumeProtocol(payload: String(decoding: payload, as: UTF8.self))
     case 6_973:
-      guard payload.count <= 8_192,
-        let value = String(bytes: payload, encoding: .ascii),
-        let report = ShellAliasReport(payload: value)
-      else { return }
-      autocompleteController?.receiveAliases(report.names)
+      guard payload.count <= 8_192, let value = String(bytes: payload, encoding: .ascii) else { return }
+      if let report = ShellAliasReport(payload: value) {
+        autocompleteController?.receiveAliases(report.names)
+      } else if let report = ShellSearchPathReport(payload: value), remoteManagedMachineLabel == nil {
+        // 远端受管 Pane 的 PATH 属于别的机器，不能拿来扫本机磁盘。
+        autocompleteController?.receiveSearchPath(report.directories)
+      }
     case 6_974:
       guard payload.count <= AgentTerminalDirective.maximumPayloadBytes,
         let value = String(bytes: payload, encoding: .ascii)

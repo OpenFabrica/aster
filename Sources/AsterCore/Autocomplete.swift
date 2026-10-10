@@ -1357,7 +1357,8 @@ public struct AutocompleteEngine: Sendable {
     readmeCommands: [String],
     aliases: [String] = [],
     dynamic: AutocompleteDynamicProvider = .empty,
-    language: AutocompleteDescriptionLanguage = .system
+    language: AutocompleteDescriptionLanguage = .system,
+    executables: AutocompleteExecutableIndex = .empty
   ) -> AutocompleteResult {
     // 空 prompt 只推荐当前目录学过的命令，不把整个规格库铺到候选面板。
     // 纯空白仍保留给 Shell 编辑；目录历史、固定命令与 README 使用原有 relevance。
@@ -1419,6 +1420,17 @@ public struct AutocompleteEngine: Sendable {
             score: AutocompleteRelevance.score(kind: .command, typed: token, candidate: $0.name),
             replacement: tokenSpan
           )
+        }
+      // Shell 上报的 PATH 里的程序：规格库没有的名字才加（有规格的已在上面出现），
+      // 分数走同一套 .command 权重，不另外加权。
+      candidates += executables.names(withPrefix: token).lazy
+        .filter { $0 != token && specDatabase.command(named: $0) == nil }
+        .prefix(50)
+        .map {
+          AutocompleteCandidate(
+            insertText: $0, description: L("PATH 中的程序"), kind: .command,
+            score: AutocompleteRelevance.score(kind: .command, typed: token, candidate: $0),
+            replacement: tokenSpan)
         }
       // 命令名已经打完整(还没敲空格)时，除了同前缀的其它命令名，也要给出这个命令
       // 本身能做什么。用户打完 `docker` 按 Tab 想看的是它的子命令和选项，而不是

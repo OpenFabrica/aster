@@ -95,6 +95,20 @@ func terminalViewReceivesShellAliases() {
   #expect(reports == [["gco", "gs"]])
 }
 
+@Test("终端视图接收 Path= 上报并拒绝非法目录")
+@MainActor
+func terminalViewReceivesShellSearchPath() {
+  let view = AsterTerminalView(frame: .zero)
+  var reports: [[String]] = []
+  view.onShellSearchPath = { reports.append($0) }
+  view.installShellIntegrationHandler()
+
+  view.dataReceived(slice: Array("\u{1B}]6973;Path=/opt/homebrew/bin:/usr/bin\u{7}".utf8)[...])
+  view.dataReceived(slice: Array("\u{1B}]6973;Path=/usr/bin:relative\u{7}".utf8)[...])
+
+  #expect(reports == [["/opt/homebrew/bin", "/usr/bin"]])
+}
+
 @Test("终端视图观察进度和三类通知且不覆盖 SwiftTerm 进度处理")
 @MainActor
 func terminalViewObservesProgressAndNotifications() {

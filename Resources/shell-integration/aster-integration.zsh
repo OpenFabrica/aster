@@ -43,6 +43,23 @@ _aster_zsh_aliases() {
   printf '\e]6973;Aliases=%s\a' "$payload"
 }
 
+_aster_zsh_path() {
+  # Only resend when $PATH changed: the app indexes the directories, so a resend per prompt
+  # would be wasted work. Each directory is percent-encoded, so ':' can never appear inside.
+  [[ "$PATH" == "${_ASTER_LAST_PATH:-}" ]] && return 0
+  typeset -g _ASTER_LAST_PATH="$PATH"
+  local dir payload="" separator=""
+  local -i count=0
+  for dir in ${(s.:.)PATH}; do
+    [[ "$dir" == /* ]] || continue
+    _aster_zsh_urlencode_path "$dir"
+    payload+="${separator}${REPLY}"
+    separator=":"
+    (( ++count >= 64 || ${#payload} >= 8000 )) && break
+  done
+  printf '\e]6973;Path=%s\a' "$payload"
+}
+
 _aster_zsh_precmd() {
   local command_status=$?
   if [[ "$_ASTER_COMMAND_ACTIVE" == "1" ]]; then
@@ -52,6 +69,7 @@ _aster_zsh_precmd() {
   printf '\e]133;A\a'
   _aster_zsh_osc7
   _aster_zsh_aliases
+  _aster_zsh_path
   if [[ "$PS1" != *$'\e]133;B\a'* ]]; then
     PS1="${PS1}"$'%{\e]133;B\a%}'
   fi

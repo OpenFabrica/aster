@@ -134,8 +134,14 @@ token 替换类建议（拼写、目录）用解引号 token 重建。
   `25·ln(1+min(n,20)) + 35·ln(1+min(n_目录,20))`，次数按 30 天半衰期衰减。整行历史按目录隔离，
   新目录冷启动时一条都用不上；这一层让 `cl` 在新目录里也先补常用的 `claude`，`git ch` 先补常用的子命令。
 - **用户词**：历史里执行过、但规格库没有的命令名（如 `claude`、`codex`），以及非路径参数槽位上用过的值
-  （如 `ssh` 主机名），作为候选跨目录补入，说明为「最近使用的命令 / 参数」。不查 PATH：
-  从 Finder 启动的 App 的 PATH 很短，查了反而误删；学习库已排除退出码 127。
+  （如 `ssh` 主机名），作为候选跨目录补入，说明为「最近使用的命令 / 参数」。学习库已排除退出码 127。
+- **PATH 里的程序**：Shell 集成在首个 prompt 及 `$PATH` 变化时经 OSC 6973 `Path=` 上报目录
+  （每项百分号编码、`:` 连接、≤ 64 目录、≤ 8000 字节），`ShellSearchPathReport` 校验后由
+  `AutocompleteService.updateSearchPath` 在后台线程建 `AutocompleteExecutableIndex`（普通可执行文件与
+  指向可执行文件的链接，名字须是裸二进制名，≤ 20000 条），建好整体换入。没上报前用 path_helper
+  规则重建的 PATH 兜底；之后每 60 s 最多一次按目录 (mtime, size) 指纹比对决定重扫。引擎在命令名位置
+  把规格库没有的名字作为 `.command` 候选（说明「PATH 中的程序」，≤ 50 条，不加权）；
+  `knowsCommand` 改查索引，不再逐次 stat。远端受管 Pane 的上报忽略。
 - **命令间上下文**（`AutocompleteTransitionTable`，存 `transitions.json`）：记录同一会话里相邻两条成功命令的
   意图键转移（命令名加第一层子命令，如 `git add → git commit`）。条件概率带绝对折扣 0.5，置信度
   `c/(c+4)`，满额 160 分；超过 2000 项时整体减半。失败的命令断开上下文；会话上下文只在内存中，
