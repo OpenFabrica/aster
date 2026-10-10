@@ -85,6 +85,7 @@ flowchart TD
 | `switchExistingBranch` | `(fatal|error): a branch named 'X' already exists` | 原命令含 `checkout` → `git checkout X`，否则 `git switch X` |
 | `nearestDirectory` | `cd`/`pushd` + zsh/bash/fish 三种「目录不存在」文案 | 在父目录里按 Levenshtein（容差 `max(1, len/3+1)`）找最近目录；含空格时单引号 |
 | `terraformInit` | `terraform`/`tofu` + 未初始化文案 | `<tool> init && <原命令>` |
+| `packageRunner` | 退出码 127 或 command not found，且 `node_modules/.bin/<cmd>` 存在（按锁文件选 `npx`/`pnpm exec`/`bunx`/`yarn`），或命令名在内置 npm/PyPI/gem CLI 表里（gem 需有 Gemfile） | `<runner> <原命令>`，如 `npx prettier …`、`uvx ruff …`、`uv run`/`poetry run`、`bundle exec` |
 | `elevatePrivileges` | 输出含 permission denied / operation not permitted / EACCES，退出码非零 | `sudo <原命令>`；排除已 `sudo`、`cd`/`ssh`/`git` 等、含 `| < > ; &` 的命令和 publickey/password 类认证失败 |
 
 磁盘事实通过 `CommandCorrectionContext` 的闭包注入：`directoryEntries(parent)` 只在 cwd 为本地绝对路径时列

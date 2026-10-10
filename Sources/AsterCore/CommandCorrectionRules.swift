@@ -175,9 +175,11 @@ enum CommandCorrectionRules {
       command: ([closest] + input.tokens.dropFirst()).joined(separator: " "), kind: .typoCommand)
   }
 
-  /// 命令没装时改用包运行器执行；规则体在 PackageRunnerSuggestion。
+  /// 命令没装时改用包运行器执行；只看 127 / command not found，规则体在 PackageRunnerSuggestion。
   static func packageRunner(_ input: Input) -> CommandCorrection? {
-    nil
+    guard input.context.exitStatus == 127 || input.outputContains("command not found") else { return nil }
+    return PackageRunnerSuggestion.suggestion(
+      command: input.executable, commandLine: input.command, fileExists: input.context.fileExists)
   }
 
   // MARK: - 提权
