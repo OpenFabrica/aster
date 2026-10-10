@@ -57,9 +57,14 @@ func ghosttyAgentLifecycleEstablishesMenuContext() async throws {
 
   // Hook 是向所属 TTY 写原始字节，不经过键盘布局或输入法。这里走生产的自动化字节
   // 入口，避免用逐键 typeText 把输入法时序误当成 OSC lifecycle 回归。
+  //
+  // 真实 hook 在 Agent 进程运行期间写入，所以 printf 之后用 `cat` 让这条命令保持运行。
+  // 单独一条 printf 会立刻结束，紧随的 OSC 133 D 按设计清掉 provider（Agent 命令已结束），
+  // 两者在同一批输出里先后处理，轮询永远看不到中间状态。
   let directive =
-    "printf '\\033]6974;AgentState=processing;Provider=claudeCode;SessionID=test-session-42\\007'\n"
+    "printf '\\033]6974;AgentState=processing;Provider=claudeCode;SessionID=test-session-42\\007'; cat\n"
   #expect(session.sendAutomationBytes(Array(directive.utf8)))
+  defer { _ = session.sendAutomationBytes([0x03]) }
   for _ in 0..<150 where session.activeAgentProvider == nil {
     try await Task.sleep(for: .milliseconds(20))
   }
