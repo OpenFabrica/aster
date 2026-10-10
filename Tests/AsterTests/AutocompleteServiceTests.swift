@@ -556,3 +556,46 @@ func autocompleteContextReusesLearnedArguments() throws {
   #expect(!service.suggestions(line: "git checkout --force fe", directory: "/project", sessionIdentifier: "test", controls: disabled).candidates.contains { $0.insertText == "feature-smart" })
   #expect(!service.suggestions(line: "git checkout --force fe", directory: "/other", sessionIdentifier: "test", controls: .init()).candidates.contains { $0.insertText == "feature-smart" })
 }
+
+@Test("无规格命令连续只传单词后不再列文件，打 ./ 或传过路径时恢复")
+@MainActor
+func autocompleteServiceLearnsPathHabitsForUnknownCommands() throws {
+  let state = try makeAutocompleteTemporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: state) }
+  let project = state.appendingPathComponent("project")
+  try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+  try "x".write(to: project.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+  try "y".write(to: project.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+  let service = try AutocompleteService(baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL)
+  func files(_ line: String) -> [String] {
+    service.suggestions(
+      line: line, directory: project.path, sessionIdentifier: "s", controls: ControlConfiguration()
+    ).candidates.filter { $0.kind == .file || $0.kind == .folder }.map(\.insertText)
+  }
+  func run(_ command: String) {
+    #expect(
+      service.record(
+        command: command, directory: project.path, exitStatus: 0, ignorePatterns: [],
+        knownOptions: [], sessionIdentifier: "s"))
+  }
+  #expect(files("zzunknowncmd ").contains("README.md"))
+  run("zzunknowncmd alpha")
+  run("zzunknowncmd beta")
+  #expect(files("zzunknowncmd ").isEmpty)
+  #expect(files("zzunknowncmd ./").contains("./README.md"))
+  // 习惯落盘，重新加载仍生效。
+  let reloaded = try AutocompleteService(baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL)
+  #expect(
+    reloaded.suggestions(
+      line: "zzunknowncmd ", directory: project.path, sessionIdentifier: "s", controls: ControlConfiguration()
+    ).candidates.filter { $0.kind == .file }.isEmpty)
+  // 传过真实路径后恢复列文件（README.md 本身会与学到的历史参数归并，看另一个文件）。
+  run("zzunknowncmd README.md")
+  #expect(files("zzunknowncmd ").contains("notes.txt"))
+  // 清空历史一并清空路径习惯。
+  run("zzunknowncmd alpha")
+  run("zzunknowncmd beta")
+  #expect(files("zzunknowncmd ").isEmpty)
+  try service.clearLearning(.history)
+  #expect(files("zzunknowncmd ").contains("README.md"))
+}

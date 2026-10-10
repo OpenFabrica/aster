@@ -591,6 +591,9 @@ final class AutocompleteService {
   private var cachedUsageModel: AutocompleteUsageModel?
   /// 命令间转移统计，单独存 `transitions.json`，不改变 `learning.json` 的格式。
   private var transitions = AutocompleteTransitionTable()
+  /// 无规格命令是否接受路径参数的习惯，单独存 `path-habits.json`。
+  private var pathHabits = AutocompletePathHabits()
+  private let pathHabitsURL: URL
   /// 每个会话上一条成功执行的命令，只在内存中保留；失败或重启即断开上下文。
   private var lastCommandBySession: [String: String] = [:]
   /// `PATH` 可执行文件查找结果的进程内缓存，见 `executableExistsOnPath`。
@@ -616,6 +619,7 @@ final class AutocompleteService {
     localSpecURL = self.baseDirectory.appendingPathComponent("local-specs.json")
     cliTokenURL = self.baseDirectory.appendingPathComponent("cli-token")
     transitionsURL = self.baseDirectory.appendingPathComponent("transitions.json")
+    pathHabitsURL = self.baseDirectory.appendingPathComponent("path-habits.json")
 
     try Self.prepareStateDirectory(self.baseDirectory, fileManager: fileManager)
     cliToken = try Self.loadOrCreateCLIToken(at: cliTokenURL, fileManager: fileManager)
@@ -666,6 +670,14 @@ final class AutocompleteService {
       let valid = decoded.validated()
     {
       transitions = valid
+    }
+    // 路径习惯同理：坏了就重学，没有证据时文件候选按原样列出。
+    if let data = try? Self.readOptionalStateFile(
+      at: pathHabitsURL, maximumBytes: 512 * 1_024, fileManager: fileManager),
+      let decoded = try? JSONDecoder().decode(AutocompletePathHabits.self, from: data),
+      let valid = decoded.validated()
+    {
+      pathHabits = valid
     }
   }
 
@@ -858,8 +870,37 @@ final class AutocompleteService {
         specDatabase: specDatabase)
       recordTransition(
         command: sanitized, succeeded: exitStatus == 0, sessionIdentifier: sessionIdentifier)
+      if exitStatus == 0 { recordPathHabit(command: sanitized, directory: directory, at: date) }
     }
     return true
+  }
+
+  /// 学习无规格命令的参数是否为路径。有规格的命令以规格为准，不记录。
+  /// 探测只对本机绝对目录做 `fileExists`，参数最多 64 字节以内的几个 stat，不列目录。
+  private func recordPathHabit(command: String, directory: String, at date: Date) {
+    guard let executable = ShellCommandTokenizer.tokenize(command).tokens.first,
+      specDatabase.command(named: executable) == nil
+    else { return }
+    let root = directory.hasPrefix("/") ? directory : nil
+    let before = pathHabits
+    pathHabits.record(
+      command: command,
+      pathProbe: { argument in
+        guard let root, argument.utf8.count <= 1_024 else { return false }
+        return self.fileManager.fileExists(atPath: "\(root)/\(argument)")
+      }, at: date)
+    guard pathHabits != before else { return }
+    do {
+      try persistPathHabits()
+    } catch {
+      pathHabits = before
+    }
+  }
+
+  private func persistPathHabits() throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    try Self.writeStateFile(try encoder.encode(pathHabits), to: pathHabitsURL, fileManager: fileManager)
   }
 
   /// 更新同一会话里「上一条 → 这一条」的转移。失败的命令断开上下文，不作为下一条的前文。
@@ -980,6 +1021,14 @@ final class AutocompleteService {
         try persistTransitions()
       } catch {
         transitions = previousTransitions
+        throw error
+      }
+      let previousHabits = pathHabits
+      pathHabits = AutocompletePathHabits()
+      do {
+        try persistPathHabits()
+      } catch {
+        pathHabits = previousHabits
         throw error
       }
     }
@@ -1181,6 +1230,13 @@ final class AutocompleteService {
       return []
     }
     guard mode != .none else { return [] }
+    // 没有规格的命令按学到的习惯决定要不要列文件：`foo bar`、`foo baz` 之后 `foo <Tab>`
+    // 不再把整个目录倒出来；用户明确打 `./`、`/` 时照样列。
+    if root == nil, let executable = parsed.tokens.first,
+      !pathHabits.shouldEnumerate(command: executable, currentToken: token)
+    {
+      return []
+    }
     let rawToken = String(line.dropFirst(tokenStart))
     let tokenPath = token.replacingOccurrences(of: "\\ ", with: " ")
     let slash = tokenPath.lastIndex(of: "/")
