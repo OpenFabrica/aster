@@ -238,9 +238,10 @@ final class TerminalAutocompleteController {
   private var runningCommand: String?
   private var outputCapture = ShellCommandOutputCapture()
   private var completedCommandOutput: ShellCapturedCommandOutput?
-  private var pendingCorrection: String?
+  /// 上一条失败命令的修正建议，按确定性排序；首条作 ghost，其余进面板。
+  private var pendingCorrections: [CommandCorrection] = []
   /// 上一条成功命令的「下一步」（`git clone` 后的 `cd <dir>`），在下一条空 prompt 作
-  /// ghost 首选。与 `pendingCorrection` 互斥：一个只在失败后出现，一个只在成功后出现。
+  /// ghost 首选。与 `pendingCorrections` 互斥：一个只在失败后出现，一个只在成功后出现。
   private var pendingFollowUp: CommandFollowUp?
   /// OSC 133 C 时终端网格上真实的命令行。键盘重建（tracker）在用户按 ↑ 调历史、
   /// 接受 shell 自身建议或 Tab 补全后会缺失/不完整，「下一步」推断以屏幕文本为准。
@@ -696,22 +697,27 @@ final class TerminalAutocompleteController {
       aliases: aliases
     )
     // 失败纠错可在下一条空 prompt 推荐；是否能画 ghost 由实时网格校验决定。
-    if configuration.resolvedAutocompleteOnDeviceLearning,
-      let correction = pendingCorrection,
-      correction.hasPrefix(tracker.line), correction != tracker.line
-    {
-      let candidate = AutocompleteCandidate(
-        insertText: correction,
-        description: L("修正上一条命令"),
-        kind: .correction,
-        score: Double.greatestFiniteMagnitude,
-        replacement: .fullLine
-      )
-      result = AutocompleteResult(
-        candidates: [candidate] + result.candidates.filter { $0.insertText != correction },
-        ghostText: String(correction.dropFirst(tracker.line.count)),
-        replacementStart: 0
-      )
+    // 多条建议按确定性排序插在最前：首条画 ghost，其余留在面板里供上下键选择。
+    if configuration.resolvedAutocompleteOnDeviceLearning {
+      let corrections = pendingCorrections
+        .filter { $0.command.hasPrefix(tracker.line) && $0.command != tracker.line }
+        .map { correction in
+          AutocompleteCandidate(
+            insertText: correction.command,
+            description: Self.correctionDescription(correction.kind),
+            kind: .correction,
+            score: Double.greatestFiniteMagnitude,
+            replacement: .fullLine
+          )
+        }
+      if let first = corrections.first {
+        let commands = Set(corrections.map(\.insertText))
+        result = AutocompleteResult(
+          candidates: corrections + result.candidates.filter { !commands.contains($0.insertText) },
+          ghostText: String(first.insertText.dropFirst(tracker.line.count)),
+          replacementStart: 0
+        )
+      }
     }
     // 上一条成功命令的「下一步」（clone 后 cd、commit 后 push 等）是用户此刻最可能
     // 的意图，排在最前。
@@ -882,7 +888,7 @@ final class TerminalAutocompleteController {
     guard let command = runningCommand, !command.isEmpty else { return }
     let configuration = controls()
     guard configuration.resolvedAutocompleteOnDeviceLearning else {
-      pendingCorrection = nil
+      pendingCorrections = []
       return
     }
     let executable = ShellCommandTokenizer.tokenize(command).tokens.first ?? ""
@@ -899,10 +905,47 @@ final class TerminalAutocompleteController {
       knownOptions: service.knownOptions(for: executable),
       sessionIdentifier: sessionIdentifier
     )
-    pendingCorrection = status == 0 ? nil : CommandCorrectionParser.suggestion(
+    pendingCorrections = status == 0 ? [] : CommandCorrectionParser.suggestions(
       command: command,
       output: output,
-      knownCommands: Set(service.specDatabase.commands.map(\.name))
+      context: Self.correctionContext(exitStatus: status, directory: currentDirectory(), service: service)
+    )
+  }
+
+  /// 纠错规则需要的磁盘事实。只在 cwd 是本地绝对路径时列目录；列表有界，
+  /// 远端 Shell 的 cwd 不可读，规则拿到空数组后自然不会给出目录建议。
+  static func correctionContext(
+    exitStatus: Int, directory: String, service: AutocompleteService
+  ) -> CommandCorrectionContext {
+    let knownCommands = Set(service.specDatabase.commands.map(\.name))
+    let localRoot = directory.hasPrefix("/") ? directory : nil
+    // 闭包要跨到纠错规则的 @Sendable 上下文里，只捕获不可变的 String?。
+    let resolve: @Sendable (String) -> String? = { relative in
+      guard let localRoot else { return nil }
+      if relative.hasPrefix("/") { return relative }
+      return relative.isEmpty ? localRoot : (localRoot as NSString).appendingPathComponent(relative)
+    }
+    return CommandCorrectionContext(
+      exitStatus: exitStatus,
+      knownCommands: knownCommands,
+      directoryEntries: { parent in
+        guard let path = resolve(parent),
+          let names = try? FileManager.default.contentsOfDirectory(atPath: path)
+        else { return [] }
+        var directories: [String] = []
+        for name in names.sorted() where directories.count < 500 {
+          var isDirectory: ObjCBool = false
+          let full = (path as NSString).appendingPathComponent(name)
+          if FileManager.default.fileExists(atPath: full, isDirectory: &isDirectory), isDirectory.boolValue {
+            directories.append(name)
+          }
+        }
+        return directories
+      },
+      fileExists: { relative in
+        guard let path = resolve(relative) else { return false }
+        return FileManager.default.fileExists(atPath: path)
+      }
     )
   }
 
@@ -917,6 +960,19 @@ final class TerminalAutocompleteController {
     var isDirectory: ObjCBool = false
     return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
       && isDirectory.boolValue == followUp.requiresDirectory
+  }
+
+  /// 面板里给纠错候选的说明文案；按规则类别区分，让用户一眼看出建议改了什么。
+  static func correctionDescription(_ kind: CommandCorrection.Kind) -> String {
+    switch kind {
+    case .typoCommand, .typoSubcommand: L("修正上一条命令")
+    case .pullBeforePush: L("先拉取远端提交再推送")
+    case .switchExistingBranch: L("切换到已存在的分支")
+    case .nearestDirectory: L("进入名称最接近的目录")
+    case .terraformInit: L("先初始化 Terraform 再重试")
+    case .elevatePrivileges: L("以管理员权限重试")
+    case .packageRunner: L("用包运行器执行缺失的命令")
+    }
   }
 
   /// 面板里给「下一步」候选的说明文案。

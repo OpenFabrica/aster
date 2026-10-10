@@ -366,6 +366,12 @@
 "修复" = "Fix";
 "修复路径" = "Fix Path";
 "修正上一条命令" = "Fix previous command";
+"先拉取远端提交再推送" = "Pull remote commits before pushing";
+"切换到已存在的分支" = "Switch to the existing branch";
+"进入名称最接近的目录" = "Enter the closest-named directory";
+"先初始化 Terraform 再重试" = "Initialize Terraform, then retry";
+"以管理员权限重试" = "Retry with administrator privileges";
+"用包运行器执行缺失的命令" = "Run the missing command with a package runner";
 "候选面板" = "Candidate Panel";
 "候选面板中的命令说明语言" = "Description Language for Commands in the Candidate Panel";
 "停止重放" = "Stop Replay";

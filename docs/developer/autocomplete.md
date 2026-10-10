@@ -72,6 +72,26 @@ flowchart TD
 已知限制：`tracker.line` 为空不等于屏幕输入行为空。zle 预填（`print -z`）这类不经过键盘
 字节的写入会让建议画在已有文本之后；后果是回车把内容插到已有文本尾部，不会执行。
 
+## 纠错规则
+
+`CommandCorrectionParser.suggestions`（`CommandCorrection.swift` / `CommandCorrectionRules.swift`）在 OSC 133 D
+且退出码非零时运行，返回按确定性排序、去重后的最多 3 条 `CommandCorrection`；控制器把首条作 ghost，其余
+进面板。规则顺序：工具明说的更正（`most similar command` / `did you mean`）> 结构性规则 > 命令名编辑距离 >
+包运行器 > `sudo`。结构性规则：
+
+| 规则 | 触发 | 建议 |
+|---|---|---|
+| `pullBeforePush` | `git push` + `Updates were rejected because … (remote contains work / tip … behind / fetch first)`，无 `--force*`/`-f` | `git pull --rebase && <原命令>` |
+| `switchExistingBranch` | `(fatal|error): a branch named 'X' already exists` | 原命令含 `checkout` → `git checkout X`，否则 `git switch X` |
+| `nearestDirectory` | `cd`/`pushd` + zsh/bash/fish 三种「目录不存在」文案 | 在父目录里按 Levenshtein（容差 `max(1, len/3+1)`）找最近目录；含空格时单引号 |
+| `terraformInit` | `terraform`/`tofu` + 未初始化文案 | `<tool> init && <原命令>` |
+| `elevatePrivileges` | 输出含 permission denied / operation not permitted / EACCES，退出码非零 | `sudo <原命令>`；排除已 `sudo`、`cd`/`ssh`/`git` 等、含 `| < > ; &` 的命令和 publickey/password 类认证失败 |
+
+磁盘事实通过 `CommandCorrectionContext` 的闭包注入：`directoryEntries(parent)` 只在 cwd 为本地绝对路径时列
+目录（≤ 500 项），远端 Shell 得到空数组；Core 自己不碰文件系统，规则因此可以纯函数测试
+（`CommandCorrectionRulesTests`）。整行前缀类建议（`sudo …`、`… init && …`）拼的是保留引号的原始命令行，
+token 替换类建议（拼写、目录）用解引号 token 重建。
+
 ## 验证
 
 `./scripts/test.sh --no-parallel --filter 'Autocomplete|autocomplete'` 覆盖领域排序、来源、隐私、面板、

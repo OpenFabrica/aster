@@ -366,6 +366,12 @@
 "修复" = "Réparer";
 "修复路径" = "Réparer le chemin";
 "修正上一条命令" = "Corriger la commande précédente";
+"先拉取远端提交再推送" = "Récupérer les commits distants avant de pousser";
+"切换到已存在的分支" = "Basculer vers la branche existante";
+"进入名称最接近的目录" = "Entrer dans le dossier au nom le plus proche";
+"先初始化 Terraform 再重试" = "Initialiser Terraform puis réessayer";
+"以管理员权限重试" = "Réessayer avec les privilèges administrateur";
+"用包运行器执行缺失的命令" = "Exécuter la commande manquante via un lanceur de paquets";
 "候选面板" = "Panneau de suggestions";
 "候选面板中的命令说明语言" = "Langue des descriptions de commandes dans le panneau de suggestions";
 "停止重放" = "Arrêter la relecture";

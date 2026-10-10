@@ -366,6 +366,12 @@
 "修复" = "Reparieren";
 "修复路径" = "Pfad reparieren";
 "修正上一条命令" = "Vorherigen Befehl korrigieren";
+"先拉取远端提交再推送" = "Vor dem Push entfernte Commits holen";
+"切换到已存在的分支" = "Zum vorhandenen Branch wechseln";
+"进入名称最接近的目录" = "In das Verzeichnis mit dem ähnlichsten Namen wechseln";
+"先初始化 Terraform 再重试" = "Terraform initialisieren und erneut versuchen";
+"以管理员权限重试" = "Mit Administratorrechten erneut versuchen";
+"用包运行器执行缺失的命令" = "Fehlenden Befehl mit einem Paket-Runner ausführen";
 "候选面板" = "Kandidatenbereich";
 "候选面板中的命令说明语言" = "Beschreibungssprache für Befehle im Kandidatenbereich";
 "停止重放" = "Wiedergabe stoppen";

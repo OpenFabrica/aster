@@ -426,6 +426,56 @@ func terminalAutocompleteSkipsUnexecutableCommands() throws {
   #expect(TerminalAutocompleteController.commandWasNotExecutable(exitStatus: 0, output: "command not found") == false)
 }
 
+// 结构性纠错依赖真实目录列表：`cd porject` 失败后，下一条空 prompt 的 ghost 是 `cd project`。
+@Test("失败的 cd 与被拒的 git push 在下一条 prompt 给出结构性纠错")
+@MainActor
+func terminalAutocompleteOffersStructuralCorrections() throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let workingDirectory = fixture.directory.appendingPathComponent("cwd", isDirectory: true)
+  try FileManager.default.createDirectory(
+    at: workingDirectory.appendingPathComponent("project", isDirectory: true), withIntermediateDirectories: true)
+  let controller = TerminalAutocompleteController(
+    service: fixture.service,
+    sessionIdentifier: "session",
+    controls: { fixture.controls.value },
+    currentDirectory: { workingDirectory.path }
+  )
+  func run(_ command: String, exitStatus: Int, output: String) {
+    controller.receive(.promptStart)
+    controller.receive(.inputStart)
+    controller.receiveInput(Array("\(command)\n".utf8)[...])
+    controller.receive(.commandStart)
+    let stream = "\u{1B}]133;C\u{07}" + output + "\u{1B}]133;D;\(exitStatus)\u{07}"
+    controller.receiveOutput(Array(stream.utf8)[...])
+    controller.receive(.commandFinished(exitStatus: exitStatus))
+  }
+
+  run("cd porject", exitStatus: 1, output: "cd: no such file or directory: porject\n")
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.refreshNow()
+  let first = controller.currentResult.candidates.first
+  #expect(first?.kind == .correction)
+  #expect(first?.insertText == "cd project")
+  #expect(first?.description == TerminalAutocompleteController.correctionDescription(.nearestDirectory))
+  #expect(controller.currentResult.ghostText == "cd project")
+
+  run(
+    "git push", exitStatus: 1,
+    output: "hint: Updates were rejected because the remote contains work that you do not have locally.\n")
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.refreshNow()
+  #expect(controller.currentResult.candidates.first?.insertText == "git pull --rebase && git push")
+  // 成功的命令清掉旧纠错。
+  run("ls", exitStatus: 0, output: "")
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.refreshNow()
+  #expect(!controller.currentResult.candidates.contains { $0.kind == .correction })
+}
+
 @Test("Escape 关闭自动面板后本轮 prompt 内不再自动弹回")
 @MainActor
 func terminalAutocompleteEscapeKeepsAutoPanelClosedForRestOfPrompt() throws {
