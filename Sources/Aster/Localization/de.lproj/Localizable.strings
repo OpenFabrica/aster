@@ -1439,6 +1439,12 @@
 "登录 Shell" = "Login-Shell";
 "监听端口" = "Lauschende Ports";
 "目录" = "Verzeichnis";
+"SSH 配置" = "SSH-Konfiguration";
+"已知主机" = "Bekannter Host";
+"Cargo 二进制" = "Cargo-Binary";
+"Cargo 示例" = "Cargo-Beispiel";
+"Cargo feature" = "Cargo-Feature";
+"Cargo 包" = "Cargo-Paket";
 "目录为空。" = "Dieser Ordner ist leer.";
 "目录为空或不可读取。" = "Verzeichnis ist leer oder nicht lesbar.";
 "目录优先（点击切换为按名称）" = "Verzeichnis zuerst (klicken, um nach Name zu sortieren)";

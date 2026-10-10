@@ -191,14 +191,20 @@ func autocompleteHomebrewReaderReadsTapsCellarAndCaskroom() throws {
 func autocompleteDynamicReaderNeverSpawnsProcesses() throws {
   // Otty 的硬约束 "never runs the tools it completes for" 只能靠源码级不变量守住：
   // 一旦有人为了图省事在这里 fork 一次 `git branch`，补全就会在用户仓库里执行命令。
-  let source = URL(fileURLWithPath: #filePath)
+  let directory = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
     .deletingLastPathComponent()
-    .appendingPathComponent("Sources/AsterCore/AutocompleteDynamicSources.swift")
-  let text = try String(contentsOf: source, encoding: .utf8)
-  for forbidden in ["Process(", "posix_spawn", "NSTask", "system(", "popen("] {
-    #expect(!text.contains(forbidden), "动态候选读取器不得出现 \(forbidden)")
+    .appendingPathComponent("Sources/AsterCore")
+  // 读取器按来源拆成多个文件（git/npm/brew、SSH、Cargo），守卫要覆盖全部。
+  let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+    .filter { $0.hasPrefix("AutocompleteDynamic") && $0.hasSuffix(".swift") }
+  #expect(files.count >= 3)
+  for file in files {
+    let text = try String(contentsOf: directory.appendingPathComponent(file), encoding: .utf8)
+    for forbidden in ["Process(", "posix_spawn", "NSTask", "system(", "popen("] {
+      #expect(!text.contains(forbidden), "\(file) 不得出现 \(forbidden)")
+    }
   }
 }
 

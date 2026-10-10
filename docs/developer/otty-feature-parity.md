@@ -4,9 +4,10 @@
 
 Aster 以 Otty 用户文档为功能规格，目标范围是 `user-interface`、`workflows`、`terminal-features` 与 `agents` 四个栏目。本文是逐页审计入口；只有页面内全部可用行为均有实现与非 UI 功能测试时，状态才能改为“完成”。“部分”表示已有能力，但不能据此推断整页完成。
 
-> Ghostty 切换说明：本矩阵中的 SwiftTerm 精细交互完成度是迁移前基线。当前产品暂停
-> Vi/Mark/Hint、键盘扩展选区、大小写/正则终端查找、inline Autocomplete、精确命令
-> Outline 和 OSC 6974 Agent lifecycle；这些条目在 Ghostty 公开接口补齐前按“部分”处理。
+> Ghostty 切换说明：本矩阵中的 SwiftTerm 精细交互完成度是迁移前基线。inline Autocomplete
+> 与候选面板已在 Ghostty 路径上重新接入（`GhosttySurfaceView+Input/IO`、OSC 133/6973 分支）；
+> Vi/Mark/Hint、键盘扩展选区、大小写/正则终端查找与精确命令 Outline 仍在 Ghostty 公开
+> 接口补齐前按“部分”处理。
 
 ## 状态定义
 
@@ -116,7 +117,7 @@ Autocomplete 由 `PromptInputTracker`、`AutocompleteEngine`、`AutocompleteRele
 
 排序是跨来源可比的单一 relevance 模型（`AutocompleteRelevance`），不再是分层加法常量：基础权重 + 匹配质量 + 归一化 frecency（7 天半衰期）+ 会话/pin 加成。历史条目的基础权重刻意低于子命令——历史赢下来必须靠 frecency，而不是靠“它是一条历史”。候选按「补全后的完整命令行」跨来源去重，因此历史整行与动态 token 候选会合并成一行。每个候选自带 `AutocompleteReplacementSpan`，ghost 显示与接受时插入的字节来自同一次计算。
 
-动态候选（`AutocompleteDynamicSource`）把 Fig 规格里的生成器脚本映射成「读磁盘的意图」，只支持能从已有文件读出的来源（git refs/config/reflog、package.json、Makefile、Homebrew 的 Formula/Cellar/Caskroom 与 API 名称缓存）；需要执行工具才能取到的一律映射为 nil。`autocompleteDynamicReaderNeverSpawnsProcesses` 以源码文本断言守住「绝不运行被补全的工具」这条约束。按目录缓存以见证文件的 (mtime, size) 加硬 TTL 失效——目录 mtime 不随子目录内文件变化更新，单靠它会漏更新。
+动态候选（`AutocompleteDynamicSource`）把 Fig 规格里的生成器脚本映射成「读磁盘的意图」，只支持能从已有文件读出的来源（git refs/config/reflog、package.json、Makefile、Homebrew 的 Formula/Cellar/Caskroom 与 API 名称缓存、`~/.ssh/config` + known_hosts 的主机、Cargo.toml 与 src/bin、examples 的 bin/example/feature/包；读取器按来源拆为 `AutocompleteDynamicSources*.swift`）；`isMachineScoped` 标记机器级来源（ssh、brew），这类槽位上别的目录用过的值仍作为用户词补出；需要执行工具才能取到的一律映射为 nil。`autocompleteDynamicReaderNeverSpawnsProcesses` 以源码文本断言守住「绝不运行被补全的工具」这条约束。按目录缓存以见证文件的 (mtime, size) 加硬 TTL 失效——目录 mtime 不随子目录内文件变化更新，单靠它会漏更新。
 
 候选面板的可见性由显式状态机 `AutocompletePanelState` 承载，迁移只发生在 `refreshNow` 一处。打字保留面板状态（Otty 的 "keep typing to refine"），Escape 在本轮 prompt 内上闩锁，`auto` 模式下 Escape 兼任重新打开。自动弹出的面板在用户按方向键之前不武装 Return，避免系统主动弹出的浮层吞掉终端里最常用的按键。
 

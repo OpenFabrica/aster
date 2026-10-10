@@ -109,6 +109,7 @@ token 替换类建议（拼写、目录）用解引号 token 重建。
 - 空参数位置同时提供可用子命令与选项；非重复选项在使用后去掉，带参选项优先补值。
 - `--name=value` 的替换起点移至等号后，不把值当作选项名。`--` 之后不再解释选项。
 - 文件枚举遵守参数模板；`cd`/`pushd` 仅目录。已有规格但当前参数不接收路径时不枚举文件。
+- 动态来源新增 ssh（`~/.ssh/config` 的 `Host`，跟进 `Include` ≤ 8 文件、不支持通配；`known_hosts(2)` 跳过 `|1|` 哈希与 `@` 标记行，`[host]:port` 取 host）与 Cargo（向上找 Cargo.toml，行级最小 TOML 读 `[[bin]]`/`[[example]]` 的 name、`[features]` 键、`[package] name`、`[workspace] members`；自动发现 `src/main.rs`、`src/bin/*.rs|*/main.rs`、`examples/*.rs|*/main.rs`）。ssh 见证 `~/.ssh/{config,known_hosts}` + 60 s TTL，cargo 见证 `Cargo.toml`/`src/bin`/`examples` + 5 s。`scp`/`rsync` 的 `host:path` 首轮不做。守卫测试扫全部 `AutocompleteDynamic*.swift`。
 - 没有规格的命令按 `AutocompletePathHabits`（`path-habits.json`）决定是否列文件：成功命令的位置参数连续两次都是普通单词（不以 `/ ./ ../ ~` 开头、不含 `/`、在当前目录也不存在）就不再枚举；再传一次真实路径立即恢复。用户当前 token 明确是路径形态时永远列。有规格的命令不查此表；清空历史一并清空。
 - 目录判断跟随符号链接（`fileExists(atPath:isDirectory:)`），链到目录的链接按目录补全并追加 `/`。
   `..` 与 `~` 不在目录列表里，单独补成 `../`、`~/`。

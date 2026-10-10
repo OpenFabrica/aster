@@ -480,7 +480,8 @@ final class AutocompleteDynamicCache {
   private let capacity = 16
   private var entries: [Key: Entry] = [:]
   private var order: [Key] = []
-  /// Homebrew 的 tap 目录可以有上万条,重读很贵而且几乎不变,给它更长的 TTL。
+  /// Homebrew 的 tap 目录可以有上万条,重读很贵而且几乎不变,给它更长的 TTL；
+  /// SSH 配置同理，且有见证文件兜底。
   private static let defaultTTL: TimeInterval = 5
   private static let brewTTL: TimeInterval = 60
 
@@ -521,7 +522,7 @@ final class AutocompleteDynamicCache {
 
   private static func ttl(for source: AutocompleteDynamicSource) -> TimeInterval {
     switch source {
-    case .brewFormulae, .brewCasks, .brewInstalledFormulae, .brewInstalledCasks, .brewTaps:
+    case .brewFormulae, .brewCasks, .brewInstalledFormulae, .brewInstalledCasks, .brewTaps, .sshHosts:
       brewTTL
     default:
       defaultTTL
@@ -545,9 +546,15 @@ final class AutocompleteDynamicCache {
     case .brewFormulae, .brewCasks, .brewInstalledFormulae, .brewInstalledCasks, .brewTaps:
       // Homebrew 不在项目目录下,靠 TTL 兜底即可。
       paths = []
+    case .sshHosts:
+      // 不在项目目录下：见证文件用绝对路径。
+      let ssh = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh").path
+      paths = ["\(ssh)/config", "\(ssh)/known_hosts", "\(ssh)/known_hosts2"]
+    case .cargoBinaries, .cargoExamples, .cargoFeatures, .cargoPackages:
+      paths = ["Cargo.toml", "src/bin", "examples"]
     }
     return paths.map { path in
-      let url = root.appendingPathComponent(path)
+      let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : root.appendingPathComponent(path)
       guard let values = try? url.resourceValues(forKeys: [
         .contentModificationDateKey, .fileSizeKey,
       ]) else { return "\(path):-" }

@@ -260,7 +260,7 @@ Tab（或设置中的其他接受键）直接接受已经可见的建议，包�
 不再推荐；`--` 后按位置参数处理。历史参数按当前目录和参数位置学习，例如常用分支在增加
 `--force` 后仍可推荐；关闭本机学习会同时停用这类历史参数建议。
 
-**动态候选**：当内置规格声明某个参数需要活数据时（`git checkout <分支>`、`brew install <formula>`、`npm run <script>`、`make <target>`），Aster 直接读取磁盘上已有的文件——`.git/refs`、`.git/packed-refs`、`.git/config`、`package.json`、Makefile、Homebrew 的 `Formula/` 与 `Cellar/` 目录。**Aster 绝不运行被补全的工具**：补全 `brew install` 不会触发 `brew update`，补全 `git checkout` 不会在你的仓库里执行 git。最近 check out 过的分支会排在更前面（读的是 `.git/logs/HEAD`）。需要真正运行工具才能取到的数据（例如 `git status --short` 的暂存清单）不做动态候选，退回普通文件补全。
+**动态候选**：当内置规格声明某个参数需要活数据时（`git checkout <分支>`、`brew install <formula>`、`npm run <script>`、`make <target>`、`ssh <主机>`、`cargo run --bin <名字>`），Aster 直接读取磁盘上已有的文件——`.git/refs`、`.git/packed-refs`、`.git/config`、`package.json`、Makefile、Homebrew 的 `Formula/` 与 `Cellar/` 目录、`~/.ssh/config` 的 `Host` 别名（跟进 `Include`，通配模式不列）与 `known_hosts` 里未哈希的主机、Cargo.toml 与 `src/bin/`、`examples/` 里的 bin / example / feature / workspace 包。`scp`、`rsync` 的 `host:path` 形态暂不补主机。**Aster 绝不运行被补全的工具**：补全 `brew install` 不会触发 `brew update`，补全 `git checkout` 不会在你的仓库里执行 git。最近 check out 过的分支会排在更前面（读的是 `.git/logs/HEAD`）。需要真正运行工具才能取到的数据（例如 `git status --short` 的暂存清单）不做动态候选，退回普通文件补全。
 
 Homebrew 4.x 默认走 JSON API：如果你的机器上没有 homebrew-core tap，也没有 API 名称缓存，`brew install` 只会补出已安装的包和第三方 tap 里的 formula。这是“绝不联网、绝不触发 `brew update`”的必然代价。
 

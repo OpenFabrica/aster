@@ -276,9 +276,11 @@ extension AutocompleteUsageModel {
       let context = AutocompleteArgumentContext(root: root, completed: completed)
       // 有活数据的槽位（分支、npm script、formula…）以当前项目的真实数据为准：
       // 别的仓库用过的分支名放到这里只会是错的。
+      // 机器级来源（ssh 主机）例外：别的目录连过的主机仍然是这台机器能连的主机。
       guard context.filesystemMode == .none, let key = context.argumentKey,
         let argument = context.argument,
-        AutocompleteDynamicSource.sources(for: argument, commandPath: context.commandPath).isEmpty
+        AutocompleteDynamicSource.sources(for: argument, commandPath: context.commandPath)
+          .allSatisfy(\.isMachineScoped)
       else { return [] }
       slot = key
       kind = .argument

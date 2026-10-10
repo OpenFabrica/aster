@@ -1439,6 +1439,12 @@
 "登录 Shell" = "Login Shell";
 "监听端口" = "Listening Ports";
 "目录" = "Directory";
+"SSH 配置" = "SSH config";
+"已知主机" = "Known host";
+"Cargo 二进制" = "Cargo binary";
+"Cargo 示例" = "Cargo example";
+"Cargo feature" = "Cargo feature";
+"Cargo 包" = "Cargo package";
 "目录为空。" = "This folder is empty.";
 "目录为空或不可读取。" = "Directory is empty or unreadable.";
 "目录优先（点击切换为按名称）" = "Directory first (click to switch to by name)";

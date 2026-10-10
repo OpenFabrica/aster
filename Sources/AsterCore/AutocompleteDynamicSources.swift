@@ -29,6 +29,22 @@ public enum AutocompleteDynamicSource: String, Sendable, CaseIterable, Hashable 
   case brewInstalledFormulae
   case brewInstalledCasks
   case brewTaps
+  case sshHosts
+  case cargoBinaries
+  case cargoExamples
+  case cargoFeatures
+  case cargoPackages
+
+  /// 数据属于整台机器而不是当前项目（SSH 主机、Homebrew）。这类槽位上别的目录用过的
+  /// 值仍然有效，用户词不因为有活数据而被抹掉；项目级来源（分支、script）则相反。
+  public var isMachineScoped: Bool {
+    switch self {
+    case .sshHosts, .brewFormulae, .brewCasks, .brewInstalledFormulae, .brewInstalledCasks, .brewTaps:
+      true
+    default:
+      false
+    }
+  }
 }
 
 /// 单条动态候选。`rankBonus` 让「最近切过的分支」排到前面，这正是 Otty 文档描述的
@@ -119,6 +135,10 @@ extension AutocompleteDynamicSource {
       return .brewInstalledFormulae
     case matches(["brew", "tap"]):
       return .brewTaps
+    case matches(["cargo", "read-manifest"]):
+      return .cargoFeatures
+    case matches(["cargo", "metadata"]):
+      return .cargoPackages
     default:
       return nil
     }
@@ -155,6 +175,18 @@ extension AutocompleteDynamicSource {
     switch command {
     case "make", "gmake":
       return name.contains("target") ? .makeTargets : nil
+    // Fig 的 ssh/mosh 规格只写了参数名 `user@hostname`，没有生成器。
+    case "ssh", "mosh", "ssh-copy-id":
+      return name.contains("host") ? .sshHosts : nil
+    // cargo 的 --bin / --example 只有参数名；--features / --package 有脚本，上面已映射。
+    case "cargo":
+      switch name {
+      case "bin": return .cargoBinaries
+      case "example": return .cargoExamples
+      case "features", "feature": return .cargoFeatures
+      case "package", "spec": return .cargoPackages
+      default: return nil
+      }
     default:
       return nil
     }
@@ -182,8 +214,8 @@ public struct AutocompleteDynamicLimits: Sendable {
 /// 从磁盘读取动态候选。环境变量按构造参数注入（不读全局 `ProcessInfo`），
 /// 便于测试用临时目录完全替身。
 public struct AutocompleteDiskDynamicReader: AutocompleteDynamicReader {
-  private let environment: [String: String]
-  private let limits: AutocompleteDynamicLimits
+  let environment: [String: String]
+  let limits: AutocompleteDynamicLimits
   /// `FileManager` 不是 `Sendable`,但这里只用 `contentsOfDirectory` 这类无状态读取,
   /// 且实例在构造后不再变更,因此显式标注为跨并发域安全。
   private nonisolated(unsafe) let fileManager: FileManager
@@ -216,6 +248,9 @@ public struct AutocompleteDiskDynamicReader: AutocompleteDynamicReader {
     case .brewInstalledFormulae: brewNames(kind: .formula, installedOnly: true)
     case .brewInstalledCasks: brewNames(kind: .cask, installedOnly: true)
     case .brewTaps: brewTaps()
+    case .sshHosts: sshHosts()
+    case .cargoBinaries, .cargoExamples, .cargoFeatures, .cargoPackages:
+      cargoItems(source, directory: directory)
     }
   }
 
@@ -606,7 +641,7 @@ public struct AutocompleteDiskDynamicReader: AutocompleteDynamicReader {
 
   // MARK: 文件系统辅助
 
-  private func isDirectory(_ url: URL) -> Bool {
+  func isDirectory(_ url: URL) -> Bool {
     (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
   }
 
@@ -623,11 +658,11 @@ public struct AutocompleteDiskDynamicReader: AutocompleteDynamicReader {
     }
   }
 
-  private func directoryNames(at url: URL) -> [String] {
+  func directoryNames(at url: URL) -> [String] {
     directoryURLs(at: url).map(\.lastPathComponent).filter { !$0.hasPrefix(".") }
   }
 
-  private func fileNames(at url: URL, extension pathExtension: String) -> [String] {
+  func fileNames(at url: URL, extension pathExtension: String) -> [String] {
     guard let entries = try? fileManager.contentsOfDirectory(
       at: url, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
       options: [.skipsSubdirectoryDescendants])
@@ -644,7 +679,7 @@ public struct AutocompleteDiskDynamicReader: AutocompleteDynamicReader {
 
   /// 只读普通文件，拒绝符号链接与特殊文件，并施加字节上限。`tailBytes` 非空时只读
   /// 文件末尾——reflog 可以很大，而我们只关心最近的几次 checkout。
-  private func readFile(at url: URL, maximumBytes: Int, tailBytes: Int? = nil) -> Data? {
+  func readFile(at url: URL, maximumBytes: Int, tailBytes: Int? = nil) -> Data? {
     guard let values = try? url.resourceValues(forKeys: [
       .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
     ]), values.isRegularFile == true, values.isSymbolicLink != true
