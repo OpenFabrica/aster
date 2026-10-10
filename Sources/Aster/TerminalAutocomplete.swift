@@ -144,6 +144,8 @@ enum TerminalAutocompleteKey: Equatable {
   case controlSpace
   case functionFive
   case backspace
+  /// ⇧⌫（含 ⇧ + 前向删除）：面板里忘记选中的历史候选。
+  case shiftDelete
   case other
 
   static func resolve(_ event: NSEvent) -> TerminalAutocompleteKey {
@@ -156,6 +158,8 @@ enum TerminalAutocompleteKey: Equatable {
     case 53 where event.modifierFlags.contains(.option): return .optionEscape
     case 53: return .escape
     case 96: return .functionFive
+    case 51 where event.modifierFlags.contains(.shift), 117 where event.modifierFlags.contains(.shift):
+      return .shiftDelete
     case 51: return .backspace
     default:
       if event.modifierFlags.contains(.control), event.charactersIgnoringModifiers == " " {
@@ -518,6 +522,7 @@ final class TerminalAutocompleteController {
   ///   仅剪贴板建议的回车接受依赖它；其余分支的语义不受影响。
   @discardableResult
   func handle(_ key: TerminalAutocompleteKey, plainKeyPress: Bool = true) -> Bool {
+    if key == .shiftDelete { return forgetSelectedCandidate() }
     if key == .backspace {
       // Backspace 本身仍交给 Shell；这里只清掉旧候选，输入回调随后按新文本重算。
       // 面板保持打开:Otty 的退格是“清掉 ghost”,不是“关掉下拉”。
@@ -1024,6 +1029,29 @@ final class TerminalAutocompleteController {
     render()
   }
 
+  /// 面板里 ⇧⌫：忘记明确选中的学习候选，面板保持打开并按新结果重算，选中位置钳位。
+  /// 没有面板或没有选中时放行给 Shell；选中的是规格/文件候选时吞掉按键但什么都不做，
+  /// 避免 ⇧⌫ 在面板打开时意外删掉输入行的字符。
+  private func forgetSelectedCandidate() -> Bool {
+    guard case .open(let origin, true) = panelState,
+      currentResult.candidates.indices.contains(selectedIndex)
+    else { return false }
+    let candidate = currentResult.candidates[selectedIndex]
+    guard candidate.isLearned,
+      service.forget(candidate: candidate, line: tracker.line, directory: currentDirectory())
+    else { return true }
+    let previousIndex = selectedIndex
+    clearCandidatesForRefilter()
+    refreshNow()
+    if !currentResult.candidates.isEmpty, case .open = panelState {
+      selectedIndex = min(previousIndex, currentResult.candidates.count - 1)
+      panelState = .open(origin: origin, userSelected: true)
+      updateVisibleWindow()
+      render()
+    }
+    return true
+  }
+
   /// 只清掉待重算的候选,**保留面板状态**。打字与退格走这条路径,面板因此能按新前缀
   /// 收窄而不是消失。debounce 窗口内候选为空,`render` 会暂时隐藏面板视图、
   /// `acceptCandidate` 因索引不存在返回 false,回车照常交给 shell。
@@ -1432,7 +1460,12 @@ final class AutocompleteDescriptionSidebarView: NSView {
   func update(candidate: AutocompleteCandidate?, foreground: NSColor, accent: NSColor) {
     titleLabel.stringValue = candidate?.displayText ?? ""
     titleLabel.textColor = foreground.withAlphaComponent(0.92)
-    bodyLabel.stringValue = candidate?.description ?? ""
+    // 学习候选多一行按键提示：忘记历史只有这一个入口，不写出来用户无从发现。
+    var body = candidate?.description ?? ""
+    if candidate?.isLearned == true {
+      body += (body.isEmpty ? "" : "\n\n") + L("⇧⌫ 从历史中删除")
+    }
+    bodyLabel.stringValue = body
     bodyLabel.textColor = foreground.withAlphaComponent(0.62)
     // 底色由前景色派生：固定灰在浅色主题里会发脏，跟随前景则永远只是「比列表列
     // 略深/略浅一点」。

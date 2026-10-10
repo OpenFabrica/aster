@@ -725,6 +725,9 @@ public struct AutocompleteLearnedSuggestion: Equatable, Sendable {
 public struct AutocompleteLearningDatabase: Codable, Equatable, Sendable {
   public private(set) var entries: [AutocompleteLearnedEntry]
   public private(set) var capacity: Int
+  /// 用户在面板里用 ⇧⌫ 忘记的槽位值（槽位 → 值集合）。可选字段：旧 learning.json 没有
+  /// 这个键也能解码。再次执行含该值的命令会自动解除压制，见 `unsuppress`。
+  public internal(set) var suppressedValues: [String: Set<String>]?
 
   public init(capacity: Int = 5_000) {
     self.capacity = min(max(capacity, 1), 5_000)
@@ -822,6 +825,20 @@ public struct AutocompleteLearningDatabase: Codable, Equatable, Sendable {
     return true
   }
 
+  /// 面板 ⇧⌫ 忘记一条整行历史：直接删掉该目录下的这条记录。被固定（pin）过的条目
+  /// 不删——那是用户显式钉上去的，走 `aster ignore`。返回 false 表示没有可删的记录。
+  @discardableResult
+  public mutating func remove(command: String, directory: String) -> Bool {
+    guard let directory = Self.normalizedDirectory(directory),
+      let sanitized = Self.sanitizedCommand(command),
+      let index = entries.firstIndex(where: {
+        $0.command == sanitized && $0.directory == directory && $0.pinCount == 0
+      })
+    else { return false }
+    entries.remove(at: index)
+    return true
+  }
+
   /// 该命令在指定目录下是否被固定过，供 CLI 在撤销前做存在性判断。
   public func isPinned(command: String, directory: String) -> Bool {
     guard let directory = Self.normalizedDirectory(directory),
@@ -833,6 +850,7 @@ public struct AutocompleteLearningDatabase: Codable, Equatable, Sendable {
   }
 
   public mutating func clearHistory() {
+    suppressedValues = nil
     entries = entries.compactMap { entry in
       guard entry.pinCount > 0 else { return nil }
       var pinned = entry
@@ -900,7 +918,7 @@ public struct AutocompleteLearningDatabase: Codable, Equatable, Sendable {
           && (entry.lastSessionIdentifier.map {
             Self.normalizedSessionIdentifier($0) == $0
           } ?? true)
-      })
+      }), Self.suppressedValuesAreValid(suppressedValues)
     else { throw AutocompleteStoreError.invalidData }
     return self
   }
@@ -1138,6 +1156,8 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   public let kind: AutocompleteCandidateKind
   public let score: Double
   public let replacement: AutocompleteReplacementSpan
+  /// 来自本机学习历史（整行或槽位值），面板里可用 ⇧⌫ 忘记；规格、文件、动态候选为 false。
+  public let isLearned: Bool
 
   /// `replacement` 默认取 `.fullLine` 是刻意的失败安全:某个构造点漏填时,接受路径的
   /// 前缀校验会失败并拒绝接受,而不是往命令行里插入错位文本。
@@ -1147,7 +1167,8 @@ public struct AutocompleteCandidate: Equatable, Sendable {
     description: String = "",
     kind: AutocompleteCandidateKind,
     score: Double = 0,
-    replacement: AutocompleteReplacementSpan = .fullLine
+    replacement: AutocompleteReplacementSpan = .fullLine,
+    isLearned: Bool = false
   ) {
     self.insertText = insertText
     self.displayText = displayText ?? insertText
@@ -1155,6 +1176,7 @@ public struct AutocompleteCandidate: Equatable, Sendable {
     self.kind = kind
     self.score = score
     self.replacement = replacement
+    self.isLearned = isLearned
   }
 
   /// 在插入文本前补一个空格，用于“命令名刚打完、还没敲空格”时直接给出下一段参数。
@@ -1162,14 +1184,14 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   func prefixedWithSeparator() -> AutocompleteCandidate {
     AutocompleteCandidate(
       insertText: " " + insertText, displayText: displayText, description: description,
-      kind: kind, score: score, replacement: replacement)
+      kind: kind, score: score, replacement: replacement, isLearned: isLearned)
   }
 
   /// 返回同一候选但换一个分数,供排序模型和跨来源归并复用。
   public func withScore(_ score: Double) -> AutocompleteCandidate {
     AutocompleteCandidate(
       insertText: insertText, displayText: displayText, description: description,
-      kind: kind, score: score, replacement: replacement)
+      kind: kind, score: score, replacement: replacement, isLearned: isLearned)
   }
 
   /// 接受该候选后命令行的完整文本。跨来源去重与接受路径共用它,保证“同一条命令”
@@ -1365,7 +1387,7 @@ public struct AutocompleteEngine: Sendable {
         score: AutocompleteRelevance.score(
           kind: .learnedCommand, typed: line, candidate: $0.command,
           frecency: $0.frecency, sessionBoost: $0.isSessionMatch ? 1 : 0),
-        replacement: .fullLine)
+        replacement: .fullLine, isLearned: true)
     }
     candidates += readmeCommands.filter { $0.hasPrefix(line) && $0 != line }.map {
       AutocompleteCandidate(
@@ -1494,7 +1516,9 @@ public struct AutocompleteEngine: Sendable {
       description: description,
       kind: winner.kind,
       score: max(lhs.score, rhs.score) + 25,
-      replacement: winner.replacement
+      replacement: winner.replacement,
+      // 任一来源是学习历史，归并后就仍可忘记：忘记只删历史那一半，规格候选不受影响。
+      isLearned: lhs.isLearned || rhs.isLearned
     )
   }
 }

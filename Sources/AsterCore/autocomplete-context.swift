@@ -139,7 +139,9 @@ extension AutocompleteLearningDatabase {
       guard tokens.first == executable, tokens.count <= 64 else { continue }
       for index in tokens.indices.dropFirst() {
         let value = tokens[index]
-        guard !value.hasPrefix("-"), value.hasPrefix(parsed.currentToken), value != parsed.currentToken else { continue }
+        guard !value.hasPrefix("-"), value.hasPrefix(parsed.currentToken), value != parsed.currentToken,
+          !isSuppressed(slot: key, value: value)
+        else { continue }
         let source = AutocompleteArgumentContext(root: root, completed: Array(tokens[1..<index]))
         guard source.argumentKey == key,
           let insert = AutocompleteShellInsertion.token(value: value, typed: parsed.currentToken, raw: raw, closeQuote: true)
@@ -150,7 +152,7 @@ extension AutocompleteLearningDatabase {
         if score > (candidates[value]?.score ?? -.infinity) {
           candidates[value] = AutocompleteCandidate(
             insertText: insert, displayText: value, description: L("最近使用的参数"), kind: .argument,
-            score: score, replacement: .currentToken(start: parsed.currentTokenStart))
+            score: score, replacement: .currentToken(start: parsed.currentTokenStart), isLearned: true)
         }
       }
     }

@@ -818,7 +818,8 @@ final class AutocompleteService {
       return cachedUsageModel
     }
     let model = AutocompleteUsageModel(
-      entries: learningDatabase.entries, specDatabase: specDatabase)
+      entries: learningDatabase.entries, specDatabase: specDatabase,
+      suppressed: learningDatabase.suppressedValues ?? [:])
     cachedUsageModel = model
     return model
   }
@@ -856,14 +857,20 @@ final class AutocompleteService {
       lastCommandBySession[sessionIdentifier] = nil
       return false
     }
+    // 派生统计只用脱敏后的文本，与学习库保存的内容一致。
+    let sanitized = AutocompleteLearningDatabase.sanitizedCommand(command)
+    // 用户又执行了被 ⇧⌫ 忘记的值：解除压制，和这次写盘一起落地。
+    if let sanitized, learningDatabase.suppressedValues != nil {
+      learningDatabase.unsuppress(slots: AutocompleteUsageModel.slots(of: sanitized, specDatabase: specDatabase))
+      if learningDatabase.suppressedValues != previous.suppressedValues { cachedUsageModel = nil }
+    }
     do {
       try persistLearning()
     } catch {
       learningDatabase = previous
       return false
     }
-    // 派生统计只用脱敏后的文本，与学习库保存的内容一致。
-    if let sanitized = AutocompleteLearningDatabase.sanitizedCommand(command) {
+    if let sanitized {
       cachedUsageModel?.add(
         command: sanitized,
         directory: URL(fileURLWithPath: directory).standardizedFileURL.path,
@@ -943,6 +950,34 @@ final class AutocompleteService {
       learningDatabase = previous
       return false
     }
+  }
+
+  /// 面板 ⇧⌫「从历史中删除」。整行历史直接删记录；槽位值（历史参数、用户词）按当前
+  /// 命令行推导槽位后压制。写盘失败回滚；返回 false 表示没有东西可忘（钉住的条目、
+  /// 规格候选、推不出槽位）。
+  @discardableResult
+  func forget(candidate: AutocompleteCandidate, line: String, directory: String) -> Bool {
+    guard candidate.isLearned else { return false }
+    let previous = learningDatabase
+    let changed: Bool
+    switch candidate.replacement {
+    case .fullLine:
+      changed = learningDatabase.remove(command: candidate.insertText, directory: directory)
+    case .currentToken:
+      guard let slot = AutocompleteUsageModel.currentSlot(
+        line: line, value: candidate.displayText, specDatabase: specDatabase)
+      else { return false }
+      changed = learningDatabase.suppress(slot: slot, value: candidate.displayText)
+    }
+    guard changed else { return false }
+    do {
+      try persistLearning()
+    } catch {
+      learningDatabase = previous
+      return false
+    }
+    cachedUsageModel = nil
+    return true
   }
 
   /// 撤销一次 `pin`（`aster ignore '<命令>'`）。写盘失败时回滚内存状态，与 `pin`

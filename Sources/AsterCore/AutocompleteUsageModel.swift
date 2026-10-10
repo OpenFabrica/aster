@@ -37,7 +37,8 @@ public struct AutocompleteUsageModel: Sendable {
   public init(
     entries: [AutocompleteLearnedEntry],
     specDatabase: AutocompleteSpecDatabase,
-    now: Date = Date()
+    now: Date = Date(),
+    suppressed: [String: Set<String>] = [:]
   ) {
     builtAt = now
     // 规格查找是对 700 多条命令的线性扫描；同一命令名、同一条命令（不同目录）在历史里
@@ -55,7 +56,8 @@ public struct AutocompleteUsageModel: Sendable {
         return found
       }
       slotCache[entry.command] = slots
-      for (slot, value) in slots {
+      // 被 ⇧⌫ 忘记的值不进统计：既不再作为用户词出现，也不再给同名候选加分。
+      for (slot, value) in slots where suppressed[slot]?.contains(value) != true {
         global[slot, default: [:]][value, default: 0] += weight
         knownValues.insert(value)
         byDirectory[entry.directory, default: [:]][slot, default: [:]][value, default: 0] += weight
@@ -299,7 +301,20 @@ extension AutocompleteUsageModel {
         return AutocompleteCandidate(
           insertText: insert, displayText: value, description: description, kind: kind,
           score: AutocompleteRelevance.score(kind: kind, typed: current, candidate: value),
-          replacement: .currentToken(start: parsed.currentTokenStart))
+          replacement: .currentToken(start: parsed.currentTokenStart), isLearned: true)
       }
+  }
+
+  /// 命令行当前 token 位置对应的槽位：命令名位置是 `@command`，其余按规格游标推导，
+  /// 与 `slots(of:)` 统计时的键一致，供面板「忘记」定位要压制的槽位。没有规格时为 nil。
+  public static func currentSlot(
+    line: String, value: String, specDatabase: AutocompleteSpecDatabase
+  ) -> String? {
+    let parsed = ShellCommandTokenizer.tokenize(line)
+    if parsed.tokens.count <= 1, !line.contains(where: \.isWhitespace) { return commandSlot }
+    guard let name = parsed.tokens.first, let root = specDatabase.command(named: name) else { return nil }
+    let completed = parsed.currentToken.isEmpty
+      ? Array(parsed.tokens.dropFirst()) : Array(parsed.tokens.dropFirst().dropLast())
+    return slot(of: value, in: AutocompleteArgumentContext(root: root, completed: completed))?.slot
   }
 }

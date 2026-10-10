@@ -1258,6 +1258,7 @@
 "本机 ssh 命令通过 OpenSSH ControlMaster 复用已认证连接；详情面板的远端文件与服务器监控借用它，不需要再次认证。只影响之后新建的终端" = "Local ssh commands reuse an authenticated connection through OpenSSH ControlMaster. Remote Files and Server Monitor in the details panel borrow it, so no second authentication is needed. Applies only to terminals created afterwards";
 "本机后台保活" = "Keep local shells alive in background";
 "本机学习" = "Local Learning";
+"⇧⌫ 从历史中删除" = "⇧⌫ Remove from history";
 "跳过含凭据的命令" = "Skip Commands with Credentials";
 "命令里出现密码、令牌或密钥时整条不记录、不纠错" = "Do not record or correct a command when it contains a password, token, or key";
 "本机学习数据" = "Local Learning Data";

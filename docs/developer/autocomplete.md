@@ -139,6 +139,7 @@ token 替换类建议（拼写、目录）用解引号 token 重建。
   意图键转移（命令名加第一层子命令，如 `git add → git commit`）。条件概率带绝对折扣 0.5，置信度
   `c/(c+4)`，满额 160 分；超过 2000 项时整体减半。失败的命令断开上下文；会话上下文只在内存中，
   重启即断开。清空历史时一并清空。
+- **遗忘**（面板 ⇧⌫，`TerminalAutocompleteKey.shiftDelete`，keyCode 51/117 + ⇧）：只对明确选中、`isLearned` 为真的候选生效。整行历史走 `AutocompleteLearningDatabase.remove`（钉住的条目拒删，归 `aster ignore`）；槽位值走 `suppress(slot:value:)`，槽位由 `AutocompleteUsageModel.currentSlot` 按当前命令行推导，与统计键一致。压制表存在 `learning.json` 的可选键 `suppressedValues`（≤ 500 槽位 × 200 值），旧文件无此键照常解码；`argumentCandidates` 与使用频次模型构建时过滤被压制值，用户再次执行含该值的命令时自动解除。面板保持打开并按新结果重算，选中位置钳位；规格/文件候选上按 ⇧⌫ 吞键不动。
 - **脏历史过滤**：以「数字 + 分号」开头的终端应答残留（`11;rgb:…`）和 TUI 的 `! ` Shell 模式前缀
   不学习，加载旧学习库时一并剔除。
 - **性能**：使用频次模型惰性构建并缓存，每条命令执行后增量更新，只在清空历史或超过 6 小时后重建。

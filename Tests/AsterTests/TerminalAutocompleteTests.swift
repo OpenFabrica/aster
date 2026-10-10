@@ -810,7 +810,7 @@ func terminalAutocompleteUsesScreenCommandForFollowUp() throws {
 }
 
 @MainActor
-private func makeController(
+func makeController(
   _ fixture: (directory: URL, service: AutocompleteService, controls: MutableAutocompleteControls)
 ) -> TerminalAutocompleteController {
   TerminalAutocompleteController(
@@ -821,12 +821,12 @@ private func makeController(
   )
 }
 
-private final class MutableAutocompleteControls {
+final class MutableAutocompleteControls {
   var value = ControlConfiguration()
 }
 
 @MainActor
-private func makeTerminalAutocompleteFixture() throws -> (
+func makeTerminalAutocompleteFixture() throws -> (
   directory: URL, service: AutocompleteService, controls: MutableAutocompleteControls
 ) {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
