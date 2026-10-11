@@ -2,7 +2,7 @@ diff --git a/include/ghostty.h b/include/ghostty.h
 index b099741..f598451 100644
 --- a/include/ghostty.h
 +++ b/include/ghostty.h
-@@ -442,0 +443,48 @@ typedef struct {
+@@ -442,0 +443,49 @@ typedef struct {
 +// Stable point for the lifetime of a retained Ghostty page. `screen_row` is
 +// the zero-based row in the current retained scrollback. The page tuple lets
 +// Aster resolve the same cell after rows are appended or old pages are pruned.
@@ -28,6 +28,7 @@ index b099741..f598451 100644
 +  uint64_t latest_page_serial;
 +  ghostty_aster_buffer_point_s cursor;
 +  bool alternate_screen;
++  bool bracketed_paste;
 +} ghostty_aster_buffer_info_s;
 +
 +// Search flags are intentionally a bit mask so the Aster ABI can add new
@@ -51,12 +52,12 @@ index b099741..f598451 100644
 +  bool has_text;
 +} ghostty_aster_cell_s;
 +
-@@ -447,0 +496,13 @@ typedef struct {
+@@ -447,0 +497,13 @@ typedef struct {
 +// Aster embeds a pinned Ghostty revision and maintains this versioned extension
 +// ABI for capabilities that are intentionally not part of libghostty's internal
 +// embedding API. Callback payloads are borrowed and only valid for the duration
 +// of the callback; embedders must copy data they retain.
-+#define GHOSTTY_ASTER_EXTENSION_ABI_VERSION 2u
++#define GHOSTTY_ASTER_EXTENSION_ABI_VERSION 3u
 +
 +typedef void (*ghostty_aster_pty_io_cb)(void*, const uint8_t*, size_t);
 +typedef void (*ghostty_aster_osc_cb)(void*,
@@ -65,15 +66,15 @@ index b099741..f598451 100644
 +                                    size_t,
 +                                    const ghostty_aster_buffer_point_s*);
 +
-@@ -479,0 +541,3 @@ typedef struct {
+@@ -479,0 +542,3 @@ typedef struct {
 +  ghostty_aster_pty_io_cb aster_pty_read_cb;
 +  ghostty_aster_pty_io_cb aster_pty_write_cb;
 +  ghostty_aster_osc_cb aster_osc_cb;
-@@ -1100,0 +1165,3 @@ GHOSTTY_API ghostty_surface_config_s ghostty_surface_config_new();
+@@ -1100,0 +1166,3 @@ GHOSTTY_API ghostty_surface_config_s ghostty_surface_config_new();
 +// Returns the ABI version of the Aster-only extension symbols and fields.
 +GHOSTTY_API uint32_t ghostty_aster_extension_abi_version(void);
 +
-@@ -1163,0 +1231,30 @@ GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
+@@ -1163,0 +1232,30 @@ GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 +// Aster extension: current retained buffer geometry and tracked selection.
 +GHOSTTY_API bool ghostty_aster_surface_buffer_info(
 +    ghostty_surface_t, ghostty_aster_buffer_info_s*);
@@ -447,7 +448,7 @@ index 730913e..e3dac0f 100644
 +            .aster_pty_read_cb = opts.aster_pty_read_cb,
 +            .aster_pty_write_cb = opts.aster_pty_write_cb,
 +            .aster_osc_cb = opts.aster_osc_cb,
-@@ -1388,0 +1401,62 @@ pub const CAPI = struct {
+@@ -1388,0 +1401,63 @@ pub const CAPI = struct {
 +    const AsterBufferPoint = extern struct {
 +        column: u32,
 +        screen_row: u64,
@@ -494,6 +495,7 @@ index 730913e..e3dac0f 100644
 +        latest_page_serial: u64,
 +        cursor: AsterBufferPoint,
 +        alternate_screen: bool,
++        bracketed_paste: bool,
 +    };
 +
 +    const AsterSearchResult = extern struct {
@@ -510,13 +512,13 @@ index 730913e..e3dac0f 100644
 +        has_text: bool,
 +    };
 +
-@@ -1540,0 +1615,5 @@ pub const CAPI = struct {
+@@ -1540,0 +1616,5 @@ pub const CAPI = struct {
 +    /// Version gate for the Aster-only extension ABI.
 +    export fn ghostty_aster_extension_abi_version() u32 {
-+        return 2;
++        return 3;
 +    }
 +
-@@ -1682,0 +1762,207 @@ pub const CAPI = struct {
+@@ -1682,0 +1763,208 @@ pub const CAPI = struct {
 +    export fn ghostty_aster_surface_buffer_info(
 +        surface: *Surface,
 +        result: *AsterBufferInfo,
@@ -538,6 +540,7 @@ index 730913e..e3dac0f 100644
 +            .latest_page_serial = screen.pages.page_serial,
 +            .cursor = cursor,
 +            .alternate_screen = terminal_state.screens.active_key == .alternate,
++            .bracketed_paste = terminal_state.modes.get(.bracketed_paste),
 +        };
 +        return true;
 +    }

@@ -5,12 +5,15 @@ Aster 的主终端引擎使用 Ghostty 的 internal C interface。上游尚未�
 可重放的 Aster extension patch；不提交临时 clone。
 
 - 固定 revision：`4dcb09ada0c0909717d92547623b26eafa50ca8a`
-- 扩展 ABI：`GHOSTTY_ASTER_EXTENSION_ABI_VERSION == 2`
+- 扩展 ABI：`GHOSTTY_ASTER_EXTENSION_ABI_VERSION == 3`
 - 补丁：`patches/0001-aster-extension-abi.patch`
 - 生成命令：`./scripts/setup-ghostty.sh`
 - 编译器：Zig 0.15.2 与 Xcode Metal Toolchain
 - 产物：`Vendor/GhosttyKit.xcframework`
 - 运行时资源：`Sources/Aster/Ghostty/Resources/{ghostty,terminfo}`
+
+v3 在 `ghostty_aster_buffer_info_s` 末尾追加 `bracketed_paste`，读取终端当前的 DECSET 2004
+状态，供粘贴保护判断；struct 布局因此变化。
 
 ABI v2 在上游 internal interface 之外补充：原始 PTY read/write observer、任意数字
 OSC 的非消费式 observer、稳定 page anchor 与绝对缓冲区坐标、固定宽度 cell row、

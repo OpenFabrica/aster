@@ -199,13 +199,14 @@ Ghostty 配置 `aster-smooth-scroll`，打开后主屏 scrollback 按像素跟�
 100ms 没有回应也会放行（程序可能已滚到头而不重画）。滚动速度因此跟随程序自己的绘制速度，手势
 一停画面就停。计数用 `renderer.State.aster_output_seq`（IO 线程每次 PTY 读取加一）。
 
-### Aster extension ABI v2
+### Aster extension ABI v3
 
 固定补丁在 Ghostty internal C interface 之外提供：
 
 - 原始 PTY read/write callback，以及支持 BEL、ESC ST、C1 ST 和 64 KiB 上限的任意数字 OSC observer。observer 的流式扫描在 ground 与 payload 状态都跟踪 UTF-8 多字节序列，0x9C/0x9D 处于续字节位置时不会被误判为 C1 终止符（否则 OSC 0 标题里的 "✳"（E2 9C B3）会被截成 U+FFFD）；
 - OSC 发生位置的稳定 page anchor、绝对 retained-screen 坐标和 scrollback 裁剪后的重新解析；
 - buffer geometry、固定宽度 cell row、selection get/set/clear 和绝对 row 滚动；
+- v3 起：`ghostty_aster_buffer_info_s` 追加 `bracketed_paste`（DECSET 2004 当前状态），与 `alternate_screen` 一起供粘贴保护判断；struct 布局变化，因此提升 ABI 版本；
 - v2 起：像素滚动与越界滚动的视觉偏移读取（`ghostty_aster_surface_visual_offset_rows`）、按小数行滚动
   （`ghostty_aster_surface_scroll_rows`）与对齐到整行（`ghostty_aster_surface_snap_scroll_row`），
   以及启用它的 `aster-smooth-scroll` 配置；
