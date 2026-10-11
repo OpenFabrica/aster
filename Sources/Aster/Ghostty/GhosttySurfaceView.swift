@@ -86,6 +86,8 @@ final class GhosttySurfaceView: NSView {
   var focusFollowsMouse = false
   var pasteProtectionEnabled = true
   var pasteBracketedSafe = true
+  /// OSC 133 确认前台命令正在运行时返回 true；粘贴保护据此放行进入程序输入的粘贴。
+  var isShellCommandRunning: (() -> Bool)?
   /// 链接预览开关（controls.showLinkPreviews）：按住 Command 悬停链接时在底部展示完整路径或 URL。
   var linkPreviewEnabled = true {
     didSet {

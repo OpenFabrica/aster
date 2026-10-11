@@ -34,6 +34,16 @@ public enum TerminalClipboardText {
     // 故意丢弃最后一行尚未写出的水平空白。
     return String(result)
   }
+
+  /// 删除粘贴文本末尾所有的 LF / CR，避免复制时带上的回车在粘贴瞬间执行命令。
+  /// 按 Unicode 标量处理：`\r\n` 在 Swift 中是一个字符，按字符比较会漏掉。
+  public static func trimmingTrailingNewlines(in text: String) -> String {
+    var scalars = text.unicodeScalars[...]
+    while let last = scalars.last, last == "\n" || last == "\r" {
+      scalars = scalars.dropLast()
+    }
+    return String(scalars)
+  }
 }
 
 /// 复制相关设置的组合语义。Copy on Select 需要保留高亮供用户继续扩展，因此它比
@@ -142,19 +152,28 @@ public enum PasteRiskAnalyzer {
 
 /// 把内容风险与当前终端模式组合成最终粘贴保护决策。
 public enum PasteProtectionPolicy {
+  /// 判断粘贴前是否需要用户确认。
+  ///
+  /// - Parameters:
+  ///   - isCommandRunning: Shell Integration（OSC 133）确认已有命令在前台运行；此时粘贴
+  ///     进入该程序的输入，而不是 Shell 提示符。没有集成时调用方必须传 false。
   public static func requiresConfirmation(
     for analysis: PasteAnalysis,
     protectionEnabled: Bool,
     isAlternateScreen: Bool = false,
     isBracketedPasteMode: Bool = false,
-    treatsBracketedPasteAsSafe: Bool = true
+    treatsBracketedPasteAsSafe: Bool = true,
+    isCommandRunning: Bool = false
   ) -> Bool {
     guard protectionEnabled, !analysis.risks.isEmpty else { return false }
     // ESC、C0/C1 等控制字符可以提前结束 bracketed paste 或向 TUI 注入按键。即使位于
     // 备用屏或程序声明 bracketed paste，也必须让用户看到明确风险。
     if analysis.risks.contains(.controlCharacters) { return true }
+    // 其余放行顺序与 Otty 一致：全屏程序、已协商 bracketed paste、命令正在运行。
+    // 三种情况下换行都不会被 Shell 当作“立即执行”。
     guard !isAlternateScreen else { return false }
     if isBracketedPasteMode, treatsBracketedPasteAsSafe { return false }
+    if isCommandRunning { return false }
     return true
   }
 }
@@ -390,6 +409,12 @@ public struct TerminalOSCStreamLimiter: Sendable {
 public enum ShellPasteEscaper {
   public static func escape(_ text: String) -> String {
     "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  }
+
+  /// 把多个文件路径分别转义成 Shell 参数并用空格连接；空数组返回 nil。
+  public static func escapePaths(_ paths: [String]) -> String? {
+    guard !paths.isEmpty else { return nil }
+    return paths.map(escape).joined(separator: " ")
   }
 }
 

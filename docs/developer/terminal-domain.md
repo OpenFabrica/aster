@@ -38,7 +38,7 @@ Aster 是原生 macOS 终端工作区，面向同时使用 Shell、全屏 TUI、
 9. 关闭操作以「当前聚焦的 Pane」为对象：还有分屏时不得连带关闭整个标签页，焦点转移到被关 Pane 的相邻兄弟。
 10. 面板导航与拖放重排（方向聚焦、移动分隔条、等分、交换、搬移）是 `PaneLayout` 上的纯函数，不依赖 AppKit 帧尺寸。
 11. 拖放重排只改描述符位置，面板 ID 必须保持不变——ID 变了就等于重建运行态，PTY 会重启。
-12. 危险粘贴默认必须确认；备用屏 TUI，或已协商 bracketed paste 且用户允许信任时可跳过，但控制字符风险永不跳过。
+12. 粘贴文本先由 `TerminalClipboardText.trimmingTrailingNewlines` 去掉末尾所有 LF / CR，粘贴只预填输入行；危险粘贴默认必须确认；备用屏 TUI、已协商 bracketed paste 且用户允许信任、或 OSC 133 确认命令正在运行时可跳过，但控制字符风险永不跳过。
 13. OSC 必须在进入组件 parser 前流式限长；OSC 52 读取默认每次询问，拒绝时不得触碰系统剪贴板。
 14. 原生文本编辑只接管普通 Shell 屏幕；全屏 TUI 和增强键盘协议必须保留程序协商的按键编码。
 15. 自动安全输入只保护当前聚焦 Pane 中 `ECHO` 关闭且 `ICANON` 保持开启的密码式输入；raw-mode TUI 必须排除。多 Pane 共享引用计数，应用失活时暂停系统保护。
@@ -76,7 +76,7 @@ flowchart LR
   A[复制 / 选中即复制] --> B[可选逐行去尾空白]
   B --> C[写入 NSPasteboard]
   D[普通或 Paste As 粘贴] --> E[PasteRiskAnalyzer]
-  E --> F{备用屏或可信 bracketed?}
+  E --> F{备用屏、可信 bracketed 或命令运行中?}
   F -->|是且无控制字符| H[编码 UTF-8 / bracketed 序列]
   F -->|否且有风险| G{用户确认}
   G -->|允许| H
@@ -224,9 +224,16 @@ OSC 7 目录变化还会在“自动记录访问目录”开启时写入 `aster.
 
 ### 复制、Paste As 与 OSC 52
 
-`AsterTerminalView` 覆盖 SwiftTerm 的复制和粘贴入口。复制可选逐物理行删除尾部水平空白，并可在显式复制成功后清除选区；“选中即复制”复用同一转换，但始终保留高亮供用户继续扩展选区。普通粘贴识别多行、末尾换行、`sudo`/`su` 命令词和 C0/C1 控制字符，确认框只展示经可视化和 2,000 字符上限处理的预览。正文按原始 UTF-8 写入 PTY；终端协商 bracketed paste 或用户显式选择“括号粘贴”时，使用 `CSI 200~` / `CSI 201~` 包裹。控制字符始终要求确认，正文内嵌的 `CSI 201~` 与 C1 等价结束标记会转为可见文本，不能提前逃逸括号模式。
+`AsterTerminalView` 覆盖 SwiftTerm 的复制和粘贴入口。复制可选逐物理行删除尾部水平空白，并可在显式复制成功后清除选区；“选中即复制”复用同一转换，但始终保留高亮供用户继续扩展选区。普通粘贴先去掉末尾所有 LF / CR，再识别多行、`sudo`/`su` 命令词和 C0/C1 控制字符，确认框只展示经可视化和 2,000 字符上限处理的预览。正文按原始 UTF-8 写入 PTY；终端协商 bracketed paste 或用户显式选择“括号粘贴”时，使用 `CSI 200~` / `CSI 201~` 包裹。控制字符始终要求确认，正文内嵌的 `CSI 201~` 与 C1 等价结束标记会转为可见文本，不能提前逃逸括号模式。
 
-Edit 菜单和终端右键菜单提供粘贴选区、普通文件 Base64、POSIX Shell 单参数转义、强制括号粘贴，以及 Composer 交接入口。Base64 文件读取使用 `lstat` + `O_NOFOLLOW` + `fstat`，在打开前后比较设备号、inode、大小、mtime 与 ctime，限制为 8 MiB；目录、符号链接、FIFO、socket、设备和读取期间变化的文件都被拒绝。Composer 动作通过 `onPasteIntoComposer` 窄回调解耦；Composer 领域接入前右键项保持禁用。
+产品终端 `GhosttySurfaceView` 的粘贴入口集中在 `GhosttySurfaceView+Paste.swift`，行为与 Otty 对齐：
+
+- 普通粘贴按“文件 → 文本 → 图片”的顺序读剪贴板。文件 URL 粘贴为逐个 Shell 转义、空格连接的路径；只有图片时经 `TerminalImportedFileStore` 存成 `0600` 临时 PNG 再粘贴路径。路径由 Aster 生成、不含裸换行，因此不经确认。远端受管终端的图片仍走上传流程，文件与图片不转换成本机路径。
+- 文本粘贴经 `PasteProtectionPolicy`：模式取自 Aster ABI v3 的 `ghostty_aster_buffer_info_s.alternate_screen` 与 `bracketed_paste`，命令运行态取自 `ghosttyShellCommandTimeline.isCommandRunning`。没有 Shell Integration 时不会推断命令运行，仍按提示符处理。投递走 `ghostty_surface_text`，由 libghostty 按程序协商的模式包裹并过滤 xterm 禁止的控制字节。
+- “括号粘贴”总是以 `CSI 200~` / `CSI 201~` 投递：程序已开启 2004 时交给 libghostty，否则由 `PasteTransmissionEncoder` 编码并中和正文中的结束标记；确认判断按括号模式进行。
+- “粘贴选区”读取当前终端选区并走粘贴保护；“转义特殊字符后粘贴”把文件粘贴为转义路径、把文本整体包成单引号 Shell 参数，不经确认。
+
+SwiftTerm 兼容路径的 Edit 菜单和终端右键菜单提供粘贴选区、普通文件 Base64、POSIX Shell 单参数转义、强制括号粘贴，以及 Composer 交接入口。Base64 文件读取使用 `lstat` + `O_NOFOLLOW` + `fstat`，在打开前后比较设备号、inode、大小、mtime 与 ctime，限制为 8 MiB；目录、符号链接、FIFO、socket、设备和读取期间变化的文件都被拒绝。Composer 动作通过 `onPasteIntoComposer` 窄回调解耦；Composer 领域接入前右键项保持禁用。
 
 `TerminalOSCStreamLimiter` 在原始 PTY 字节进入 SwiftTerm 前跨分片跟踪 OSC：普通 OSC 上限 16 MiB，OSC 52 上限 8 MiB；超限时发送 CAN 取消组件内部缓存，并丢弃到真实终止符。ground 态按 UTF-8 穿越多字节字符：延续字节(0x80–0xBF)不参与 C1 判定——❯/❮(U+276F/U+276E = `E2 9D xx`)等提示符字符的中间字节恰为 0x9D，误判为 C1 OSC 起始符会把提示符连同后续输出整段吞进一条永不终止的 OSC；只有非延续位置的裸 0x9D 才规范化为 `ESC ]`（回归测试 `oscStreamLimiterPassesThroughUTF8ContinuationBytes` 与像素探针 `promptLeaderRendersInkInFirstCell`）。自定义 OSC 52 handler 再执行第二层解析，Base64 解码后限制 6 MiB；读响应正文限制 1 MiB，并使用七位 OSC/ST。写权限默认 `Allow`，读权限默认 `Ask`；导入配置中的 `Allow Read` 会降级为 `Ask`，显式 `Deny` 保留。`Ask` 不持久化临时授权，提示期间拒绝重入，提示结束后 5 秒内静默拒绝后续请求，防止模态提示风暴。畸形、超限、拒绝和取消请求均无剪贴板副作用。
 

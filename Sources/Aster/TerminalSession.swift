@@ -1564,8 +1564,10 @@ final class AsterTerminalView: LocalProcessTerminalView {
   }
 
   /// 供菜单变体复用的窄入口。返回 false 表示空内容、保护取消或没有可写入的数据。
+  /// 末尾回车先被去掉，粘贴只填入输入行，由用户自己按 Return 执行。
   @discardableResult
   func pasteText(_ text: String, forceBracketed: Bool = false) -> Bool {
+    let text = TerminalClipboardText.trimmingTrailingNewlines(in: text)
     guard !text.isEmpty, permitsUserInputAction() else { return false }
     let terminal = getTerminal()
     let analysis = PasteRiskAnalyzer.analyze(text)
@@ -1674,7 +1676,7 @@ final class AsterTerminalView: LocalProcessTerminalView {
   @discardableResult
   func insertPathsIntoCurrentInput(_ urls: [URL]) -> Bool {
     guard !urls.isEmpty else { return false }
-    let escapedPaths = urls.map { ShellPasteEscaper.escape($0.path) }.joined(separator: " ")
+    guard let escapedPaths = ShellPasteEscaper.escapePaths(urls.map(\.path)) else { return false }
     return typePromptText(escapedPaths)
   }
 
@@ -3043,6 +3045,10 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     // 命令生命周期统一从非消费 OSC 133 observer 进入；不再同时消费 Ghostty 的
     // command_finished action，避免一个 D marker 触发两次学习、通知和 Outline 更新。
     view.onCommandFinished = nil
+    // 粘贴保护与 Otty 一致：OSC 133 已确认命令在运行时，粘贴进入该程序而非 Shell 提示符。
+    view.isShellCommandRunning = { [weak self] in
+      self?.ghosttyShellCommandTimeline.isCommandRunning ?? false
+    }
     view.onProgress = { [weak self] progress in
       guard let self else { return }
       switch progress {

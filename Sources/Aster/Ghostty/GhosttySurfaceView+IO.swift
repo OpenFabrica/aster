@@ -85,30 +85,6 @@ extension GhosttySurfaceView: NSMenuItemValidation {
     _ = ghostty_surface_key(surface, key)
   }
 
-  /// 用户粘贴走 libghostty 的 `surface_text`，由内核按目标的 bracketed-paste 模式
-  /// 自动包裹。Aster 仍在发送前做保守风险确认，控制字符永远不会静默放行。
-  @discardableResult
-  func pasteText(_ text: String) -> Bool {
-    guard let surface, isProcessRunning, !readOnly, managedInputGateOpen,
-      navigationMode == .normal, !text.isEmpty
-    else {
-      return false
-    }
-    let analysis = PasteRiskAnalyzer.analyze(text)
-    if PasteProtectionPolicy.requiresConfirmation(
-      for: analysis,
-      protectionEnabled: pasteProtectionEnabled,
-      isAlternateScreen: false,
-      isBracketedPasteMode: false,
-      treatsBracketedPasteAsSafe: pasteBracketedSafe
-    ), !Self.presentPasteConfirmation(analysis) {
-      return false
-    }
-    onUserInput?()
-    text.withCString { ghostty_surface_text(surface, $0, UInt(text.utf8.count)) }
-    return true
-  }
-
   func readSelection() -> String? {
     guard let surface, ghostty_surface_has_selection(surface) else { return nil }
     var text = ghostty_text_s()
@@ -304,44 +280,7 @@ extension GhosttySurfaceView: NSMenuItemValidation {
 
   @objc func copy(_ sender: Any?) { _ = performBindingAction("copy_to_clipboard") }
 
-  @objc func paste(_ sender: Any?) {
-    // 远端受管终端：剪贴板含图片时走上传流程，粘贴远端路径而不是图片内容
-    let pb = NSPasteboard.general
-    if let handler = onRemoteImagePaste,
-       RemoteImageUploader.pasteboardHasImage(pb),
-       let imageData = RemoteImageUploader.extractImageData(from: pb)
-    {
-      Task { @MainActor [weak self] in
-        guard let self else { return }
-        let result = await handler(imageData)
-        switch result {
-        case .success(let remotePath):
-          // 粘贴远端路径，不带换行
-          _ = self.pasteText(remotePath)
-        case .cancelled:
-          break
-        case .failed:
-          // 失败时不粘贴任何内容，避免残留
-          break
-        }
-      }
-      return
-    }
-    guard let text = readSystemClipboard() else { return }
-    _ = pasteText(text)
-  }
-
   override func selectAll(_ sender: Any?) { _ = performBindingAction("select_all") }
-
-  @objc func pasteBracketed(_ sender: Any?) {
-    guard let text = readSystemClipboard() else { return }
-    _ = pasteText(text)
-  }
-
-  @objc func pasteAndContinueInComposer(_ sender: Any?) {
-    guard let text = readSystemClipboard() else { return }
-    onPasteIntoComposer?(text)
-  }
 
   @objc func sendSelectionToChat(_ sender: Any?) {
     guard surface.map(ghostty_surface_has_selection) == true else { return }
@@ -404,8 +343,15 @@ extension GhosttySurfaceView: NSMenuItemValidation {
     case #selector(copy(_:)):
       guard let surface else { return false }
       return ghostty_surface_has_selection(surface)
-    case #selector(paste(_:)), #selector(pasteBracketed(_:)):
+    case #selector(paste(_:)):
+      return surface != nil && !readOnly && Self.pasteboardHasPastableContent()
+    case #selector(pasteBracketed(_:)):
       return surface != nil && readSystemClipboard() != nil && !readOnly
+    case #selector(pasteEscapingSpecialCharacters(_:)):
+      return surface != nil && !readOnly && Self.pasteboardHasEscapableContent()
+    case #selector(pasteSelection(_:)):
+      guard let surface else { return false }
+      return !readOnly && ghostty_surface_has_selection(surface)
     case #selector(pasteAndContinueInComposer(_:)):
       return surface != nil && readSystemClipboard() != nil && onPasteIntoComposer != nil
     case #selector(sendSelectionToChat(_:)):
@@ -436,24 +382,6 @@ extension GhosttySurfaceView: NSMenuItemValidation {
     _ = ghostty_surface_key(surface, key)
     key.action = GHOSTTY_ACTION_RELEASE
     _ = ghostty_surface_key(surface, key)
-  }
-
-  private static func presentPasteConfirmation(_ analysis: PasteAnalysis) -> Bool {
-    let alert = NSAlert()
-    alert.alertStyle = .warning
-    alert.messageText = L("粘贴的内容可能立即执行命令")
-    let reasons = analysis.risks.map { risk -> String in
-      switch risk {
-      case .multipleLines: L("包含多行")
-      case .trailingNewline: L("末尾包含换行")
-      case .privilegeEscalation: L("包含 sudo 或 su")
-      case .controlCharacters: L("包含不可见控制字符")
-      }
-    }.sorted().joined(separator: "、")
-    alert.informativeText = L("检测到：\(reasons)\n\n\(analysis.preview())")
-    alert.addButton(withTitle: L("仍然粘贴"))
-    alert.addButton(withTitle: L("取消"))
-    return alert.runModal() == .alertFirstButtonReturn
   }
 }
 
