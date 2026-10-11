@@ -411,7 +411,7 @@ aster pane split --current --direction down  # 在当前 pane 下方拆出新 pa
 aster pane close w1:p3                       # 关闭 pane；标签里只剩它时连标签一起关
 aster tab new --cwd ~/project                # 新建标签并切过去，打印标签和 pane 的 ID
 aster tab focus w1:t2                        # 切到某个标签
-aster tab rename w1:t2 "构建"                # 固定标签名；--clear 恢复自动标题
+aster tab rename w1:t2 "build"                # 固定标签名；--clear 恢复自动标题
 aster tab close w1:t2                        # 关闭整个标签
 aster events subscribe --kind pane.agent_status_changed
 aster notification show "构建完成" --body "全部通过"
