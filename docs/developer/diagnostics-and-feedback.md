@@ -83,3 +83,9 @@ flowchart LR
 - 验收：`swift test --filter CrashReportEnvelope`；手工打开开关后在
   `~/Library/Logs/Aster` 看到 `crash_reporting.uploaded`，Sentry 项目里出现对应 issue。
 
+
+## 启动恢复中的子进程读取
+
+项目目录探测等后台命令的管道读取由 `PipeOutputCapture` 串行协调回调与退出收尾；
+读取错误按信息缺失处理，不能通过 Foundation 异常终止应用。机制和回归边界见
+[有界子进程输出与退出收尾](process-output.md)。

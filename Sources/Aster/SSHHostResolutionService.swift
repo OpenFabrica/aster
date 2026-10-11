@@ -29,12 +29,6 @@ enum SSHHostResolutionService {
   /// 并行排空 stdout，避免 OpenSSH 输出填满 pipe；超时/取消先 TERM，再以 KILL 保底。
   /// 输出和等待均有界，错误文本直接丢弃，防止本地配置内容进入日志或 UI。
   private static func runConfiguration(arguments: [String]) -> String? {
-    final class OutputBox: @unchecked Sendable {
-      let lock = NSLock()
-      var data = Data()
-      var exceededLimit = false
-    }
-
     guard !isCancelled, FileManager.default.isExecutableFile(atPath: "/usr/bin/ssh") else {
       return nil
     }
@@ -52,26 +46,21 @@ enum SSHHostResolutionService {
     let pipe = Pipe()
     process.standardOutput = pipe
     process.standardError = FileHandle.nullDevice
-    let output = OutputBox()
-    let finished = DispatchSemaphore(value: 0)
-    pipe.fileHandleForReading.readabilityHandler = { handle in
-      let chunk = handle.availableData
-      guard !chunk.isEmpty else { return }
-      output.lock.lock()
-      if output.data.count + chunk.count > maximumBytes { output.exceededLimit = true }
-      if output.data.count < maximumBytes {
-        output.data.append(chunk.prefix(maximumBytes - output.data.count))
+    let output: PipeOutputCapture
+    do {
+      output = try PipeOutputCapture(handle: pipe.fileHandleForReading, maximumBytes: maximumBytes) {
+        if process.isRunning { process.terminate() }
       }
-      let exceededLimit = output.exceededLimit
-      output.lock.unlock()
-      if exceededLimit, process.isRunning { process.terminate() }
+    } catch {
+      return nil
     }
+    let finished = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in finished.signal() }
 
     do {
       try process.run()
     } catch {
-      pipe.fileHandleForReading.readabilityHandler = nil
+      _ = output.finish()
       return nil
     }
 
@@ -91,17 +80,11 @@ enum SSHHostResolutionService {
       }
     }
 
-    pipe.fileHandleForReading.readabilityHandler = nil
-    // 不等 EOF：后台孙进程可能一直握着写端，见 `readRemainingWithoutBlocking`。
-    let tail = pipe.fileHandleForReading.readRemainingWithoutBlocking(maximumBytes: maximumBytes)
-    output.lock.lock()
-    let remaining = maximumBytes - output.data.count
-    if remaining > 0 { output.data.append(tail.prefix(remaining)) }
-    let data = output.data
-    let exceededLimit = output.exceededLimit
-    output.lock.unlock()
+    let captured = output.finish()
+    let data = captured.data
+    let exceededLimit = captured.exceededLimit
 
-    guard !aborted, !exceededLimit, process.terminationReason == .exit,
+    guard !aborted, !exceededLimit, captured.readError == nil, process.terminationReason == .exit,
       process.terminationStatus == 0
     else { return nil }
     return String(data: data, encoding: .utf8)

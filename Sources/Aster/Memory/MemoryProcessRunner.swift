@@ -17,12 +17,6 @@ enum MemoryProcessRunner {
     timeout: TimeInterval = 2,
     maximumBytes: Int = 64 * 1_024
   ) -> String? {
-    /// 读端缓冲：`readabilityHandler` 在专用队列上回调，必须加锁与主体隔离。
-    final class OutputBox: @unchecked Sendable {
-      let lock = NSLock()
-      var data = Data()
-    }
-
     guard FileManager.default.isExecutableFile(atPath: executable), maximumBytes > 0 else {
       return nil
     }
@@ -40,23 +34,20 @@ enum MemoryProcessRunner {
     let pipe = Pipe()
     process.standardOutput = pipe
     process.standardError = FileHandle.nullDevice
-    let output = OutputBox()
-    let finished = DispatchSemaphore(value: 0)
-    pipe.fileHandleForReading.readabilityHandler = { handle in
-      let chunk = handle.availableData
-      guard !chunk.isEmpty else { return }
-      output.lock.lock()
-      let remaining = maximumBytes - output.data.count
-      if remaining > 0 { output.data.append(chunk.prefix(remaining)) }
-      let full = output.data.count >= maximumBytes
-      output.lock.unlock()
-      if full, process.isRunning { process.terminate() }
+    let output: PipeOutputCapture
+    do {
+      output = try PipeOutputCapture(handle: pipe.fileHandleForReading, maximumBytes: maximumBytes) {
+        if process.isRunning { process.terminate() }
+      }
+    } catch {
+      return nil
     }
+    let finished = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in finished.signal() }
     do {
       try process.run()
     } catch {
-      pipe.fileHandleForReading.readabilityHandler = nil
+      _ = output.finish()
       return nil
     }
 
@@ -77,15 +68,9 @@ enum MemoryProcessRunner {
         _ = finished.wait(timeout: .now() + 0.25)
       }
     }
-    pipe.fileHandleForReading.readabilityHandler = nil
-    // 不等 EOF：后台孙进程可能一直握着写端，见 `readRemainingWithoutBlocking`。
-    let tail = pipe.fileHandleForReading.readRemainingWithoutBlocking(maximumBytes: maximumBytes)
-    output.lock.lock()
-    let remaining = maximumBytes - output.data.count
-    if remaining > 0 { output.data.append(tail.prefix(remaining)) }
-    let data = output.data
-    output.lock.unlock()
-    guard !aborted, process.terminationStatus == 0 else { return nil }
+    let captured = output.finish()
+    let data = captured.data
+    guard !aborted, captured.readError == nil, process.terminationStatus == 0 else { return nil }
     return String(data: data, encoding: .utf8)
   }
 
