@@ -99,6 +99,11 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     startModificationMonitoring()
   }
 
+  override func viewDidLayout() {
+    super.viewDidLayout()
+    updateSourceLayout()
+  }
+
   deinit {
     modificationFallbackTimer?.invalidate()
     sourceRenderTask?.cancel()
@@ -408,6 +413,9 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     }
     let textView = NSTextView()
     sourceTextView = textView
+    textView.isVerticallyResizable = true
+    textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
     textView.isEditable = presentationKind.supportsEditing && !runtime.isReadOnly
     textView.isSelectable = true
     textView.backgroundColor = AsterTheme.paper
@@ -436,13 +444,24 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   private func updateSourceLayout() {
     guard let textView = sourceTextView, let scroll = sourceScrollView else { return }
     textView.isEditable = presentationKind.supportsEditing && !runtime.isReadOnly
-    textView.textContainer?.widthTracksTextView = softWrap
+    scroll.hasHorizontalScroller = !softWrap
     textView.isHorizontallyResizable = !softWrap
+    textView.autoresizingMask = softWrap ? [.width] : []
+    textView.textContainer?.widthTracksTextView = softWrap
+    // Pane 初次挂载和 Source/Preview 切换时滚动区可能尚未完成布局。显式跟随
+    // viewport 建立文本视图尺寸，避免零宽 documentView 只加载文本而不绘制字形。
+    let viewport = scroll.contentSize
+    guard viewport.width > 0, viewport.height > 0 else { return }
+    textView.minSize = viewport
+    let size = NSSize(
+      width: softWrap ? viewport.width : max(viewport.width, textView.frame.width),
+      height: max(viewport.height, textView.frame.height)
+    )
+    if textView.frame.size != size { textView.setFrameSize(size) }
     textView.textContainer?.containerSize = NSSize(
-      width: softWrap ? 0 : CGFloat.greatestFiniteMagnitude,
+      width: softWrap ? max(0, viewport.width - textView.textContainerInset.width * 2) : CGFloat.greatestFiniteMagnitude,
       height: CGFloat.greatestFiniteMagnitude
     )
-    scroll.hasHorizontalScroller = !softWrap
   }
 
   private func sourceText() -> String {

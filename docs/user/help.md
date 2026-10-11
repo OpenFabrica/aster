@@ -118,7 +118,7 @@ Aster 会在本机记录你通过终端访问的目录，并按“使用频率 +
 - `Rename…` / `Move to Trash`：重命名后已打开 Pane 会继续跟踪新路径；删除进入系统废纸篓，可以恢复。
 - `Copy Path` / `Copy Relative Path` / `Reveal in Finder`：相对路径以当前 Files 根目录为准且不带 `./`。
 
-File Pane 顶部左侧提供模式胶囊、发送到 Chat 和共享；中间显示文件名与更多菜单；右侧显示 `✓ Saved`、`Edited`、磁盘冲突或错误，并提供保存和关闭。Markdown、reStructuredText、HTML 与 SVG 使用 code/eye 在可编辑 Source 和 Preview 间切换；普通源码使用 code/lock 就地锁定或解锁。切换会保留源码选区、滚动位置和撤销记录；`⌘S` 原子保存，不会自动保存。存在未保存内容时关闭仍会询问保存、放弃或取消。外部程序修改文件时，未编辑的 Pane 自动重载；本地已有修改时显示 `Modified on Disk`，可从 `… → Reload from Disk` 明确放弃本地内容。
+File Pane 顶部左侧提供模式胶囊、发送到 Chat 和共享；中间显示文件名与更多菜单；右侧显示 `✓ Saved`、`Edited`、磁盘冲突或错误，并提供保存和关闭。Markdown、reStructuredText、HTML 与 SVG 使用 code/eye 在可编辑 Source 和 Preview 间切换；普通源码使用 code/lock 就地锁定或解锁。Source 会随 Pane 尺寸调整显示区域；`… → Soft Wrap` 可切换自动换行，关闭后可横向滚动长行。切换会保留源码选区、滚动位置和撤销记录；`⌘S` 原子保存，不会自动保存。存在未保存内容时关闭仍会询问保存、放弃或取消。外部程序修改文件时，未编辑的 Pane 自动重载；本地已有修改时显示 `Modified on Disk`，可从 `… → Reload from Disk` 明确放弃本地内容。
 
 Preview 支持 Markdown（含 GFM 表格、任务列表等）、reStructuredText、HTML、SVG、常见图片/GIF、PDF、diff、Office/媒体/字体 Quick Look、二进制 hex 和 Aster 已识别的 Agent transcript。HTML/SVG/Markdown 预览禁用 JavaScript 与网络请求；Agent transcript 以会话视图渲染（角色区分、Markdown、工具折叠），可 Resume 或 Fork。二进制 hex 只按可见行绘制，超大文本和二进制只读取有界内容，避免单个 Pane 占满内存。远程 SSH 路径暂不支持 File Pane。
 
