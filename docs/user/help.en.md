@@ -339,7 +339,7 @@ External commands are fully listed for confirmation by default, including comman
 
 Priority is OSC 88 declaration, then multiplexer, then ordinary process. Agent-bound Panes use only Agent reconnection. Restore commands send at the first Shell prompt; any earlier user input cancels them. Switches are read at send time, so changing settings does not require another quit.
 
-`⇧⌘T` restores mistakenly closed Panes/tabs in recently closed order. This history survives normal exit and crashes. Normal exit restores the main window and still-open additional windows. After three consecutive crashes, Aster bypasses a potentially damaged snapshot and opens a clean Shell. Serializable layouts restore, but PIDs, file descriptors, and transient read-only state do not persist.
+`⇧⌘T` restores mistakenly closed Panes/tabs in recently closed order. This history survives normal exit and crashes. Normal exit restores the main window and still-open additional windows. After three consecutive crashes, Aster bypasses a potentially damaged snapshot and opens a clean Shell. If a background project-directory check fails during recovery, Aster continues restoring the workspace and uses the current directory for missing project information. Serializable layouts restore, but PIDs, file descriptors, and transient read-only state do not persist.
 
 ## CLI and Deep Links
 

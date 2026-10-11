@@ -419,13 +419,6 @@ enum MemoryExtractionProcess {
     workingDirectory: String?,
     timeout: TimeInterval
   ) -> MemoryExtractionProcessResult? {
-    /// 读端缓冲：`readabilityHandler` 在专用队列回调，必须加锁与主体隔离。
-    final class OutputBox: @unchecked Sendable {
-      let lock = NSLock()
-      var data = Data()
-      var exceededLimit = false
-    }
-
     guard FileManager.default.isExecutableFile(atPath: executable) else { return nil }
 
     let process = Process()
@@ -448,25 +441,20 @@ enum MemoryExtractionProcess {
     process.standardError = FileHandle.nullDevice
     process.standardInput = FileHandle.nullDevice
 
-    let output = OutputBox()
-    let finished = DispatchSemaphore(value: 0)
-    pipe.fileHandleForReading.readabilityHandler = { handle in
-      let chunk = handle.availableData
-      guard !chunk.isEmpty else { return }
-      output.lock.lock()
-      if output.data.count + chunk.count > maximumOutputBytes { output.exceededLimit = true }
-      if output.data.count < maximumOutputBytes {
-        output.data.append(chunk.prefix(maximumOutputBytes - output.data.count))
+    let output: PipeOutputCapture
+    do {
+      output = try PipeOutputCapture(handle: pipe.fileHandleForReading, maximumBytes: maximumOutputBytes) {
+        if process.isRunning { process.terminate() }
       }
-      let exceeded = output.exceededLimit
-      output.lock.unlock()
-      if exceeded, process.isRunning { process.terminate() }
+    } catch {
+      return nil
     }
+    let finished = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in finished.signal() }
     do {
       try process.run()
     } catch {
-      pipe.fileHandleForReading.readabilityHandler = nil
+      _ = output.finish()
       return nil
     }
 
@@ -488,17 +476,10 @@ enum MemoryExtractionProcess {
     if didTimeOut || wasCancelled {
       terminate(process, finished: finished)
     }
-    pipe.fileHandleForReading.readabilityHandler = nil
-    // 不等 EOF：后台孙进程可能一直握着写端，见 `readRemainingWithoutBlocking`。
-    let tail = pipe.fileHandleForReading.readRemainingWithoutBlocking(maximumBytes: maximumOutputBytes)
-    output.lock.lock()
-    if output.data.count < maximumOutputBytes {
-      output.data.append(tail.prefix(maximumOutputBytes - output.data.count))
-    }
-    let data = output.data
-    let exceeded = output.exceededLimit
-    output.lock.unlock()
-    guard !wasCancelled else { return nil }
+    let captured = output.finish()
+    let data = captured.data
+    let exceeded = captured.exceededLimit
+    guard !wasCancelled, captured.readError == nil else { return nil }
     return MemoryExtractionProcessResult(
       standardOutput: String(data: data, encoding: .utf8) ?? "",
       terminationStatus: didTimeOut ? -1 : process.terminationStatus,

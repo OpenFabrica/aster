@@ -68,7 +68,7 @@ enum WorkspaceInspectionService {
   }
 
   private enum Failure: Sendable {
-    case unavailable, launch, cancelled, timedOut, exceededLimit, unexpectedExit
+    case unavailable, launch, read, cancelled, timedOut, exceededLimit, unexpectedExit
   }
 
   /// 测试取消/超时语义的内部 seam。生产调用仍只使用下方固定的 `ps` 和
@@ -241,12 +241,6 @@ enum WorkspaceInspectionService {
     maximumBytes: Int,
     acceptedTerminationStatuses: Set<Int32> = [0]
   ) -> CommandRunResult {
-    final class OutputBox: @unchecked Sendable {
-      let lock = NSLock()
-      var data = Data()
-      var exceededLimit = false
-    }
-
     guard !currentTaskIsCancelled() else {
       return .init(output: "", failure: .cancelled)
     }
@@ -260,25 +254,20 @@ enum WorkspaceInspectionService {
     let pipe = Pipe()
     process.standardOutput = pipe
     process.standardError = FileHandle.nullDevice
-    let output = OutputBox()
-    let finished = DispatchSemaphore(value: 0)
-    pipe.fileHandleForReading.readabilityHandler = { handle in
-      let chunk = handle.availableData
-      guard !chunk.isEmpty else { return }
-      output.lock.lock()
-      if output.data.count + chunk.count > maximumBytes { output.exceededLimit = true }
-      if output.data.count < maximumBytes {
-        output.data.append(chunk.prefix(maximumBytes - output.data.count))
+    let output: PipeOutputCapture
+    do {
+      output = try PipeOutputCapture(handle: pipe.fileHandleForReading, maximumBytes: maximumBytes) {
+        if process.isRunning { process.terminate() }
       }
-      let exceeded = output.exceededLimit
-      output.lock.unlock()
-      if exceeded, process.isRunning { process.terminate() }
+    } catch {
+      return .init(output: "", failure: .read)
     }
+    let finished = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in finished.signal() }
     do {
       try process.run()
     } catch {
-      pipe.fileHandleForReading.readabilityHandler = nil
+      _ = output.finish()
       return .init(output: "", failure: .launch)
     }
     // `DispatchSemaphore.wait` 本身不响应 Swift Task cancellation。用短周期轮询同时观察
@@ -296,26 +285,17 @@ enum WorkspaceInspectionService {
         break
       }
     }
-    output.lock.lock()
-    let exceededLimit = output.exceededLimit
-    output.lock.unlock()
-    if failure != nil || exceededLimit {
-      if exceededLimit { failure = .exceededLimit }
+    if failure != nil {
       process.terminate()
       if finished.wait(timeout: .now() + 0.25) == .timedOut, process.processIdentifier > 0 {
         _ = Darwin.kill(process.processIdentifier, SIGKILL)
         _ = finished.wait(timeout: .now() + 0.25)
       }
     }
-    pipe.fileHandleForReading.readabilityHandler = nil
-    // 不等 EOF：后台孙进程可能一直握着写端，见 `readRemainingWithoutBlocking`。
-    let tail = pipe.fileHandleForReading.readRemainingWithoutBlocking(maximumBytes: maximumBytes)
-    output.lock.lock()
-    if output.data.count < maximumBytes {
-      output.data.append(tail.prefix(maximumBytes - output.data.count))
-    }
-    let data = output.data
-    output.lock.unlock()
+    let captured = output.finish()
+    if captured.exceededLimit { failure = .exceededLimit }
+    if captured.readError != nil { failure = .read }
+    let data = captured.data
     let text = String(data: data, encoding: .utf8) ?? ""
     if failure == nil, !acceptedTerminationStatuses.contains(process.terminationStatus) {
       failure = .unexpectedExit
