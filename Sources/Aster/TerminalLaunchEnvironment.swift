@@ -11,6 +11,9 @@ struct TerminalLaunchEnvironmentResult {
 /// 组合终端身份、terminfo 搜索路径与 Shell 集成环境。所有外部探测都经闭包注入，
 /// Pane 启动只消费最终字典，不需要知道配置回退或不同 Shell 的加载机制。
 enum TerminalLaunchEnvironmentBuilder {
+  /// zsh 在输出末尾缺少换行时显示的标记；空值表示不显示。
+  static let zshPromptEndOfLineMarkKey = "PROMPT_EOL_MARK"
+
   static func make(
     inherited: [String: String],
     configuredTerm: String,
@@ -63,6 +66,12 @@ enum TerminalLaunchEnvironmentBuilder {
     // 但用户 rc 里受管 block 里的 Aster 脚本仍会加载，所以复用目录必须独立于 plan 注入。
     if let sshControlDirectory, !sshControlDirectory.isEmpty {
       environment[ShellIntegrationLaunchPlan.sshControlDirectoryKey] = sshControlDirectory
+    }
+    // 输出末尾没有换行时，zsh 默认在行尾补一个反色 `%` 再换行。终端里这个标记像是多出的
+    // 字符，因此默认清空它；zsh 启动时把环境变量导入为同名参数，Ghostty 自带的 zsh 集成
+    // 也能生效。用户自己导出过该变量、或在 .zshrc 里重新赋值时，以用户设置为准。
+    if environment[Self.zshPromptEndOfLineMarkKey] == nil {
+      environment[Self.zshPromptEndOfLineMarkKey] = ""
     }
     let productVersion = TerminalProductVersion(version)
     return TerminalLaunchEnvironmentResult(

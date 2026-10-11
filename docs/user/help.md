@@ -174,6 +174,10 @@ Aster 使用 Ghostty 的 Metal renderer。PTY 读取、VT 状态、scrollback �
 内核管理，Aster 只响应最终渲染请求；持续大量输出不再经过旧的 AppKit 字节批次与
 Core Graphics 网格路径。
 
+命令输出末尾没有换行时（例如 `cat` 一个末尾不带换行的文件），zsh 默认会在行尾补一个反色的 `%`。
+Aster 默认不显示它，输出照常保留，提示符换到下一行。想恢复时，在 `~/.zshrc` 里写
+`PROMPT_EOL_MARK='%B%S%#%s%b'`。
+
 ### 输入与安全键盘
 
 - 键盘、IME、修饰键和 Kitty 键盘协议由 Ghostty 编码；Aster 不再额外猜测普通 Shell 的行编辑序列。

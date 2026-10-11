@@ -111,3 +111,22 @@ func terminfoProbeDoesNotPumpMainQueue() {
   )
   #expect(!flag.fired, "探测期间不得执行 runloop 回调")
 }
+
+@Test("启动环境默认清空 zsh 行尾 % 标记，用户导出的值保持不变")
+func terminalLaunchEnvironmentHidesZshEndOfLineMarkUnlessUserSetIt() {
+  func launch(_ inherited: [String: String]) -> [String: String] {
+    TerminalLaunchEnvironmentBuilder.make(
+      inherited: inherited,
+      configuredTerm: "xterm-256color",
+      shellPath: "/bin/zsh",
+      shellIntegrationEnabled: false,
+      paneIdentifier: "pane-eol",
+      version: "0.4.1",
+      resourcesDirectory: nil
+    ) { _, _ in true }.environment
+  }
+
+  #expect(launch(["HOME": "/Users/test"])["PROMPT_EOL_MARK"] == "")
+  #expect(
+    launch(["HOME": "/Users/test", "PROMPT_EOL_MARK": "%B↵%b"])["PROMPT_EOL_MARK"] == "%B↵%b")
+}
