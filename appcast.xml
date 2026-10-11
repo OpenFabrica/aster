@@ -3,6 +3,23 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.19</title>
+            <pubDate>Sun, 11 Oct 2026 14:44:33 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>38</sparkle:version>
+            <sparkle:shortVersionString>0.6.19</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 修复
+
+- **关闭后重新打开不再因管道读取竞争退出**：修复启动恢复和工作区检查时，后台子进程输出读取与退出收尾同时访问管道引发的崩溃。快速退出的命令、超时和取消仍保留有界处理，孙进程持有输出管道时也不会无限等待。
+- **Files 打开的源码正常显示**：修复文件 Pane 已加载文本但 Source 区域空白的问题。源码显示区域随 Pane 尺寸调整，恢复工作区、切换 Source/Preview 和缩放窗口后仍能正常显示。
+- **长行可以横向滚动**：关闭 `Soft Wrap` 后，源码文本视图会按长行扩展，不再把显示宽度固定在 Pane 内。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.19/Aster-0.6.19.dmg" length="49859370" type="application/octet-stream" sparkle:edSignature="CATm47T3ZdsliDUdXZmEPIV3UtJC0Dm1Xfu/LNqsfU3vWdrabHF0/4J853Mg+faqMrLL/VylqeP2/g2Pt6yABg=="/>
+        </item>
+        <item>
             <title>0.6.18</title>
             <pubDate>Sun, 11 Oct 2026 10:14:16 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -113,21 +130,6 @@
 - Agent 停在确认表单等画面不动时，不再每 0.3 秒读一次屏，长时间等待更省电。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.15/Aster-0.6.15.dmg" length="49913213" type="application/octet-stream" sparkle:edSignature="Y5cobGi2rO1B/ZQNnV7WrHUwYLWfUCnv6WwvT5q0g+xMqTsEWvJ3xpb/tRCBZ8bFgU/yoWvBaFuGrl0r2BBaCQ=="/>
-        </item>
-        <item>
-            <title>0.6.14</title>
-            <pubDate>Wed, 30 Sep 2026 19:37:58 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>33</sparkle:version>
-            <sparkle:shortVersionString>0.6.14</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 修复
-
-- 修复 Dock 图标右键菜单里窗口名后面多出「(主工作区)」的问题。这是旧版「一个工作区就是一个窗口」留下的，工作区改为窗口内的标签分组后已经没有意义。现在菜单里只显示标签标题。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.14/Aster-0.6.14.dmg" length="49990381" type="application/octet-stream" sparkle:edSignature="ySRm0myBJgKehmd9fddtMt/Xqso+GRyPGkBJ/6saDpBBC+b24uC84JpD5XTpYReDeTli/7gGC3mVk2P0oOxgDw=="/>
         </item>
     </channel>
 </rss>
