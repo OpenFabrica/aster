@@ -101,6 +101,8 @@ final class SettingsHostsBridge {
     /// 保险库密钥与其加载错误；「密钥」子页也随快照重绘。
     var vaultKeys: [SSHVaultKey]
     var vaultKeysError: String?
+    /// 钥匙串里缺私钥的密钥（后台刷新的缓存），变化时「钥匙串中缺失」标记要重绘。
+    var vaultKeychainMissing: Set<UUID>
   }
 
   /// 一台机器对主机的引用。
@@ -138,7 +140,8 @@ final class SettingsHostsBridge {
     RenderedState(
       hosts: directory.hosts, loadError: directory.loadError,
       machineReferences: machines.map { MachineReference(hostID: $0.hostID, label: $0.label) },
-      vaultKeys: keysBridge?.directory.keys ?? [], vaultKeysError: keysBridge?.directory.loadError)
+      vaultKeys: keysBridge?.directory.keys ?? [], vaultKeysError: keysBridge?.directory.loadError,
+      vaultKeychainMissing: keysBridge?.directory.keychainMissing ?? [])
   }
 
   /// 开始监听主机目录。重复调用无副作用。
@@ -153,8 +156,13 @@ final class SettingsHostsBridge {
     if let machines = dependencies.machinesDidChange { changes = changes.merge(with: machines).eraseToAnyPublisher() }
     if let keys = keysBridge?.directory {
       keys.startWatching()
-      changes = changes.merge(with: keys.$keys.map { _ in () }, keys.$loadError.map { _ in () })
-        .eraseToAnyPublisher()
+      // 打开设置页时重新查一次钥匙串，覆盖在钥匙串访问里手动删掉私钥的情况。
+      keys.refreshKeychainPresence()
+      changes = changes.merge(
+        with: keys.$keys.map { _ in () }, keys.$loadError.map { _ in () },
+        keys.$keychainMissing.map { _ in () }
+      )
+      .eraseToAnyPublisher()
     }
     changes
       .receive(on: DispatchQueue.main)

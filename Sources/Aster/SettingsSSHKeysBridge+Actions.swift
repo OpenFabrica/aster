@@ -62,7 +62,7 @@ extension SettingsSSHKeysBridge {
           algorithm: material.algorithm, fingerprint: material.fingerprint,
           publicKey: material.publicKey, comment: material.comment, origin: .imported,
           importedFrom: url.standardizedFileURL.path)
-        try self.directory.add(key, privateKey: material.privateKey)
+        try await self.directory.add(key, privateKey: material.privateKey)
         self.pushSnapshot()
         self.toast(L("已导入“\(key.label)”"), false)
         return true
@@ -138,7 +138,7 @@ extension SettingsSSHKeysBridge {
         let key = SSHVaultKey(
           label: label, algorithm: material.algorithm, fingerprint: material.fingerprint,
           publicKey: material.publicKey, comment: material.comment, origin: .generated)
-        try self.directory.add(key, privateKey: material.privateKey)
+        try await self.directory.add(key, privateKey: material.privateKey)
         self.pushSnapshot()
         self.toast(L("已生成“\(label)”，可以复制公钥添加到服务器"), false)
         return true
@@ -178,19 +178,30 @@ extension SettingsSSHKeysBridge {
   // MARK: - 删除与迁移
 
   /// 删除保险库密钥：目录、钥匙串与主机引用一起清理。网页已列出引用它的主机让用户确认。
-  func delete(_ payload: [String: Any], complete: (Bool) -> Void) {
+  /// 钥匙串删除在后台进行，期间用 `runExclusive` 挡住其它密钥动作。
+  func delete(_ payload: [String: Any], complete: @escaping (Bool) -> Void) {
+    let key: SSHVaultKey
     do {
-      let key = try vaultKey(payload)
-      do {
-        try directory.remove(key.id)
-      } catch SSHVaultKeyDirectoryError.keychainCleanupFailed {
-        toast(L("密钥已从列表删除，但没能从钥匙串删除私钥"), true)
-      }
-      pushSnapshot()
-      complete(true)
+      key = try vaultKey(payload)
     } catch {
       toast(Self.describe(error), true)
       complete(false)
+      return
+    }
+    runExclusive(complete: complete) { [weak self] in
+      guard let self else { return false }
+      do {
+        do {
+          try await self.directory.remove(key.id)
+        } catch SSHVaultKeyDirectoryError.keychainCleanupFailed {
+          self.toast(L("密钥已从列表删除，但没能从钥匙串删除私钥"), true)
+        }
+        self.pushSnapshot()
+        return true
+      } catch {
+        self.toast(Self.describe(error), true)
+        return false
+      }
     }
   }
 

@@ -12,8 +12,24 @@ final class InMemoryVaultCredentials: SSHCredentialStoring {
   /// 为 true 时写入保险库私钥失败（模拟钥匙串拒绝）。
   private let failsVaultWrites = OSAllocatedUnfairLock(initialState: false)
 
+  /// 在主线程上发生的保险库调用（方法名），用来断言钥匙串 I/O 不占主线程。
+  private let mainThreadVaultCalls = OSAllocatedUnfairLock(initialState: [String]())
+
   /// 让后续的保险库写入失败或恢复正常。
   func setFailsVaultWrites(_ fails: Bool) { failsVaultWrites.withLock { $0 = fails } }
+
+  /// 读出并清空主线程上的保险库调用记录。
+  func takeMainThreadVaultCalls() -> [String] {
+    mainThreadVaultCalls.withLock { calls in
+      defer { calls = [] }
+      return calls
+    }
+  }
+
+  /// 调用发生在主线程时记一笔。
+  private func noteThread(_ name: String) {
+    if Thread.isMainThread { mainThreadVaultCalls.withLock { $0.append(name) } }
+  }
 
   func password(for endpoint: String) throws -> String? { entries.withLock { $0["password|\(endpoint)"] } }
   func setPassword(_ password: String, for endpoint: String) throws {
@@ -32,15 +48,23 @@ final class InMemoryVaultCredentials: SSHCredentialStoring {
   func deletePassphrase(forKeyDigest digest: String) throws {
     _ = entries.withLock { $0.removeValue(forKey: "passphrase|\(digest)") }
   }
-  func vaultPrivateKey(id: UUID) throws -> String? { entries.withLock { $0["vault|\(id)"] } }
+  func vaultPrivateKey(id: UUID) throws -> String? {
+    noteThread("vaultPrivateKey")
+    return entries.withLock { $0["vault|\(id)"] }
+  }
   func setVaultPrivateKey(_ privateKey: String, id: UUID, label: String) throws {
+    noteThread("setVaultPrivateKey")
     if failsVaultWrites.withLock({ $0 }) { throw SSHCredentialStoreError.keychain(-25293) }
     entries.withLock { $0["vault|\(id)"] = privateKey }
   }
   func deleteVaultPrivateKey(id: UUID) throws {
+    noteThread("deleteVaultPrivateKey")
     _ = entries.withLock { $0.removeValue(forKey: "vault|\(id)") }
   }
-  func hasVaultPrivateKey(id: UUID) -> Bool { entries.withLock { $0["vault|\(id)"] != nil } }
+  func hasVaultPrivateKey(id: UUID) -> Bool {
+    noteThread("hasVaultPrivateKey")
+    return entries.withLock { $0["vault|\(id)"] != nil }
+  }
 
   /// 保险库私钥条目数。
   var vaultCount: Int { entries.withLock { $0.keys.filter { $0.hasPrefix("vault|") }.count } }

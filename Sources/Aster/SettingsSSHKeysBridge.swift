@@ -118,7 +118,8 @@ final class SettingsSSHKeysBridge {
         "usedBy": SSHVaultMigration.hostsUsing(key.id, in: hosts).compactMap { names[$0] },
         "migratableHosts": migratableHosts(for: key, in: hosts).compactMap { names[$0] },
         "originalExists": key.importedFrom.map { dependencies.fileManager.fileExists(atPath: $0) } ?? false,
-        "keychainMissing": !directory.credentials.hasVaultPrivateKey(id: key.id),
+        // 读缓存而不是当场查钥匙串：快照每次推送都会走到这里，逐把查会卡住主线程。
+        "keychainMissing": directory.keychainMissing.contains(key.id),
       ]
       row["importedFrom"] = key.importedFrom.map { ($0 as NSString).abbreviatingWithTildeInPath }
       return row

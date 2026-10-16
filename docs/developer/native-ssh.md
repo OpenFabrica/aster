@@ -119,6 +119,7 @@ broker socket 位于 0700 目录，但同一用户的任何进程都能连上它
 
 - **存放**：私钥统一转成未加密的 OpenSSH 文本存进钥匙串（钥匙串负责静态加密；再套一层 passphrase 只会多一个 ACL 相同的秘密）。导入加密私钥时只解密一次。元数据在 `ssh-keys.json`，指纹唯一，同一把私钥重复导入时复用已有条目。
 - **主机引用**：`SSHHostProfile.vaultKeyIDs`（UUID 列表，按顺序尝试）。nil 表示继承「默认」项，空数组存成 nil。引用已删除的密钥是允许的，解析时跳过。删除密钥时 `SSHVaultKeyDirectory` 依次清理目录、钥匙串和所有主机（含默认项）里的引用。
+- **钥匙串 I/O 不占主线程**：`SSHVaultKeyDirectory.add` / `remove` 在后台写、删钥匙串，主线程只改目录；顺序不变（新增先写钥匙串再存目录，目录保存失败就回滚钥匙串；删除先改目录再删钥匙串）。设置页的「钥匙串中缺失」读 `keychainMissing` 缓存，不在每次推快照时逐把查钥匙串。缓存在加载、目录变化（含外部修改 `ssh-keys.json`）、增删和打开设置页时由 `refreshKeychainPresence()` 在后台刷新，回到主线程按密钥 ID 写入，过期的刷新结果按代数丢弃。
 - **下发**：`SSHHostResolver` 把引用换成 `{id, publicKey}` 放进 `ResolvedSpec.vaultKeys`（为空时不编码，旧 broker 收到的 JSON 不变）。`SSHBrokerSupervisor` 同时订阅主机目录与保险库目录，任一变化都重新 `profiles.sync`。
 - **取用**：broker 轮到某把密钥时发 `auth.request kind=privateKey`（`vaultKeyID`，恒为 `interactive:false`）。`SSHAuthCoordinator` 只为目录里登记过的 ID 在后台读钥匙串，回答私钥文本；不弹窗，不进 `pending`，被拒也不删。目录里没有、钥匙串缺失或读取失败都回 null，broker 跳到下一把密钥。broker 先核对私钥与登记的公钥一致才拿去认证，私钥全程放在 `Zeroizing` 里。
 - **Swift 侧的限制**：`String` 无法清零。私钥只经函数返回值短暂存在，不存进任何属性，也不写日志。

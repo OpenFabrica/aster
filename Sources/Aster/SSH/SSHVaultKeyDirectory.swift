@@ -5,6 +5,7 @@ import Foundation
 // 私钥保险库的 App 侧唯一权威入口：读写 ssh-keys.json、监听外部修改、发布变化，
 // 并保证目录与钥匙串的一致：私钥先进钥匙串再登记目录，删除时目录、钥匙串、主机引用一起清理。
 // 设置页与 broker 同步都从这里读，不各自持有副本。
+// 钥匙串读写可能很慢（钥匙串锁住、系统弹窗），一律放到后台执行，主线程只改目录与缓存。
 
 /// 保险库操作失败。
 enum SSHVaultKeyDirectoryError: Error, Equatable {
@@ -27,11 +28,16 @@ final class SSHVaultKeyDirectory: ObservableObject {
   @Published private(set) var keys: [SSHVaultKey]
   /// 最近一次加载失败的原因；nil 表示正常。失败时 `keys` 保持最后有效值。
   @Published private(set) var loadError: String?
+  /// 钥匙串里找不到私钥的密钥 ID。后台查询的缓存：加载、目录变化、增删时刷新，
+  /// 结果回到主线程才写入；第一次刷新完成前视为都不缺。
+  @Published private(set) var keychainMissing: Set<UUID> = []
 
   let store: SSHVaultKeyStore
   let credentials: any SSHCredentialStoring
   private let hostDirectory: () -> SSHHostDirectory
   private var watcher: FileSystemDirectoryWatcher?
+  /// 每次发起钥匙串存在性刷新递增；回来的结果代数不等于当前值就丢弃，旧查询不会覆盖新结果。
+  private var presenceGeneration: UInt64 = 0
 
   /// - Parameters:
   ///   - store: ssh-keys.json；测试传临时文件。
@@ -55,13 +61,33 @@ final class SSHVaultKeyDirectory: ObservableObject {
   /// 按指纹查找（导入去重用）。
   func key(fingerprint: String) -> SSHVaultKey? { keys.first { $0.fingerprint == fingerprint } }
 
-  /// 从磁盘重新加载；失败保留最后有效列表并记录原因。
+  /// 从磁盘重新加载并刷新钥匙串缓存；失败保留最后有效列表并记录原因。
   func reload() {
     do {
       keys = try store.load()
       loadError = nil
     } catch {
       loadError = String(describing: error)
+    }
+    refreshKeychainPresence()
+  }
+
+  /// 在后台查询每把密钥的私钥是否还在钥匙串里，结果回主线程按密钥 ID 写入 `keychainMissing`。
+  ///
+  /// 返回的任务供测试等待。查询期间目录可能变化：只保留仍在目录里的 ID，且只接受最新一次刷新的结果。
+  @discardableResult
+  func refreshKeychainPresence() -> Task<Void, Never> {
+    presenceGeneration &+= 1
+    let generation = presenceGeneration
+    let ids = keys.map(\.id)
+    let credentials = credentials
+    return Task { @MainActor [weak self] in
+      let missing = await Task.detached {
+        Set(ids.filter { !credentials.hasVaultPrivateKey(id: $0) })
+      }.value
+      guard let self, generation == self.presenceGeneration else { return }
+      let current = missing.intersection(self.keys.map(\.id))
+      if current != self.keychainMissing { self.keychainMissing = current }
     }
   }
 
@@ -82,11 +108,16 @@ final class SSHVaultKeyDirectory: ObservableObject {
 
   // MARK: - 写入
 
-  /// 登记一把新密钥：先把私钥写进钥匙串，再保存目录；目录保存失败就删掉刚写的钥匙串条目，
-  /// 不留下目录里看不到的孤儿私钥。
-  func add(_ key: SSHVaultKey, privateKey: String) throws {
+  /// 登记一把新密钥：先在后台把私钥写进钥匙串，再保存目录；目录保存失败就在后台删掉刚写的
+  /// 钥匙串条目，不留下目录里看不到的孤儿私钥。
+  ///
+  /// 钥匙串写入期间目录可能被外部改动，所以保存时基于回到主线程后的最新列表追加。
+  func add(_ key: SSHVaultKey, privateKey: String) async throws {
+    let credentials = credentials
     do {
-      try credentials.setVaultPrivateKey(privateKey, id: key.id, label: key.label)
+      try await Task.detached {
+        try credentials.setVaultPrivateKey(privateKey, id: key.id, label: key.label)
+      }.value
     } catch let error as SSHCredentialStoreError {
       throw SSHVaultKeyDirectoryError.keychain(error)
     }
@@ -94,12 +125,13 @@ final class SSHVaultKeyDirectory: ObservableObject {
       try commit(keys + [key])
     } catch {
       do {
-        try credentials.deleteVaultPrivateKey(id: key.id)
+        try await Task.detached { try credentials.deleteVaultPrivateKey(id: key.id) }.value
       } catch let cleanup as SSHCredentialStoreError {
         throw SSHVaultKeyDirectoryError.keychainCleanupFailed(cleanup)
       }
       throw error
     }
+    refreshKeychainPresence()
   }
 
   /// 改名。钥匙串条目的显示名不跟着改：它只是提示，改它需要读写秘密。
@@ -114,14 +146,16 @@ final class SSHVaultKeyDirectory: ObservableObject {
 
   /// 删除一把密钥：先从目录移除，再删钥匙串里的私钥，最后清掉主机（含默认项）对它的引用。
   ///
-  /// 目录先删，broker 下一次同步就不再收到这把公钥；钥匙串删除失败时抛
+  /// 目录先删，broker 下一次同步就不再收到这把公钥；钥匙串删除在后台执行，失败时抛
   /// `keychainCleanupFailed`，目录与主机引用的清理照常完成。
-  func remove(_ id: UUID) throws {
+  func remove(_ id: UUID) async throws {
     guard keys.contains(where: { $0.id == id }) else { throw SSHVaultKeyDirectoryError.unknownKey }
     try commit(keys.filter { $0.id != id })
+    refreshKeychainPresence()
     var keychainFailure: SSHCredentialStoreError?
+    let credentials = credentials
     do {
-      try credentials.deleteVaultPrivateKey(id: id)
+      try await Task.detached { try credentials.deleteVaultPrivateKey(id: id) }.value
     } catch let error as SSHCredentialStoreError {
       keychainFailure = error
     }

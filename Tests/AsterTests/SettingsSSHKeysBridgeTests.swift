@@ -159,6 +159,8 @@ func settingsKeysGenerateRenameCopy() async throws {
   let host = SSHHostProfile(name: "db", host: "db", vaultKeyIDs: [key.id])
   try fixture.hosts.upsert(host)
   try fixture.credentials.deleteVaultPrivateKey(id: key.id)
+  // 快照读的是缓存，刷新之后才看到缺失。
+  await fixture.keys.refreshKeychainPresence().value
   let snapshot = fixture.hostsBridge.snapshot()
   let rows = try #require(snapshot["vaultKeys"] as? [[String: Any]])
   #expect(rows.first?["usedBy"] as? [String] == ["db"])
@@ -187,28 +189,28 @@ func settingsKeysDeleteClearsReferences() async throws {
 
 @Test("目录保存失败时回滚钥匙串，不留孤儿私钥")
 @MainActor
-func sshVaultKeyDirectoryRollsBackKeychain() throws {
+func sshVaultKeyDirectoryRollsBackKeychain() async throws {
   let fixture = try KeysBridgeFixture()
   defer { fixture.cleanUp() }
   let material = fakeVaultMaterial("a")
   let first = SSHVaultKey(
     label: "a", algorithm: material.algorithm, fingerprint: material.fingerprint,
     publicKey: material.publicKey, origin: .generated)
-  try fixture.keys.add(first, privateKey: material.privateKey)
+  try await fixture.keys.add(first, privateKey: material.privateKey)
   // 指纹重复，目录校验失败。
   let duplicate = SSHVaultKey(
     label: "b", algorithm: material.algorithm, fingerprint: material.fingerprint,
     publicKey: material.publicKey, origin: .generated)
-  #expect(throws: SSHVaultKeyDirectoryError.self) {
-    try fixture.keys.add(duplicate, privateKey: material.privateKey)
+  await #expect(throws: SSHVaultKeyDirectoryError.self) {
+    try await fixture.keys.add(duplicate, privateKey: material.privateKey)
   }
   #expect(!fixture.credentials.hasVaultPrivateKey(id: duplicate.id))
   #expect(fixture.credentials.hasVaultPrivateKey(id: first.id))
   // 钥匙串写入失败时目录不变。
   fixture.credentials.setFailsVaultWrites(true)
   let other = fakeVaultMaterial("b")
-  #expect(throws: SSHVaultKeyDirectoryError.self) {
-    try fixture.keys.add(
+  await #expect(throws: SSHVaultKeyDirectoryError.self) {
+    try await fixture.keys.add(
       SSHVaultKey(
         label: "c", algorithm: other.algorithm, fingerprint: other.fingerprint,
         publicKey: other.publicKey, origin: .generated),
