@@ -2,8 +2,9 @@ import AsterCore
 import Foundation
 
 // aster-ssh 的定位、引擎选择与 broker 环境过滤。开发期覆盖（`ASTER_SSH_BINARY`、仓库构建产物、
-// 关票开关）只在 DEBUG 构建生效：发行版 App 的环境可被同一用户的任何进程经 `launchctl setenv`
-// 改写，若照样认这些变量，就能让 App 把保险库私钥交给伪造的 broker，或关掉启动票据校验。
+// 关票开关、主目录与 known_hosts 覆盖）只在 DEBUG 构建生效：发行版 App 的环境可被同一用户的
+// 任何进程经 `launchctl setenv` 改写，若照样认这些变量，就能让 App 把保险库私钥交给伪造的
+// broker、关掉启动票据校验，或换掉 known_hosts 让中间人主机密钥被信任后骗走钥匙串里的密码。
 
 extension SSHBrokerSupervisor {
   // MARK: - 定位与引擎选择
@@ -69,22 +70,24 @@ extension SSHBrokerSupervisor {
     return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }?.standardizedFileURL
   }
 
-  /// 拉起 broker 用的环境：发行版去掉关票调试开关 `ASTER_SSH_TICKETS`。
+  /// 拉起 broker 用的环境：发行版去掉 `developmentOnlyBrokerEnvironmentKeys` 里的调试覆盖。
   ///
-  /// 发行版 broker 自己也忽略它（只在 `debug_assertions` 下生效），这里再删一次，
-  /// 防止 DEBUG 构建的 broker 被误装进发行版 App 时开关重新生效。
+  /// 发行版 broker 自己也忽略它们（只在 `debug_assertions` 下生效），这里再删一次，
+  /// 防止 DEBUG 构建的 broker 被误装进发行版 App 时覆盖重新生效。`ASTER_SSH_DEBUG` 保留：
+  /// 它只打开 debug 日志，日志按约定只含 ID、路径与错误，不含秘密。
   nonisolated static func brokerEnvironment(
     from environment: [String: String],
     allowsDevelopmentOverrides: Bool = SSHBrokerSupervisor.allowsDevelopmentOverrides
   ) -> [String: String] {
     guard !allowsDevelopmentOverrides else { return environment }
-    var filtered = environment
-    filtered.removeValue(forKey: ticketsSwitchEnvironmentKey)
-    return filtered
+    return environment.filter { !developmentOnlyBrokerEnvironmentKeys.contains($0.key) }
   }
 
-  /// broker 的关票调试开关（与 `SshRuntime/src/tickets.rs` 的 `SWITCH_ENV` 一致）。
-  nonisolated static let ticketsSwitchEnvironmentKey = "ASTER_SSH_TICKETS"
+  /// 只供开发与测试的 broker 环境变量：关票开关（`tickets.rs` 的 `SWITCH_ENV`）、
+  /// 主目录与 known_hosts 覆盖（`env.rs` 的 `debug_override_env`）。
+  nonisolated static let developmentOnlyBrokerEnvironmentKeys: Set<String> = [
+    "ASTER_SSH_TICKETS", "ASTER_SSH_HOME", "ASTER_SSH_KNOWN_HOSTS",
+  ]
 
   /// 用户要求的引擎：环境变量 `ASTER_SSH_ENGINE` 优先，其次设置项。
   /// 环境变量取值非法时忽略它并返回说明，由调用方记诊断。

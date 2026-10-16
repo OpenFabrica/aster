@@ -132,14 +132,15 @@ func sshBrokerSupervisorReleaseLocatesOnlyBundledExecutable() throws {
       fileManager: fileManager, allowsDevelopmentOverrides: false) == bundled)
 }
 
-@Test("broker 环境：发行版去掉 ASTER_SSH_TICKETS，DEBUG 保留，其它变量不动")
+@Test("broker 环境：发行版去掉关票开关与主目录、known_hosts 覆盖，DEBUG 保留，其它变量不动")
 func sshBrokerEnvironmentStripsTicketSwitchInRelease() {
-  let environment = ["ASTER_SSH_TICKETS": "off", "HOME": "/Users/x", "ASTER_SSH_DEBUG": "1"]
+  let environment = [
+    "ASTER_SSH_TICKETS": "off", "ASTER_SSH_HOME": "/tmp/evil", "ASTER_SSH_KNOWN_HOSTS": "/tmp/kh",
+    "HOME": "/Users/x", "ASTER_SSH_DEBUG": "1",
+  ]
   let release = SSHBrokerSupervisor.brokerEnvironment(
     from: environment, allowsDevelopmentOverrides: false)
-  #expect(release["ASTER_SSH_TICKETS"] == nil)
-  #expect(release["HOME"] == "/Users/x")
-  #expect(release["ASTER_SSH_DEBUG"] == "1")
+  #expect(release == ["HOME": "/Users/x", "ASTER_SSH_DEBUG": "1"])
   #expect(
     SSHBrokerSupervisor.brokerEnvironment(from: environment, allowsDevelopmentOverrides: true)
       == environment)

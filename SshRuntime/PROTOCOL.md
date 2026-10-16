@@ -288,7 +288,7 @@ App 导入、生成保险库私钥时调用。请求是 stdin 上的一个 JSON 
 ```
 
 `list`：
-- 文件顺序：默认文件（`~/.ssh/known_hosts`，`ASTER_SSH_KNOWN_HOSTS` 可覆盖）→ `files`（展开 `~`，`none` 与空串忽略）→
+- 文件顺序：默认文件（`~/.ssh/known_hosts`，仅 debug 构建可用 `ASTER_SSH_KNOWN_HOSTS` 覆盖）→ `files`（展开 `~`，`none` 与空串忽略）→
   系统级文件（`/etc/ssh/ssh_known_hosts`、`/etc/ssh/ssh_known_hosts2`）。按解析符号链接后的真实路径去重；`path` 回显展开后的原路径。
 - `exists:false` 的文件照样列出；读失败时 `error` 是错误文本。`writable` 要求文件存在、不是系统级、文件和它（解析链接后）所在目录都可写。
 - `line` 从 1 开始；注释与空行不算记录。`marker` 为 `null | "revoked" | "certAuthority"`。

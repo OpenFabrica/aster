@@ -127,12 +127,13 @@ pub struct Paths {
 impl Paths {
     /// 读取环境变量：`ASTER_SSH_HOME` 优先于 `HOME`（测试用它把 `~/.ssh` 指到临时目录），
     /// `ASTER_SSH_KNOWN_HOSTS` 可单独覆盖 known_hosts，`SSH_AUTH_SOCK` 指定 agent。
+    /// 两个 `ASTER_SSH_*` 覆盖只在 debug 构建生效，见 `debug_override_env`。
     pub fn from_process() -> Self {
-        let home = non_empty_env("ASTER_SSH_HOME")
+        let home = debug_override_env("ASTER_SSH_HOME")
             .or_else(|| non_empty_env("HOME"))
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/"));
-        let known_hosts = non_empty_env("ASTER_SSH_KNOWN_HOSTS")
+        let known_hosts = debug_override_env("ASTER_SSH_KNOWN_HOSTS")
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join(".ssh").join("known_hosts"));
         Self {
@@ -152,6 +153,23 @@ impl Paths {
 /// 读一个非空环境变量。
 fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// 读一个只供测试与调试用的覆盖变量；发行版（无 `debug_assertions`）一律返回 None。
+///
+/// 发行版 broker 继承 App 的环境，同一用户的进程能经 `launchctl setenv` 改它。若照样认
+/// `ASTER_SSH_HOME` / `ASTER_SSH_KNOWN_HOSTS`，就能把 known_hosts 换成攻击者的文件，
+/// 让中间人主机密钥被直接信任，随后钥匙串里的密码会被非交互地交出去。
+pub fn debug_override_env(name: &str) -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        non_empty_env(name)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = name;
+        None
+    }
 }
 
 /// 当前用户名：`USER` 环境变量，取不到时查 passwd。

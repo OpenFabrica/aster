@@ -83,6 +83,8 @@ broker socket 位于 0700 目录，但同一用户的任何进程都能连上它
 
 调试时可以用 `ASTER_SSH_TICKETS=off` 启动 DEBUG 构建的 App（broker 继承这个环境变量）关闭校验。这个开关只在 debug 构建的 broker（`debug_assertions`）里生效；发行版 broker 由 `build-ssh-runtime.sh` 用 `cargo build --release` 构建，忽略它，非 DEBUG 的 App 也会在拉起 broker 前把它从环境里删掉（`SSHBrokerSupervisor.brokerEnvironment(from:)`）。
 
+`ASTER_SSH_HOME`（替代 `$HOME` 找 `~/.ssh`）与 `ASTER_SSH_KNOWN_HOSTS`（单独指定 known_hosts）同样只供测试：只在 debug 构建的 aster-ssh 里生效（`env.rs` 的 `debug_override_env`，broker、`config`、`known-hosts` 子命令共用），非 DEBUG 的 App 也在拉起 broker 前删掉它们。否则同一用户的进程可以用 `launchctl setenv` 换掉 known_hosts，让中间人的主机密钥被直接信任，随后非交互地交出钥匙串里保存的密码。`ASTER_SSH_DEBUG` 在发行版仍然可用：它只打开 debug 日志，日志只含 ID、路径和错误，不含秘密。client 进程只读 `ASTER_SSH_TICKET` 和 `TERM`。
+
 ## 调用形状
 
 | 场景 | OpenSSH | 原生 |
