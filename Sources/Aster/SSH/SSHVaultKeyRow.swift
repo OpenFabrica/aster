@@ -2,8 +2,8 @@ import AsterCore
 import Foundation
 
 // 保险库里一把密钥的展示数据：公开元数据加上使用情况与状态标记。
-// 由 `SSHVaultKeyActions.rows(hosts:)` 统一计算，「主机 → 密钥」页与设置页桥接的快照共用，
-// 不在两处各算一遍。只含公开信息，没有私钥。
+// 由 `SSHVaultKeyActions.rows(hosts:)` 统一计算，「主机 → 密钥」页的卡片与详情共用，
+// 不在各处各算一遍。只含公开信息，没有私钥。
 
 /// 一把保险库密钥的展示行。
 struct SSHVaultKeyRow: Equatable, Identifiable {

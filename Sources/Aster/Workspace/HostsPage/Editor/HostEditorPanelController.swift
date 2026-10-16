@@ -1,5 +1,5 @@
 // 主机页右侧滑出的编辑面板（类似 Termius 的「Edit host」抽屉）：标题带、可滚动的分区表单、
-// 操作区与底部「取消 / 保存」。保存走 `SSHHostEditing.save`（与设置页同一套清理与校验），
+// 操作区与底部「取消 / 保存」。保存走 `SSHHostEditing.save`（与其它保存入口同一套清理与校验），
 // 失败原因显示在底部，不落盘；面板本身不持有主机数据的可写副本。
 import AppKit
 import AsterCore

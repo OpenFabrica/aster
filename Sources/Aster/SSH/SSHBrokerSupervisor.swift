@@ -402,7 +402,7 @@ final class SSHBrokerSupervisor {
 
   /// 读取 `~/.ssh/config` 解析结果（`aster-ssh config list --json`），在后台执行。
   ///
-  /// 不依赖 broker，也不受引擎选择影响：openssh 引擎下设置页的导入同样需要它。
+  /// 不依赖 broker，也不受引擎选择影响：openssh 引擎下主机页的导入同样需要它。
   func configListing() async throws -> SSHConfigListing {
     guard let executable = executable ?? locateExecutable() else {
       throw SSHBrokerError.executableMissing

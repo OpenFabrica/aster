@@ -64,7 +64,7 @@ enum SaveSSHHostSheet {
   ) -> Draft? {
     let alert = NSAlert()
     alert.messageText = title ?? L("保存为主机")
-    alert.informativeText = L("保存后可在 Open Quickly 与「设置 ▸ 主机」里使用。认证方式、跳板机等选项请到设置里补充。")
+    alert.informativeText = L("保存后可在 Open Quickly 与侧栏「主机」页里使用。认证方式、跳板机等选项请到主机页里补充。")
     alert.addButton(withTitle: L("保存"))
     alert.addButton(withTitle: L("取消"))
 
@@ -132,7 +132,7 @@ enum SaveSSHHostSheet {
   static func describe(_ rejection: QuickConnectTarget.DerivationRejection) -> String {
     switch rejection {
     case .unsupportedOption(let option):
-      L("这条命令用了 \(option) 等选项，只保存地址会连到不同的配置。请在「设置 ▸ 主机」里新建主机并填写这些选项。")
+      L("这条命令用了 \(option) 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。")
     case .missingValue(let option):
       L("命令里的 \(option) 缺少取值。")
     case .invalidPort(let value):

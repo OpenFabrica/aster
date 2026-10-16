@@ -309,7 +309,7 @@ final class SSHAuthCoordinator: SSHAuthCoordinating {
     return .hostKeyAnswer(id: request.id, accept: accept)
   }
 
-  // MARK: 设置页辅助
+  // MARK: 主机页辅助
 
   /// 是否已为某个 `user@host:port` 保存口令。只查属性，不读秘密。
   func hasSavedPassword(endpoint: String) -> Bool {

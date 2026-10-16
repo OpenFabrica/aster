@@ -153,7 +153,7 @@ public enum SSHKnownHostsQuery {
       if let name, !name.isEmpty, names[endpoint]?.contains(name) == false { names[endpoint]?.append(name) }
     }
 
-    // 按名称排序，结果与设置页列表顺序接近，也让输出稳定、便于测试。
+    // 按名称排序，结果与已知主机页列表顺序接近，也让输出稳定、便于测试。
     let ordered = resolved.sorted { lhs, rhs in
       (profiles[lhs.key]?.name ?? "").localizedStandardCompare(profiles[rhs.key]?.name ?? "") == .orderedAscending
     }

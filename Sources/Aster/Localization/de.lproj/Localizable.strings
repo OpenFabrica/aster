@@ -373,7 +373,7 @@
 "保存为主机…" = "Als Host sichern…";
 "保存为可备份的 JSON 文件" = "Als sicherbare JSON-Datei speichern";
 "保存可重建的标签与分屏结构" = "Wiederherstellbare Tab- und Aufteilungsstruktur speichern";
-"保存后可在 Open Quickly 与「设置 ▸ 主机」里使用。认证方式、跳板机等选项请到设置里补充。" = "Nach dem Sichern steht er in Open Quickly und unter Einstellungen ▸ Hosts zur Verfügung. Optionen wie Authentifizierungsmethode und Jump-Host ergänzen Sie in den Einstellungen.";
+"保存后可在 Open Quickly 与侧栏「主机」页里使用。认证方式、跳板机等选项请到主机页里补充。" = "Nach dem Sichern steht er in Open Quickly und auf der Seite „Hosts“ in der Seitenleiste zur Verfügung. Optionen wie Authentifizierungsmethode und Jump-Host ergänzen Sie auf der Hosts-Seite.";
 "保存后立即连接" = "Nach dem Sichern sofort verbinden";
 "保存诊断包…" = "Diagnosepaket speichern…";
 "保存诊断包失败：%@" = "Diagnosepaket konnte nicht gespeichert werden: %@";
@@ -1814,7 +1814,7 @@
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "Dieser Arbeitsbereich ist noch geöffnet. Schließen Sie zuerst sein Fenster und löschen Sie ihn dann.";
 "这台主机已被删除，无法连接。" = "Dieser Host wurde gelöscht; keine Verbindung möglich.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "Dies ist die erste Verbindung zu diesem Host. Gleichen Sie den Fingerabdruck unten mit dem Serveradministrator ab und verbinden Sie sich nur, wenn er übereinstimmt.\n\nAlgorithmus: %@\nFingerabdruck: %@";
-"这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在「设置 ▸ 主机」里新建主机并填写这些选项。" = "Dieser Befehl verwendet Optionen wie %@; wird nur die Adresse gesichert, wird mit einer anderen Konfiguration verbunden. Legen Sie unter Einstellungen ▸ Hosts einen neuen Host an und tragen Sie diese Optionen ein.";
+"这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "Dieser Befehl verwendet Optionen wie %@; wird nur die Adresse gesichert, wird mit einer anderen Konfiguration verbunden. Legen Sie auf der Seite „Hosts“ in der Seitenleiste einen neuen Host an und tragen Sie diese Optionen ein.";
 "进入" = "Öffnen";
 "进入 Mark Mode" = "Mark Mode aktivieren";
 "进入 Vi Mode" = "Vi Mode aktivieren";

@@ -3,8 +3,8 @@ import AsterCore
 import Foundation
 
 // 私钥保险库的用户动作：导入、生成、改名、复制公钥、删除、迁移主机引用；删除原私钥文件在
-// SSHVaultKeyActions+Original.swift。与具体界面无关：「主机 → 密钥」原生页与设置页的网页桥接
-// 都调用这里，校验、错误文案与安全规则只有一份。
+// SSHVaultKeyActions+Original.swift。与具体界面无关：「主机 → 密钥」原生页调用这里，
+// 校验、错误文案与安全规则只有一份。
 //
 // 私钥只在原生侧流转：文件由 NSOpenPanel 选择后原生读取，passphrase 用原生表单询问，
 // 私钥与 passphrase 不交给任何界面层，也不提供导出。保险库真值只在 `SSHVaultKeyDirectory`。
@@ -79,7 +79,7 @@ final class SSHVaultKeyActions: ObservableObject {
   let hosts: SSHHostDirectory
   var directory: SSHVaultKeyDirectory { dependencies.directory }
 
-  /// 动作改动了目录或主机之后调用（网页桥接据此立即推快照；原生页直接观察目录，可以不设）。
+  /// 动作改动了目录或主机之后调用（原生页直接观察目录，可以不设）。
   var onChange: () -> Void = {}
   /// 显示一条提示；第二个参数为 true 表示错误。
   var toast: (String, Bool) -> Void = { _, _ in }

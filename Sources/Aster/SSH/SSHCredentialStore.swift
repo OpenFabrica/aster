@@ -74,7 +74,7 @@ struct SSHCredentialStore: SSHCredentialStoring {
     try delete(service: Self.passwordService, account: endpoint)
   }
 
-  /// 是否已保存口令（设置页显示「忘记口令」用）。
+  /// 是否已保存口令（主机页显示「忘记口令」用）。
   ///
   /// 只查属性不取数据：不读秘密就不会触发 ACL 授权框，适合在主线程上刷新界面。
   /// 查询失败（钥匙串锁定等）按「没有」显示。
@@ -118,7 +118,7 @@ struct SSHCredentialStore: SSHCredentialStoring {
     try delete(service: Self.vaultService, account: id.uuidString)
   }
 
-  /// 保险库私钥条目是否存在（设置页「钥匙串中缺失」标记用）。
+  /// 保险库私钥条目是否存在（「主机 → 密钥」页「钥匙串中缺失」标记用）。
   func hasVaultPrivateKey(id: UUID) -> Bool {
     exists(service: Self.vaultService, account: id.uuidString)
   }

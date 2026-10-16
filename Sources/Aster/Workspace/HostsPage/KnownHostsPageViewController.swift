@@ -1,5 +1,5 @@
 // 侧栏「主机」页的「已知主机」子页：按文件分组列出 known_hosts 记录，可搜索、重新加载、删除。
-// 列出、校验与删除都交给 `SSHKnownHostsService`（与设置页桥接共用）；这里只负责呈现与确认。
+// 列出、校验与删除都交给 `SSHKnownHostsService`；这里只负责呈现与确认。
 import AppKit
 import AsterCore
 

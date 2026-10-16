@@ -52,7 +52,7 @@ public struct SSHForwardRule: Codable, Equatable, Hashable, Sendable {
 public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
   /// 「默认」项的固定 ID。它不代表真实主机，只提供被继承的字段值。
   public static let defaultsProfileID = UUID(uuidString: "00000000-0000-4000-8000-00000000d0d0")!
-  /// 从 `~/.ssh/config` 导入的主机所在分组。设置页把这一组排在最前。
+  /// 从 `~/.ssh/config` 导入的主机所在分组。主机页把这一组排在最前。
   public static let importedGroup = "~/.ssh/config"
 
   public let id: UUID
@@ -159,7 +159,7 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
   /// 复制出一台新主机：新 ID、给定名称，其余连接参数原样保留。
   ///
   /// 导入组归 `~/.ssh/config` 管（下次导入会按 alias 覆盖），副本若留在里面会被当成
-  /// 无主条目，所以放到未分组。设置页与主机页的「复制」共用这条规则。
+  /// 无主条目，所以放到未分组。主机页与编辑面板的「复制」共用这条规则。
   public func duplicated(name: String, id: UUID = UUID()) -> SSHHostProfile {
     // `id` 是 let，只能逐字段构造新值。
     SSHHostProfile(

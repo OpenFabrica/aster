@@ -3,7 +3,7 @@ import AsterCore
 import Foundation
 
 // 编辑已保存主机的共用规则：保存（清理 → 校验 → 落盘）、复制、忘记口令、删除影响与
-// `~/.ssh/config` 文件操作。设置页网页桥与侧栏主机页的原生编辑面板都调用这里，
+// `~/.ssh/config` 文件操作。侧栏主机页与它的原生编辑面板都调用这里，
 // 主机真值仍只在 `SSHHostDirectory`，合法性以 `SSHHostStore.validate` 与解析器为准。
 
 /// 编辑主机失败的原因。文案直接给用户看。

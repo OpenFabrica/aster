@@ -373,7 +373,7 @@
 "保存为主机…" = "Save as Host…";
 "保存为可备份的 JSON 文件" = "Save as a Backupable JSON File";
 "保存可重建的标签与分屏结构" = "Save a Reconstructible Tab and Split Layout";
-"保存后可在 Open Quickly 与「设置 ▸ 主机」里使用。认证方式、跳板机等选项请到设置里补充。" = "Once saved, it is available in Open Quickly and Settings ▸ Hosts. Add options such as the authentication method and jump host in Settings.";
+"保存后可在 Open Quickly 与侧栏「主机」页里使用。认证方式、跳板机等选项请到主机页里补充。" = "Once saved, it is available in Open Quickly and on the Hosts page in the sidebar. Add options such as the authentication method and jump host on the Hosts page.";
 "保存后立即连接" = "Connect after saving";
 "保存诊断包…" = "Save Diagnostic Package…";
 "保存诊断包失败：%@" = "Failed to save diagnostic package: %@";
@@ -1814,7 +1814,7 @@
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "This workspace is still open. Close its window before deleting it.";
 "这台主机已被删除，无法连接。" = "This host has been deleted and cannot be connected to.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "This is the first connection to this host. Check the fingerprint below with the server administrator, and connect only if it matches.\n\nAlgorithm: %@\nFingerprint: %@";
-"这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在「设置 ▸ 主机」里新建主机并填写这些选项。" = "This command uses options such as %@; saving only the address would connect with a different configuration. Create a new host in Settings ▸ Hosts and fill in these options.";
+"这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "This command uses options such as %@; saving only the address would connect with a different configuration. Create a new host on the Hosts page in the sidebar and fill in these options.";
 "进入" = "Open";
 "进入 Mark Mode" = "Enter Mark Mode";
 "进入 Vi Mode" = "Enter Vi Mode";

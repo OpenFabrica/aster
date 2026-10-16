@@ -373,7 +373,7 @@
 "保存为主机…" = "Enregistrer comme hôte…";
 "保存为可备份的 JSON 文件" = "Enregistrer comme fichier JSON sauvegardable";
 "保存可重建的标签与分屏结构" = "Enregistrer une disposition d'onglets et de divisions reconstructible";
-"保存后可在 Open Quickly 与「设置 ▸ 主机」里使用。认证方式、跳板机等选项请到设置里补充。" = "Une fois enregistré, il est disponible dans Open Quickly et dans Réglages ▸ Hôtes. Ajoutez les options comme la méthode d'authentification ou l'hôte de rebond dans les Réglages.";
+"保存后可在 Open Quickly 与侧栏「主机」页里使用。认证方式、跳板机等选项请到主机页里补充。" = "Une fois enregistré, il est disponible dans Open Quickly et dans la page « Hôtes » de la barre latérale. Ajoutez les options comme la méthode d'authentification ou l'hôte de rebond dans la page Hôtes.";
 "保存后立即连接" = "Se connecter après l'enregistrement";
 "保存诊断包…" = "Enregistrer le paquet de diagnostic…";
 "保存诊断包失败：%@" = "Échec de l'enregistrement du paquet de diagnostic : %@";
@@ -1814,7 +1814,7 @@
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "Cet espace de travail est encore ouvert. Fermez sa fenêtre avant de le supprimer.";
 "这台主机已被删除，无法连接。" = "Cet hôte a été supprimé ; connexion impossible.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "C'est la première connexion à cet hôte. Vérifiez l'empreinte ci-dessous auprès de l'administrateur du serveur et ne vous connectez que si elle correspond.\n\nAlgorithme : %@\nEmpreinte : %@";
-"这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在「设置 ▸ 主机」里新建主机并填写这些选项。" = "Cette commande utilise des options comme %@ ; enregistrer seulement l'adresse mènerait à une configuration différente. Créez un nouvel hôte dans Réglages ▸ Hôtes et renseignez ces options.";
+"这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "Cette commande utilise des options comme %@ ; enregistrer seulement l'adresse mènerait à une configuration différente. Créez un nouvel hôte dans la page « Hôtes » de la barre latérale et renseignez ces options.";
 "进入" = "Ouvrir";
 "进入 Mark Mode" = "Entrer en Mark Mode";
 "进入 Vi Mode" = "Entrer en Vi Mode";

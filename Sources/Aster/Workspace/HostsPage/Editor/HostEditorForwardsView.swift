@@ -159,7 +159,7 @@ final class HostEditorForwardsView: NSStackView {
     rows[sender.tag].target.field.isEnabled = !isDynamic
   }
 
-  /// 转发类型在下拉里的文案（与网页表单一致）。
+  /// 转发类型在下拉里的文案。
   static func kindLabel(_ kind: SSHForwardKind) -> String {
     switch kind {
     case .local: L("L 本地")

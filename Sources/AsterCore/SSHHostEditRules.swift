@@ -1,7 +1,7 @@
 import Foundation
 
 // 编辑主机时共用的纯规则：内置缺省值、继承值（表单占位符）、保存前的边界清理与跳板候选。
-// 设置页网页桥与原生编辑面板都走这里，规则只有一份；最终合法性仍由 `SSHHostStore.validate` 判定。
+// 原生编辑面板与主机编辑服务都走这里，规则只有一份；最终合法性仍由 `SSHHostStore.validate` 判定。
 
 /// 字段全部留空时生效的内置缺省值，与 `SSHHostResolver.resolve` 的兜底值一致。
 public enum SSHHostBuiltinDefaults {
