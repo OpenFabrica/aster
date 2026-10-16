@@ -19,7 +19,9 @@
 | `SSHHostDirectory` | `Sources/Aster/SSH/` | App 侧主机列表的唯一权威，监听外部修改 |
 | `SSHVaultKey` / `SSHVaultKeyStore` / `SSHVaultMigration` | `Sources/AsterCore/` | 保险库密钥元数据、`ssh-keys.json` 持久化、主机引用的迁移与清理 |
 | `SSHVaultKeyDirectory` | `Sources/Aster/SSH/` | 保险库目录的唯一权威；保证目录与钥匙串一致 |
-| `SettingsSSHKeysBridge` | `Sources/Aster/` | 设置页「主机 › 密钥」：导入、生成、改名、复制公钥、删除、迁移引用、删除原文件 |
+| `SSHVaultKeyActions` / `SSHVaultKeyRow` | `Sources/Aster/SSH/` | 保险库的用户动作（导入、生成、改名、复制公钥、删除、迁移引用、删除原文件）与展示行；与界面无关，主机页与设置页共用 |
+| `HostsKeysViewController` | `Sources/Aster/Workspace/HostsPage/` | 侧栏「主机 → 密钥」原生子页：卡片、详情面板、菜单与确认框，动作交给 `SSHVaultKeyActions` |
+| `SettingsSSHKeysBridge` | `Sources/Aster/` | 设置页「主机 › 密钥」（网页）的 JSON 适配：快照与 `hosts.keys.*` 转发给 `SSHVaultKeyActions` |
 
 ## 真值归属
 
@@ -121,15 +123,16 @@ broker socket 位于 0700 目录，但同一用户的任何进程都能连上它
 
 - **存放**：私钥统一转成未加密的 OpenSSH 文本存进钥匙串（钥匙串负责静态加密；再套一层 passphrase 只会多一个 ACL 相同的秘密）。导入加密私钥时只解密一次。元数据在 `ssh-keys.json`，指纹唯一，同一把私钥重复导入时复用已有条目。
 - **主机引用**：`SSHHostProfile.vaultKeyIDs`（UUID 列表，按顺序尝试）。nil 表示继承「默认」项，空数组存成 nil。引用已删除的密钥是允许的，解析时跳过。删除密钥时 `SSHVaultKeyDirectory` 依次清理目录、钥匙串和所有主机（含默认项）里的引用。
-- **钥匙串 I/O 不占主线程**：`SSHVaultKeyDirectory.add` / `remove` 在后台写、删钥匙串，主线程只改目录；顺序不变（新增先写钥匙串再存目录，目录保存失败就回滚钥匙串；删除先改目录再删钥匙串）。设置页的「钥匙串中缺失」读 `keychainMissing` 缓存，不在每次推快照时逐把查钥匙串。缓存在加载、目录变化（含外部修改 `ssh-keys.json`）、增删和打开设置页时由 `refreshKeychainPresence()` 在后台刷新，回到主线程按密钥 ID 写入，过期的刷新结果按代数丢弃。
+- **钥匙串 I/O 不占主线程**：`SSHVaultKeyDirectory.add` / `remove` 在后台写、删钥匙串，主线程只改目录；顺序不变（新增先写钥匙串再存目录，目录保存失败就回滚钥匙串；删除先改目录再删钥匙串）。主机页与设置页的「钥匙串中缺失」都读 `keychainMissing` 缓存（经 `SSHVaultKeyActions.rows`），不在每次刷新时逐把查钥匙串。缓存在加载、目录变化（含外部修改 `ssh-keys.json`）、增删和打开「密钥」子页时由 `refreshKeychainPresence()` 在后台刷新，回到主线程按密钥 ID 写入，过期的刷新结果按代数丢弃。
 - **下发**：`SSHHostResolver` 把引用换成 `{id, publicKey}` 放进 `ResolvedSpec.vaultKeys`（为空时不编码，旧 broker 收到的 JSON 不变）。`SSHBrokerSupervisor` 同时订阅主机目录与保险库目录，任一变化都重新 `profiles.sync`。
 - **取用**：broker 轮到某把密钥时发 `auth.request kind=privateKey`（`vaultKeyID`，恒为 `interactive:false`）。`SSHAuthCoordinator` 只为目录里登记过的 ID 在后台读钥匙串，回答私钥文本；不弹窗，不进 `pending`，被拒也不删。目录里没有、钥匙串缺失或读取失败都回 null，broker 跳到下一把密钥。broker 先核对私钥与登记的公钥一致才拿去认证，私钥全程放在 `Zeroizing` 里。
 - **Swift 侧的限制**：`String` 无法清零。私钥只经函数返回值短暂存在，不存进任何属性，也不写日志。
 - **解析与生成**：都在 Rust（`aster-ssh keys`，见 `PROTOCOL.md` §6），经 `SSHRuntimeTool` 的 stdin/stdout 调用。生成只支持 ed25519，种子来自 `getentropy`，不加新依赖。导入支持 OpenSSH（含加密）、PKCS#1 RSA PEM、PKCS#8、SEC1 EC、PuTTY PPK；DSA、`sk-*` 安全密钥和 DES / AES-256 加密的旧式 PEM 返回 `unsupported`。
-- **导入与迁移**：设置页「主机 › 密钥」导入时用 NSOpenPanel 选文件，原生读取，私钥与 passphrase 从不进 WKWebView；加密私钥最多问三次 passphrase。导入后可以把 `identityFiles` 指向原文件（展开 `~`、`%h`、`%r` 并解析软链后比较）的主机改用保险库密钥，原来继承的默认项保险库密钥会一起抄过来，实际尝试的密钥不变。
+- **动作入口**：校验、互斥（`isBusy`，同一时刻只跑一个要等用户或子进程的动作）、错误文案与下面的安全规则都在 `SSHVaultKeyActions`；侧栏「主机 → 密钥」与设置页网页桥接只负责展示与确认，不各写一份。
+- **导入与迁移**：导入时用 NSOpenPanel 从 `~/.ssh` 选文件（显示隐藏文件），原生读取，私钥与 passphrase 不交给任何界面层（包括 WKWebView）；加密私钥最多问三次 passphrase。导入后可以把 `identityFiles` 指向原文件（展开 `~`、`%h`、`%r` 并解析软链后比较）的主机改用保险库密钥，原来继承的默认项保险库密钥会一起抄过来，实际尝试的密钥不变。
 - **删除原文件**：先回读钥匙串并重新计算指纹，再核对磁盘上的文件仍是这把密钥，都一致才弹原生确认框。核对文件时先解析软链，解析后的真实路径不在 `~/.ssh` 下就拒绝（提示用户手动删除）；未加密的用 `keys inspect` 重算指纹，加密的不问 passphrase，改用旁边 `.pub` 文件的 SHA256 指纹（`SSHPublicKeyFingerprint`，先看解析后路径旁的，再看原路径旁的），对不上或没有 `.pub` 就拒绝。用户点确认后、`removeItem` 前再核对一次，删的就是刚核对过的解析路径，缩小「确认期间文件被替换」的窗口。确认框列出文件路径、仍引用它的主机和 `~/.ssh/config` 里 IdentityFile 指向它的 Host，并写明 OpenSSH 回退引擎、手敲的 `ssh` 会失效、备份里可能还有副本。直接 `removeItem`，不进废纸篓；路径是软链时删除真正的文件和留下的链接。同名 `.pub` 保留。
 - **不提供**：私钥导出；Aster 自己的 ssh-agent（需要 agent 时用 `identityAgent` 指向 1Password、Secretive 等）。
-- **限制**：OpenSSH 回退引擎和手敲的 `ssh` 用不到保险库密钥，设置页在 openssh 引擎下显示提示。同用户的恶意进程仍可能通过钥匙串授权框或模拟点击拿到私钥，见威胁模型。
+- **限制**：OpenSSH 回退引擎和手敲的 `ssh` 用不到保险库密钥，主机页「密钥」与设置页在 openssh 引擎下显示提示。同用户的恶意进程仍可能通过钥匙串授权框或模拟点击拿到私钥，见威胁模型。
 
 ### ssh-agent 的选择（IdentityAgent）
 
@@ -180,6 +183,7 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 规则：搜索、分组、标签筛选、排序与回车意图都在 `HostBrowserCatalog`（AsterCore，纯函数）。顶层不过滤时只列分组和未分组主机；过滤时平铺所有分组的匹配主机，分组只留名称命中的。回车顺序：名称或连接串完全相同的已保存主机 → 像地址的输入走 `QuickConnectTarget` 临时连接 → 只剩一台可见主机。「最近使用」排序用 `HostUsageLedger.lastUsedByID`。
 - 真值与动作：主机只从 `SSHHostDirectory` 读；复制用 `SSHHostProfile.duplicated(name:)`，删除用 `SSHHostRemoval.remove`（与设置页同一份口令清理规则），导入用 `SSHHostDirectory.mergeSSHConfig`，连接走 `openNativeSSH(hostID:)` / `openNativeSSH(target:)`，编辑跳到 `showHostSettings(hostID:)`，新建复用 `SaveSSHHostSheet`。
 - 图标：代码库没有按主机持久化的远端系统识别结果，卡片统一用通用服务器图标，不为识别系统发起连接。
+- 「密钥」子页：`HostsKeysViewController`（在 `HostsHubViewController.defaultFactories()` 登记）。数据来自 `SSHVaultKeyActions.rows(hosts:)`，订阅保险库目录（含 `keychainMissing`）、主机目录与 `isBusy` 后重算；动作经 `HostsKeysPrompts`（名称表单、删除 / 迁移确认，测试可替换）后交给 `SSHVaultKeyActions`。生成或重命名被服务拒绝时，带原因和原输入重弹表单。提示写到所在窗口的 `AppModel.notice`。详情面板只显示公开信息（指纹、公钥、来源、使用它的主机）。
 
 ## Agent 主机终端
 
@@ -196,5 +200,5 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 ## 验证
 
 - Rust：`cd SshRuntime && cargo test`。用进程内的 russh 服务端覆盖认证、known_hosts、exec 退出码、pty、channel 关闭时限、跳板链、结构化错误行和协议样例。
-- Swift：`./scripts/test.sh --no-parallel --filter 'nativeTransport|sshBrokerSupervisor|machineHostBinding|sshAuthCoordinator|sshCredentialStore|sshHostProfile|sshHostStore|sshBrokerProtocol|settingsHosts|sshConfigImport|nativeSSHTicket|nativeSSHRunners|Vault|SettingsSSHKeys|knownHosts|SettingsKnownHosts'`。保险库的真实二进制往返用例（`SSHVaultKeyToolTests`）需要先跑 `./scripts/build-ssh-runtime.sh .build/debug`，找不到二进制时跳过。
+- Swift：`./scripts/test.sh --no-parallel --filter 'nativeTransport|sshBrokerSupervisor|machineHostBinding|sshAuthCoordinator|sshCredentialStore|sshHostProfile|sshHostStore|sshBrokerProtocol|settingsHosts|sshConfigImport|nativeSSHTicket|nativeSSHRunners|Vault|vaultActions|hostsKeysPage|SettingsSSHKeys|knownHosts|SettingsKnownHosts'`。保险库的真实二进制往返用例（`SSHVaultKeyToolTests`）需要先跑 `./scripts/build-ssh-runtime.sh .build/debug`，找不到二进制时跳过。
 - 打包：`./scripts/build-app.sh` 会构建 aster-ssh、复制进 `Contents/MacOS/`、签名并运行 `--version` 自检。

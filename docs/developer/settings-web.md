@@ -116,7 +116,7 @@ scripts/build-app.sh
 
 ### 密钥保险库
 
-`ssh-keys.js`（`window.AsterSSHKeys`）只展示密钥元数据并提交意图，私钥从不进入网页。
+`ssh-keys.js`（`window.AsterSSHKeys`）只展示密钥元数据并提交意图，私钥从不进入网页。侧栏「主机 → 密钥」已有同功能的原生页（见 [原生 SSH](native-ssh.md) 的「侧栏主机页」）；两者都调用 `SSHVaultKeyActions`，`SettingsSSHKeysBridge` 只做快照与 payload 适配，网页页移除时一起删掉。
 
 - 快照：`hosts.vaultKeys` 按名称排序，每项为 `{id, label, algorithm, fingerprint, publicKey, comment, createdAt, origin: "generated"|"imported", importedFrom, usedBy: [主机名], migratableHosts: [主机名], originalExists, keychainMissing}`。`importedFrom` 用 `~` 缩写，`migratableHosts` 是 `identityFiles` 仍指向原文件的主机。另有 `hosts.vaultKeysError`（`ssh-keys.json` 读取失败的原因，正常为空串）与 `hosts.sshEngine`（`native` 或 `openssh`；后者时页顶提示保险库密钥不生效）。
 - 主机对象可带 `vaultKeyIDs`（大写 UUID 数组）；缺省表示继承默认项，原生侧把空数组规范成缺省。主机表单的「保险库密钥」是勾选列表，保存时按保险库顺序写入勾选项，并原样保留快照里找不到的 ID，避免从网页保存时悄悄丢掉引用。
