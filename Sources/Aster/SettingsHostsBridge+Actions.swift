@@ -161,20 +161,7 @@ extension SettingsHostsBridge {
   private func duplicate(_ payload: [String: Any], complete: (Bool) -> Void) {
     do {
       let source = try savedHost(payload)
-      // `id` 是 let，只能逐字段构造新值。
-      let copy = SSHHostProfile(
-        name: L("\(source.name) 副本"),
-        group: source.group == SSHHostProfile.importedGroup ? nil : source.group,
-        host: source.host, port: source.port, user: source.user, jumpHostID: source.jumpHostID,
-        proxyCommand: source.proxyCommand, socksProxy: source.socksProxy, httpProxy: source.httpProxy,
-        auth: source.auth, identityFiles: source.identityFiles,
-        identitiesOnly: source.identitiesOnly, knownHostsFiles: source.knownHostsFiles,
-        identityAgent: source.identityAgent,
-        agentForward: source.agentForward, forwards: source.forwards,
-        keepaliveInterval: source.keepaliveInterval, keepaliveCountMax: source.keepaliveCountMax,
-        connectTimeout: source.connectTimeout, verifyHostKeys: source.verifyHostKeys,
-        tags: source.tags,
-        vaultKeyIDs: source.vaultKeyIDs)
+      let copy = source.duplicated(name: L("\(source.name) 副本"))
       try directory.upsert(copy)
       pushSnapshot()
       complete(true)
@@ -192,23 +179,17 @@ extension SettingsHostsBridge {
       complete(false)
       return
     }
-    let hosts = directory.hosts
-    // 删除之前算：删完就解析不到它的 endpoint 了。
-    let endpoint = Self.credentialEndpoints(hosts)[profile.id]
-    let sharing = SSHHostStore.hostsSharingCredential(with: profile.id, in: hosts)
+    let passwordError: (any Error)?
     do {
-      try directory.remove(profile.id)
+      passwordError = try SSHHostRemoval.remove(
+        profile.id, from: directory, passwords: dependencies.passwords)
     } catch {
       toast(Self.describe(error), true)
       complete(false)
       return
     }
-    if let endpoint, sharing.isEmpty, dependencies.passwords.hasPassword(for: endpoint) {
-      do {
-        try dependencies.passwords.deletePassword(for: endpoint)
-      } catch {
-        toast(L("主机已删除，但没能从钥匙串删除口令：\(Self.describe(error))"), true)
-      }
+    if let passwordError {
+      toast(L("主机已删除，但没能从钥匙串删除口令：\(Self.describe(passwordError))"), true)
     }
     pushSnapshot()
     complete(true)
@@ -260,13 +241,7 @@ extension SettingsHostsBridge {
       defer { self.isImporting = false }
       do {
         let listing = try await self.dependencies.configListing()
-        // 合并基于读取完成那一刻的列表，等待期间其它窗口的修改不会被覆盖。
-        let current = self.directory.hosts
-        let result = SSHConfigImport.merge(listing, into: current)
-        if result.hosts != current {
-          try self.directory.store.save(result.hosts)
-          self.directory.reload()
-        }
+        let result = try self.directory.mergeSSHConfig(listing)
         self.postMessage(["type": "hostsImportReport", "report": Self.reportJSON(result)])
         self.pushSnapshot()
         complete(true)

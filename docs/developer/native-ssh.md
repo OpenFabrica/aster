@@ -169,8 +169,18 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 规范化（`SSHHostStore.normalizedTags`）：去首尾空白、丢弃空串、不分大小写去重并保留第一次出现的写法，结果为空时存成 nil。
 - 校验（`SSHHostStore.tagsAreValid`）：最多 16 个，每个不超过 32 个 UTF-8 字节，不含逗号、换行和控制字符；违反时原因是 `invalid tags`，设置页显示「标签过长或包含逗号/换行」。
 - 兼容：`hosts.json` 版本号仍是 1，新字段是增量加的，旧文件没有 `tags` 键也能读。降级到旧版后再保存会丢掉标签。
-- 字段同步：设置页桥接按字段手写，`SettingsHostsBridge.profileJSON`、`+Actions.swift` 的 `duplicate()` 和 `decodeProfile`（控制字符扫描）都带上了 `tags`；以后加字段也要同时改这三处，否则从网页保存会悄悄丢字段。
+- 字段同步：设置页桥接按字段手写，`SettingsHostsBridge.profileJSON`、`SSHHostProfile.duplicated(name:)`（设置页与主机页的「复制」共用）和 `decodeProfile`（控制字符扫描）都带上了 `tags`；以后加字段也要同时改这三处，否则从网页保存会悄悄丢字段。
 - 使用方：设置页筛选与 chip、Open Quickly 主机行的 detail（`connectString · group · #tag1 #tag2`，模糊搜索能命中标签）、`host.list` 的 `tags` 输出与 `{tags:[…]}` 筛选（AND、不分大小写；CLI 为 `aster-cli host list --tag X`，可重复）。
+## 侧栏主机页
+
+侧栏「工作区」上方的「主机」行打开主机页，页面占据工作区内容区（Termius 式的卡片浏览）。
+
+- 状态：`AppModel.isHostsPagePresented`，只属于本窗口、不持久化。`selectedTabID` 的 `didSet` 在任何选中标签的入口（侧栏、Open Quickly、开 SSH 标签、CLI）都把它关掉；点当前工作区也会先关它（`selectWorkspaceGroupItem`）。命令面板有 `hosts` 命令，横向标签栏布局用它打开。
+- 视图：`WorkspaceViewController.hostsPageController` 懒建并跨整树 `refresh()` 复用，搜索词、钻取的分组和滚动位置不丢；显示时终端视图不在树里，`refresh()` 不回焦终端，详情面板按钮隐藏。代码在 `Sources/Aster/Workspace/HostsPage/`，侧栏行在 `Workspace/Sidebar/HostsSidebarRowView.swift`（行自己订阅主机目录原地更新数量）。
+- 规则：搜索、分组、标签筛选、排序与回车意图都在 `HostBrowserCatalog`（AsterCore，纯函数）。顶层不过滤时只列分组和未分组主机；过滤时平铺所有分组的匹配主机，分组只留名称命中的。回车顺序：名称或连接串完全相同的已保存主机 → 像地址的输入走 `QuickConnectTarget` 临时连接 → 只剩一台可见主机。「最近使用」排序用 `HostUsageLedger.lastUsedByID`。
+- 真值与动作：主机只从 `SSHHostDirectory` 读；复制用 `SSHHostProfile.duplicated(name:)`，删除用 `SSHHostRemoval.remove`（与设置页同一份口令清理规则），导入用 `SSHHostDirectory.mergeSSHConfig`，连接走 `openNativeSSH(hostID:)` / `openNativeSSH(target:)`，编辑跳到 `showHostSettings(hostID:)`，新建复用 `SaveSSHHostSheet`。
+- 图标：代码库没有按主机持久化的远端系统识别结果，卡片统一用通用服务器图标，不为识别系统发起连接。
+
 ## Agent 主机终端
 
 编程 agent 在已保存主机上执行命令时用的终端（[Agent 远程执行](agent-host-access.md)）也是原生 SSH 的使用方：

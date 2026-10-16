@@ -155,19 +155,26 @@ final class WorkspaceViewController: NSViewController {
   /// 底层 scrim 与面板分开：它只负责压低工作区对比度和接收外部点击，
   /// 不参与搜索或结果布局，避免深色阴影影响内容对齐。
   private var openQuicklyBackdrop: OpenQuicklyBackdropView?
+  /// 侧栏「主机」页。懒建且跨整树刷新复用，搜索词、钻取的分组与滚动位置因此保留；
+  /// 显隐只看 `model.isHostsPagePresented`。
+  private var hostsPageController: HostsPageViewController?
+  /// 主机页与侧栏「主机」行读取的主机目录。生产是共享目录；测试注入临时 hosts.json。
+  let hostsDirectory: SSHHostDirectory
 
   init(
     model: AppModel,
     preferences: AppPreferences,
     panelLayoutStore: WorkspacePanelLayoutStore,
     fileRenderer: any FileRendering = FileRenderPipeline(),
-    secureInputCoordinator: SecureInputCoordinator = .shared
+    secureInputCoordinator: SecureInputCoordinator = .shared,
+    hostsDirectory: SSHHostDirectory = .shared
   ) {
     self.model = model
     self.preferences = preferences
     self.panelLayoutStore = panelLayoutStore
     self.fileRenderer = fileRenderer
     self.secureInputCoordinator = secureInputCoordinator
+    self.hostsDirectory = hostsDirectory
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -176,7 +183,8 @@ final class WorkspaceViewController: NSViewController {
   convenience init(
     model: AppModel,
     preferences: AppPreferences,
-    secureInputCoordinator: SecureInputCoordinator = .shared
+    secureInputCoordinator: SecureInputCoordinator = .shared,
+    hostsDirectory: SSHHostDirectory = .shared
   ) {
     let suite = "Aster.WorkspacePanelPreview.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -188,7 +196,8 @@ final class WorkspaceViewController: NSViewController {
         defaults: defaults,
         legacySidebarWidth: preferences.sidebarWidth
       ),
-      secureInputCoordinator: secureInputCoordinator
+      secureInputCoordinator: secureInputCoordinator,
+      hostsDirectory: hostsDirectory
     )
   }
 
@@ -689,6 +698,11 @@ final class WorkspaceViewController: NSViewController {
     synchronizesPointerFromWindow: Bool = true
   ) {
     guard let button = inspectorToggleButton else { return }
+    // 主机页没有详情面板可开关。
+    if model.isHostsPagePresented {
+      setHoverButtonVisible(button, false, animated: animated)
+      return
+    }
     if model.isInspectorPresented {
       button.toolTip = L("收起详情面板")
       setHoverButtonVisible(button, true, animated: animated)
@@ -919,7 +933,8 @@ final class WorkspaceViewController: NSViewController {
     children.forEach { $0.removeFromParent() }
     view.removeAllSubviews()
     view.appearance = preferences.preferredAppearance
-    updateWindowTitle(model.selectedTab?.windowTitle ?? "Aster")
+    updateWindowTitle(
+      model.isHostsPagePresented ? L("主机") : (model.selectedTab?.windowTitle ?? "Aster"))
 
     let theme = preferences.activeTheme
     renderedTheme = theme
@@ -1018,9 +1033,10 @@ final class WorkspaceViewController: NSViewController {
       }
     }
 
+    // 主机页占据内容区时终端不在视图树里，焦点归主机页的搜索框。
     let blocksTerminalFocus = model.isFindPresented || model.isPalettePresented
       || model.isOpenQuicklyPresented || model.isGlobalFindPresented
-      || model.isAgentHistoryPresented
+      || model.isAgentHistoryPresented || model.isHostsPagePresented
     // 只有旧终端仍属于当前活动 Pane 时才同步回焦——拆分/切换后活动 Pane 已换人,
     // 无条件恢复会让键盘输入劫持回旧 Pane,与视觉焦点分裂(输入进错 Pane 的根因)。
     let activeSession = model.selectedTab?.activeRuntime?.terminalSession
@@ -1044,7 +1060,7 @@ final class WorkspaceViewController: NSViewController {
       if !restoredTerminalFocus,
         !self.model.isFindPresented, !self.model.isPalettePresented,
         !self.model.isOpenQuicklyPresented, !self.model.isGlobalFindPresented,
-        !self.model.isAgentHistoryPresented,
+        !self.model.isAgentHistoryPresented, !self.model.isHostsPagePresented,
         let tab = self.model.selectedTab
       {
         self.focusActivePane(in: tab)
@@ -1424,7 +1440,12 @@ final class WorkspaceViewController: NSViewController {
   private func makeContentArea() -> NSView {
     let host = NSView()
     let workspace: NSView
-    if let tab = model.selectedTab {
+    if model.isHostsPagePresented {
+      let page = hostsPageController ?? HostsPageViewController(model: model, directory: hostsDirectory)
+      hostsPageController = page
+      workspace = makeHostsPageArea(page)
+      page.pageDidAppear()
+    } else if let tab = model.selectedTab {
       workspace = makeTerminalWorkspace(tab)
     } else {
       workspace = makeEmptyWorkspace()
@@ -1472,23 +1493,11 @@ final class WorkspaceViewController: NSViewController {
     // 不能拿 trailing padding 反推左侧位置。
     let eyebrowLeading = CGFloat(theme.style.resolvedSidebarPadding.leading) + 10
 
-    // 顶部 header：上半是红绿灯行，下半是「工作区」区块的标题行（eyebrow + 新建按钮）。
+    // 顶部 header 是红绿灯行（30pt，几何由窗口决定、不缩放）加一点留白；其下依次是
+    // 「主机」入口行与「工作区」区块的标题行（eyebrow + 新建按钮）。
     let header = NSView()
     header.translatesAutoresizingMaskIntoConstraints = false
-    // 上 30pt 是红绿灯行，几何由窗口决定、不缩放；下面 38pt 的标题带装文字，随字号放大。
-    header.heightAnchor.constraint(equalToConstant: 30 + InterfaceScale.length(38)).isActive = true
-    let groupTitle = makeLabel(L("工作区"), size: 10, weight: .semibold, color: eyebrowColor)
-    groupTitle.identifier = NSUserInterfaceItemIdentifier("workspace-group-section-title")
-    groupTitle.translatesAutoresizingMaskIntoConstraints = false
-    let addGroup = makeWorkspaceGroupAddButton()
-    header.addSubview(groupTitle)
-    header.addSubview(addGroup)
-    NSLayoutConstraint.activate([
-      groupTitle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: eyebrowLeading),
-      groupTitle.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -12),
-      addGroup.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -9),
-      addGroup.centerYAnchor.constraint(equalTo: groupTitle.centerYAnchor),
-    ])
+    header.heightAnchor.constraint(equalToConstant: 30 + InterfaceScale.length(8)).isActive = true
     column.addArrangedSubview(header)
 
     // 红绿灯行感应区：header 顶部与交通灯同高的一条带子，只用来界定「折叠」按钮的
@@ -1519,6 +1528,30 @@ final class WorkspaceViewController: NSViewController {
     // 鼠标进入侧栏任意位置就显示「+」；inVisibleRect 让跟踪区域跟随侧栏尺寸。
     sidebarHoverRegion = background
     background.addTrackingArea(makeHoverTrackingArea())
+
+    // 「主机」入口：在「工作区」区块上方，点开后内容区换成主机页。
+    let hostsRow = makeHostsSidebarRow(theme: theme)
+    column.addArrangedSubview(hostsRow)
+    hostsRow.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+
+    // 「工作区」标题行：38pt 标题带装文字，随字号放大。
+    let groupHeader = NSView()
+    groupHeader.translatesAutoresizingMaskIntoConstraints = false
+    groupHeader.heightAnchor.constraint(equalToConstant: InterfaceScale.length(38)).isActive = true
+    let groupTitle = makeLabel(L("工作区"), size: 10, weight: .semibold, color: eyebrowColor)
+    groupTitle.identifier = NSUserInterfaceItemIdentifier("workspace-group-section-title")
+    groupTitle.translatesAutoresizingMaskIntoConstraints = false
+    let addGroup = makeWorkspaceGroupAddButton()
+    groupHeader.addSubview(groupTitle)
+    groupHeader.addSubview(addGroup)
+    NSLayoutConstraint.activate([
+      groupTitle.leadingAnchor.constraint(equalTo: groupHeader.leadingAnchor, constant: eyebrowLeading),
+      groupTitle.bottomAnchor.constraint(equalTo: groupHeader.bottomAnchor, constant: -12),
+      addGroup.trailingAnchor.constraint(equalTo: groupHeader.trailingAnchor, constant: -9),
+      addGroup.centerYAnchor.constraint(equalTo: groupTitle.centerYAnchor),
+    ])
+    column.addArrangedSubview(groupHeader)
+    groupHeader.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
 
     // 「工作区」区块：只有一个工作区时也显示，让用户知道可以建工作区。
     let groupRows = makeWorkspaceGroupRows(theme: theme)
@@ -1576,7 +1609,8 @@ final class WorkspaceViewController: NSViewController {
         let ruleOutcome = tabRuleOutcome(for: tab)
         let button = TabRowButton(
           tab: tab,
-          selected: tab.id == model.selectedTabID,
+          // 主机页显示时内容区不是任何标签，标签行不画选中态。
+          selected: tab.id == model.selectedTabID && !model.isHostsPagePresented,
           horizontal: false,
           theme: theme,
           showsExitStatus: preferences.configuration.shell.badgeExitStatus,
@@ -1909,7 +1943,7 @@ final class WorkspaceViewController: NSViewController {
       let ruleOutcome = tabRuleOutcome(for: tab)
       let button = TabRowButton(
         tab: tab,
-        selected: tab.id == model.selectedTabID,
+        selected: tab.id == model.selectedTabID && !model.isHostsPagePresented,
         horizontal: true,
         rowHeight: rowHeight,
         theme: theme,
