@@ -1574,6 +1574,8 @@ final class AppModel: ObservableObject {
   @Published var isHostsPagePresented = false
   /// 主机页当前子页（主机 / 密钥 / 已知主机）。只属于本窗口、不持久化。
   @Published var hostsPageSection: HostsHubSection = .hosts
+  /// 在主机页打开的原生 SSH 标签。远端会话结束、标签自动关闭后回到主机页；不持久化。
+  var hostsPageOriginTabIDs: Set<UUID> = []
   /// 活动徽章的窗口级局部事件。视图只更新对应 Tab 的附件，Dock 只重新聚合状态；
   /// 该事件不承担布局、持久化或终端内容刷新。
   let tabActivityChanged = PassthroughSubject<UUID, Never>()
@@ -2442,7 +2444,10 @@ final class AppModel: ObservableObject {
       tab.layout.allPanes.contains(where: { $0.id == paneID })
     else { return }
     guard tab.layout.allPanes.count > 1 else {
+      // 从主机页连出去的 SSH 标签：会话结束即「退出主机」，关掉标签后回到主机页继续挑主机。
+      let returnsToHostsPage = hostsPageOriginTabIDs.remove(tab.id) != nil
       closeTab(id: tab.id, confirm: false)
+      if returnsToHostsPage { presentHostsPage() }
       return
     }
     if let remoteStructureHandler {

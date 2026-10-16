@@ -183,7 +183,14 @@ extension AppModel {
       let tab = TerminalTabItem(
         title: title, workingDirectory: directory, layout: .leaf(pane),
         titleState: TerminalTitleState(fallback: title))
+      // 记下是否从主机页发起：插入标签会选中它并收起主机页，所以要在插入前读取。
+      let fromHostsPage = isHostsPagePresented
       insertTab(tab, hasContent: true)
+      if fromHostsPage {
+        // 顺带清掉已关闭标签的残留记录，集合只保留仍存在的标签。
+        hostsPageOriginTabIDs = hostsPageOriginTabIDs.filter { id in tabs.contains { $0.id == id } }
+        hostsPageOriginTabIDs.insert(tab.id)
+      }
     }
   }
 
