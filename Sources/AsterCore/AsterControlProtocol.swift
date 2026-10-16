@@ -176,6 +176,21 @@ public enum AsterControlErrorCode: String, Codable, CaseIterable, Sendable {
   case agentNameTaken = "agent_name_taken"
   case replayGap = "replay_gap"
   case internalError = "internal_error"
+  // `host.*` agent 远程执行（见 docs/developer/agent-host-access.md）。
+  /// 设置里没有打开「允许编程 agent 申请主机访问」。
+  case agentAccessDisabled = "agent_access_disabled"
+  /// 批准面板仍在等用户回答；稍后重试同一请求。
+  case approvalPending = "approval_pending"
+  /// 用户拒绝了本会话对该主机的访问（10 分钟冷却）。
+  case approvalDenied = "approval_denied"
+  /// 用户在浮动终端里暂停了 agent。
+  case agentPaused = "agent_paused"
+  /// SSH 终端在期限内没有就绪（还在连接、认证或握手失败）。
+  case hostNotReady = "host_not_ready"
+  /// agent 终端已结束（Shell 退出或被关闭）。
+  case terminalEnded = "terminal_ended"
+  /// 超出终端数或排队深度上限。
+  case limitExceeded = "limit_exceeded"
 }
 
 /// 协议错误对象；同时作为 Swift Error 在服务端逐层抛出，最终编码进响应信封。
