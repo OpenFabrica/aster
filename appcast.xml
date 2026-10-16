@@ -3,6 +3,31 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.20</title>
+            <pubDate>Fri, 16 Oct 2026 23:26:55 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>39</sparkle:version>
+            <sparkle:shortVersionString>0.6.20</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 新功能
+
+- **侧栏主机页**：侧栏新增「主机」页，分为主机、密钥、已知主机三个子页。主机以卡片显示，可以按分组管理，双击卡片直接连接，悬停铅笔或右键打开右侧的编辑面板。从主机页连接的 SSH 会话结束后会回到主机页。「设置 → 主机」只保留 Agent 访问。
+- **主机系统信息**：从主机页连接成功后，Aster 在后台采集系统、CPU 核数和内存，显示在卡片副标题里，悬停可看内核、架构和根分区用量。卡片图标随系统变化，Ubuntu 主机显示 Ubuntu 标志。已添加为远程机器的主机会带「远程机器」标注。
+- **私钥保险库**：私钥可以导入或生成到钥匙串里保管，原生 SSH 连接直接从保险库取用；可以把仍在用磁盘私钥文件的主机改成保险库密钥。
+- **Agent 访问已保存主机**：Agent 可以通过 `aster host exec` 与 `aster mcp` 在你保存的 SSH 主机上执行命令。每次访问都需要你在 Aster 里批准，命令在可见的浮动终端里运行，你可以随时查看和接管。设置页会检测并修复失效的 MCP 登记。
+- **主机多标签与 known_hosts 管理**：主机可以打多个标签，便于筛选；已知主机可以在界面里查看和删除。
+- **命令片段支持标签**，并可直接粘贴到 Pane。
+
+## 修复
+
+- **注销再登录后，终端里能正常打开浏览器**：本机后台服务会活过注销，旧会话里的终端连不上当前桌面，`open`、剪贴板和 `claude /login` 打不开浏览器。现在 Aster 发现后台服务属于旧登录会话时，会换一个新的服务。
+- **原生 SSH 更安全**：原生 SSH Pane 一开始就按敏感会话处理；删除原私钥文件前会核对磁盘上仍是同一把密钥；保险库的钥匙串读写不再占用主线程；发行版忽略调试用的环境变量覆盖。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.20/Aster-0.6.20.dmg" length="51342795" type="application/octet-stream" sparkle:edSignature="/wHp98rHl134emV6Q7R3zjdQG92L7r4ZmoFnvboeQPv4weQKaRbbkJQiR3WqA41i1g+9gZb8vma68SJqbt9NDg=="/>
+        </item>
+        <item>
             <title>0.6.19</title>
             <pubDate>Sun, 11 Oct 2026 14:44:33 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -104,32 +129,6 @@
 - 修复界面字号调大后，窗口较小时 Agent 历史、命令面板、全局查找等浮层超出窗口、底部按钮被裁掉的问题。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.16/Aster-0.6.16.dmg" length="50343282" type="application/octet-stream" sparkle:edSignature="jvWGoYGSzXm85isU9Rhg6KTRHEKOEMZ6HrRcgJBeh4OiMWFHlqR7bHFdnnmL9DDLfXya3qgWnysuqI5PtM7iDA=="/>
-        </item>
-        <item>
-            <title>0.6.15</title>
-            <pubDate>Thu, 01 Oct 2026 08:31:15 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>34</sparkle:version>
-            <sparkle:shortVersionString>0.6.15</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 新功能
-
-- **收起实时画面**：Agent 持续输出时，可以收起某个 Pane 的实时画面来省电。收起后 Pane 中间显示一张小卡片，写着 Agent 名称和任务状态（处理中 / 等待你确认或输入 / 空闲 / 已完成）。进程照常运行，通知照常弹出。入口：终端右键菜单、「显示 ▸ 收起实时画面」（⇧⌘B）或命令面板。点卡片上的按钮或按 Return / Space 恢复。
-- **Pane 放大按钮**：分屏时把鼠标移到 Pane 顶边，右上角 `×` 左边多了一个放大按钮。点它把这个 Pane 放大到整个内容区，再点一次还原原来的分屏。快捷键 ⇧⌘↩ 照旧可用，也可以在「设置 ▸ 快捷键」里修改。
-- **设置页**：左侧分区换了新图标，点击时有小动画；内容往下滚动后，顶部会显示「设置 / 当前分区」。
-
-## 修复
-
-- 修复「设置 ▸ 控制 ▸ 自动补全」里「接受候选」和「候选面板」选了不生效、跳回第一项的问题。
-- 修复另一个 Aster 正在使用某个后台保活终端时，点「重新附加」一直附加不上的问题。现在点一次就会接管过来。
-
-## 改进
-
-- Agent 停在确认表单等画面不动时，不再每 0.3 秒读一次屏，长时间等待更省电。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.15/Aster-0.6.15.dmg" length="49913213" type="application/octet-stream" sparkle:edSignature="Y5cobGi2rO1B/ZQNnV7WrHUwYLWfUCnv6WwvT5q0g+xMqTsEWvJ3xpb/tRCBZ8bFgU/yoWvBaFuGrl0r2BBaCQ=="/>
         </item>
     </channel>
 </rss>
