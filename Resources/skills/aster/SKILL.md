@@ -167,6 +167,25 @@ aster tab close <tab-id>
 
 `pane split` and `tab new` return the new IDs as `pane_id` and `tab_id`; read them from the JSON result. `--direction` is `right` (default), `left`, `down`, or `up`. `tab new` selects the new tab. `pane close` closes the whole tab when the pane is the last one in it (`closed_tab: true`). A `<tab-id>` argument also accepts the ID of any pane inside that tab. `pane close` and `tab close` need an explicit target or `--current`, and they run without a confirmation dialog.
 
+## Run commands on saved hosts
+
+Use this to run commands on the SSH hosts the user saved in Aster (Settings → Hosts). Commands are typed into a persistent native SSH terminal that the user watches in a floating window and can take over at any time. This is separate from `pane` and `agent` commands and is not affected by the "IPC: allow send keys" setting.
+
+```bash
+aster host list
+aster host exec <host> --reason "check disk usage" -- df -h
+aster host wait <command_id>
+```
+
+- Run `aster host list` first and use the exact host name (or id). Everything after `--` is the remote command; words are joined with single spaces, so quote the command as one string when it contains shell syntax.
+- Never ask the user for passwords, passphrases, or private keys, and never try to type them. Authentication is handled by Aster; secrets are only ever entered by the user.
+- The shell is persistent per host: `cd`, `export`, and other shell state persist between `host exec` calls on the same host.
+- Prefer non-interactive forms: `-y` / `--yes`, `sudo -n`, `--no-pager`, `DEBIAN_FRONTEND=noninteractive`. Avoid full-screen programs (`vim`, `top`, `less`, `htop`); their screen is not captured.
+- Exit status: when the command finishes, `aster host exec` exits with the remote command's exit code. Exit status 75 means the command has not finished; stderr carries one JSON line with `status` (`running`, `needs_input`, `interrupted`, or `ended`), `command_id`, and `prompt`. Continue with `aster host wait <command_id>`. A `running` command keeps running in the terminal.
+- `needs_input`: the command is waiting at a prompt (for example a `sudo` password or `[y/N]`). Tell the user to answer it in the Aster window (the floating terminal for that host), then run `aster host wait <command_id>`. Do not retry the command.
+- Server errors are JSON on stderr with exit status 1. `approval_pending`: the user has not answered the approval prompt in Aster yet; retry the same command shortly. `approval_denied`: the user refused access to this host; stop and ask the user, do not retry. `agent_access_disabled`: ask the user to enable "Allow coding agents to request host access" in Settings → Hosts → Agent Access. `agent_paused`: the user paused the agent; stop and ask how to proceed. `host_not_ready`: the SSH terminal did not become ready; check with the user, then retry. `pane_busy`: another command is still running or the user is typing in that terminal; `aster host wait` for the blocking command first.
+- Other commands: `aster host read <host>` reads the terminal screen, `aster host interrupt <host|command_id>` sends Ctrl-C, `aster host close <host>` closes the terminal (shell state is lost), `aster host terminals` lists agent terminals.
+
 ## Safety and coordination rules
 
 - Write commands (`prompt`, `send-text`, `send-keys`, `start`, `pane split`, `pane close`, `tab new`, `tab close`) require the user to enable "IPC: allow send keys" in Aster settings. On `write_not_allowed`, tell the user to enable it; do not retry.

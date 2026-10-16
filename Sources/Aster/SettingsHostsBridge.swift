@@ -89,6 +89,8 @@ final class SettingsHostsBridge {
   var isImporting = false
   /// 「已知主机」页的协作者，处理 `hosts.knownHosts.*` 动作，快照放在 `knownHosts` 下。
   private(set) lazy var knownHosts: SettingsKnownHostsBridge = makeKnownHostsBridge()
+  /// 「Agent 访问」子页的协作者（agent 远程执行的开关、授权与审计）。
+  lazy var agentAccess = SettingsAgentAccessBridge(owner: self)
 
   /// 快照的输入摘要，用来判断外部通知是否真的改变了页面内容。
   private struct RenderedState: Equatable {
@@ -143,6 +145,7 @@ final class SettingsHostsBridge {
   func start() {
     guard cancellables.isEmpty else { return }
     directory.startWatching()
+    agentAccess.start()
     // @Published 在 willSet 时发出，此刻 `hosts` 还是旧值；切到下一轮主队列再读。
     var changes = directory.$hosts.map { _ in () }
       .merge(with: directory.$loadError.map { _ in () })
@@ -232,6 +235,7 @@ final class SettingsHostsBridge {
       "sshConfigPath": (dependencies.sshConfigURL.path as NSString).abbreviatingWithTildeInPath,
       "loadError": directory.loadError ?? "",
       "knownHosts": knownHosts.snapshot(),
+      "agentAccess": agentAccess.snapshot(),
     ].merging(keysBridge?.snapshot(hosts: hosts) ?? [:]) { current, _ in current }
   }
 

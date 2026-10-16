@@ -41,6 +41,8 @@ extension SettingsHostsBridge {
     case "hosts.editSSHConfig": editSSHConfig(complete: complete)
     case _ where action.hasPrefix("hosts.keys.") && keysBridge != nil:
       keysBridge?.handle(action: action, payload: payload, complete: complete)
+    case _ where SettingsAgentAccessBridge.actions.contains(action):
+      agentAccess.handle(action: action, payload: payload, complete: complete)
     default:
       // `hosts.knownHosts.*` 交给「已知主机」协作者；它不认识的才算未知动作。
       guard !knownHosts.handle(action: action, payload: payload, complete: complete) else { return }

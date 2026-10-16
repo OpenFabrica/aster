@@ -24,6 +24,8 @@ struct HostControlRow: Codable, Equatable, Sendable {
   var jumpHostName: String?
   /// 主机标签（保持保存时的写法与顺序）；没有标签时为空数组。
   var tags: [String] = []
+  /// agent 远程执行的授权状态：`always`（有「一直允许」授权）或 `ask`（每次需要批准）。
+  var agentAccess: String?
 }
 
 /// `host.list` 的可选参数。`tags` 非空时只返回同时带有全部这些标签的主机（不分大小写）。
@@ -42,11 +44,15 @@ struct HostControlSnapshot: Sendable {
   /// 含默认项的全部主机；默认项只用于合并字段，不出现在输出里。
   var hosts: [SSHHostProfile]
   var loadError: String?
+  /// 有「一直允许」agent 授权的主机。
+  var alwaysGrantedHostIDs: Set<UUID> = []
 
   /// 从主机目录取当前快照。
   @MainActor
   static func live(_ directory: SSHHostDirectory = .shared) -> HostControlSnapshot {
-    HostControlSnapshot(hosts: directory.hosts, loadError: directory.loadError)
+    HostControlSnapshot(
+      hosts: directory.hosts, loadError: directory.loadError,
+      alwaysGrantedHostIDs: AgentHostService.shared?.grants.alwaysGrantedHostIDs ?? [])
   }
 }
 
@@ -61,9 +67,12 @@ extension AsterControlDispatcher {
       switch method {
       case .hostList:
         let params = try request.decodeParams(HostListParams.self)
-        let result = HostListResult(
-          hosts: Self.filter(Self.hostRows(snapshot.hosts), tags: params.tags ?? []),
-          configurationError: snapshot.loadError)
+        var rows = Self.filter(Self.hostRows(snapshot.hosts), tags: params.tags ?? [])
+        for index in rows.indices {
+          let granted = UUID(uuidString: rows[index].id).map(snapshot.alwaysGrantedHostIDs.contains) ?? false
+          rows[index].agentAccess = granted ? "always" : "ask"
+        }
+        let result = HostListResult(hosts: rows, configurationError: snapshot.loadError)
         return AsterControlResponse(id: request.id, result: try JSONValue(encoding: result))
       }
     } catch let error as AsterControlError {

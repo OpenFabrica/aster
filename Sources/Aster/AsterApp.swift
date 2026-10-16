@@ -429,6 +429,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // broker 读到 shutdown / stdin EOF 即断开全部原生 SSH 连接并退出。
     SSHBrokerSupervisor.shared.shutdown()
     quickTerminalController.shutdown()
+    AgentHostRuntime.shared?.shutdown()
     tearDownUsageMonitor()
     themeSwitcherPanelController?.dismiss(commit: false)
     themeSwitcherPanelController = nil
@@ -458,8 +459,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    let models: [any WorkspaceTerminationParticipant] =
+    var models: [any WorkspaceTerminationParticipant] =
       [quickTerminalController, model] + additionalWorkspaceWindows.values.map { $0.model }
+    if let agentHosts = AgentHostRuntime.shared { models.append(agentHosts) }
     guard WorkspaceTerminationTransaction.commit(models) else {
       // 用户在关闭确认里取消了退出，重启请求随之作废，避免下次普通退出时莫名再开一个实例。
       relaunchAfterTerminate = false
@@ -534,6 +536,10 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
         allowSensitiveSessions: controls.resolvedIPCAllowSensitiveSessions,
         shell: self?.preferences.configuration.shell ?? AsterConfiguration().shell)
     }
+    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID。
+    dispatcher.agentHostService = AgentHostRuntime.install(preferences: preferences) {
+      [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector)
+    }.service
     let server = AsterControlServer(
       socketPath: socketPath,
       onDisconnect: { [weak bridge] connection in
@@ -2158,6 +2164,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     let submenu = NSMenu(title: L("窗口"))
     submenu.addItem(menuItem("Quick Terminal", #selector(toggleQuickTerminal(_:)), "", modifiers: []))
     submenu.addItem(menuItem(L("重新启动 Quick Terminal"), #selector(restartQuickTerminal(_:)), "", modifiers: []))
+    if let agentHosts = AgentHostRuntime.shared { submenu.addItem(agentHosts.makeMenuItem()) }
     submenu.addItem(.separator())
     submenu.addItem(menuItem(L("新建窗口"), #selector(newWindow(_:)), "n"))
     submenu.addItem(menuItem(L("关闭窗口"), #selector(closeActiveWindow(_:)), "w", modifiers: [.command, .shift]))

@@ -102,8 +102,8 @@ scripts/build-app.sh
 | 子标签 | 模块 | 脚本 |
 | --- | --- | --- |
 | `keys` | `window.AsterSSHKeys` | `ssh-keys.js` |
-| `knownHosts` | `window.AsterKnownHosts` | 由已知主机功能提供 |
-| `agentAccess` | `window.AsterAgentAccess` | 由 Agent 远程主机访问功能提供 |
+| `knownHosts` | `window.AsterKnownHosts` | `known-hosts.js` |
+| `agentAccess` | `window.AsterAgentAccess` | `agent-access.js` |
 
 模块只需实现 `render(container, hostsSnapshot, send, ui)`：
 
@@ -129,3 +129,11 @@ scripts/build-app.sh
   - `hosts.keys.migrateReferences {id}`：网页先列出 `migratableHosts` 确认，再把这些主机里的原文件路径换成该密钥。
   - `hosts.keys.deleteOriginal {id}`：原生弹出自己的确认框说明全部后果，网页不再重复确认。
 - 不提供私钥导出。
+
+### Agent 访问
+
+- 「Agent 访问」子页（agent 远程执行的总开关、授权、agent 终端、MCP 安装与活动记录）：`Resources/settings-ui/agent-access.js`
+  （入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`，契约见上文「子标签与扩展契约」），Swift 侧协作者 `SettingsAgentAccessBridge`。
+  数据在快照的 `hosts.agentAccess`；动作 `hosts.setAgentAccessEnabled`、`hosts.revokeAgentGrant`、`hosts.revokeAllAgentGrants`、
+  `hosts.agentAuditPage`（分页读审计，结果经消息 `agentAccessAuditPage` 异步送回）、`hosts.installAgentMCP`。
+  语义与审计字段见 [Agent 远程执行](agent-host-access.md)。

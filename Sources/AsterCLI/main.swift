@@ -42,6 +42,15 @@ func extractSocketOption(_ arguments: [String]) -> (rest: [String], socket: Stri
 
 let (groupArguments, explicitSocket) = extractSocketOption(rawArguments)
 
+// `aster mcp` 与 agent 远程执行命令（host exec/wait/…）先于其它路由：前者独占 stdio，
+// 后者要自己处理 `--` 之后的命令文本，不能经过下面全局摘取 `--json` 的路由。
+if MCPCommand.matches(groupArguments) {
+  MCPCommand.run(groupArguments, explicitSocket: explicitSocket, environment: environment)
+}
+if HostExecCommands.matches(groupArguments) {
+  HostExecCommands.run(groupArguments, explicitSocket: explicitSocket, environment: environment)
+}
+
 // 机器、命名会话、主机与命名工作区命令在旧解析器之前拦截：它们的作用域是客户端配置、
 // 某台机器上的注册表或工作区注册表，与 agent/pane/events 的「当前工作区」作用域不同，
 // 参数规则也不一样。

@@ -51,11 +51,25 @@ func hostControlListShape() async throws {
     Issue.record("hosts 不是对象数组")
     return
   }
-  #expect(Set(row.keys).isSubset(of: ["id", "name", "group", "target", "jumpHostID", "jumpHostName", "tags"]))
+  #expect(Set(row.keys).isSubset(of: ["id", "name", "group", "target", "jumpHostID", "jumpHostName", "tags", "agentAccess"]))
+  #expect(list.hosts.allSatisfy { $0.agentAccess == "ask" })
   let encoded = String(decoding: try JSONEncoder().encode(result), as: UTF8.self)
   for secret in ["password", "secret_key", "nc %h", "auth", "identity", "proxy"] {
     #expect(!encoded.contains(secret), "输出不应包含 \(secret)")
   }
+}
+
+@Test("host.list：有「一直允许」agent 授权的主机标 always，其余 ask")
+@MainActor
+func hostControlListAgentAccess() async throws {
+  let granted = SSHHostProfile(name: "granted", host: "a.local")
+  let other = SSHHostProfile(name: "other", host: "b.local")
+  let dispatcher = hostDispatcher(
+    HostControlSnapshot(hosts: [granted, other], loadError: nil, alwaysGrantedHostIDs: [granted.id]))
+  let list = try #require(
+    await dispatcher.handle(controlRequest("host.list"), client: ControlFakeClient()).result
+  ).decoded(as: HostListResult.self)
+  #expect(list.hosts.map(\.agentAccess) == ["always", "ask"])
 }
 
 @Test("host.list：hosts.json 加载失败时回显错误，列表保持最后有效值；失效的跳板只回显 ID")

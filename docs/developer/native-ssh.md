@@ -166,6 +166,17 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 兼容：`hosts.json` 版本号仍是 1，新字段是增量加的，旧文件没有 `tags` 键也能读。降级到旧版后再保存会丢掉标签。
 - 字段同步：设置页桥接按字段手写，`SettingsHostsBridge.profileJSON`、`+Actions.swift` 的 `duplicate()` 和 `decodeProfile`（控制字符扫描）都带上了 `tags`；以后加字段也要同时改这三处，否则从网页保存会悄悄丢字段。
 - 使用方：设置页筛选与 chip、Open Quickly 主机行的 detail（`connectString · group · #tag1 #tag2`，模糊搜索能命中标签）、`host.list` 的 `tags` 输出与 `{tags:[…]}` 筛选（AND、不分大小写；CLI 为 `aster-cli host list --tag X`，可重复）。
+## Agent 主机终端
+
+编程 agent 在已保存主机上执行命令时用的终端（[Agent 远程执行](agent-host-access.md)）也是原生 SSH 的使用方：
+
+- 每个 agent 终端是一个**独立的** `TerminalSession`，绑定 `bindNativeSSH(.host(id))`，PTY 里跑 `aster-ssh client … --tty`
+  （与原生 SSH 标签同一种调用形状）。它显示在浮动 NSPanel 里，**不注册进任何工作区标签**，所以 `pane.*`、
+  `session.snapshot`、`agent.*` 与 Session Recording 都碰不到它。
+- 连接前确认 PTY 前台进程是 `aster-ssh`。引擎回退到 OpenSSH 时，`TerminalSession` 会变成「本地 Shell 里预填 ssh」，
+  这时 agent 命令会落到本机；因此前台不是 `aster-ssh` 就立刻结束该终端并报 `host_not_ready`，绝不执行。
+- 认证、口令与主机密钥提示走 App 自己的认证表单（`SSHAuthCoordinator`），与普通原生 SSH 标签一致；
+  agent 永远拿不到口令或私钥，sudo 口令也只能由用户在浮动终端里输入。
 
 ## 验证
 

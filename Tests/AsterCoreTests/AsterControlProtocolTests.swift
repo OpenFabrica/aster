@@ -83,7 +83,8 @@ struct AsterControlProtocolTests {
   func errorCodesUseSnakeCase() {
     #expect(AsterControlErrorCode.sensitiveSessionNotAllowed.rawValue == "sensitive_session_not_allowed")
     #expect(AsterControlErrorCode.paneNotTerminal.rawValue == "pane_not_terminal")
-    #expect(AsterControlErrorCode.allCases.count == 24)
+    #expect(AsterControlErrorCode.allCases.count == 31)
+    #expect(AsterControlErrorCode.agentAccessDisabled.rawValue == "agent_access_disabled")
   }
 
   @Test("params 解码：snake_case 键、缺省值与 invalid_params 包装")
