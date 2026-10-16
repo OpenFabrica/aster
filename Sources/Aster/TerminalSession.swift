@@ -4104,6 +4104,24 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     return lines.suffix(maximumLines).joined(separator: "\n")
   }
 
+  /// agent 主机终端读屏：活动屏幕（主屏或备用屏中正在显示的那个），不含回滚。
+  /// 标记符轮询只看这一屏，开销与屏幕大小相关而不是与回滚长度相关。
+  func readActiveScreenText() -> String? {
+    ghosttyView?.readAgentDetectionText()
+  }
+
+  /// PTY 前台进程 PID。agent 主机终端据此确认连接的确是 `aster-ssh`，
+  /// 而不是引擎不可用时回退出来的本地 Shell（那样命令会在本机执行）。
+  var foregroundProcessIdentifier: Int32? {
+    ghosttyView?.foregroundProcessIdentifier
+  }
+
+  /// 是否处在备用屏（vim、less、top 等全屏程序）。agent 主机终端此时不敲任何探针，
+  /// 否则 `export …` 会被当成 vim 普通模式命令执行。
+  var isAlternateScreenActive: Bool {
+    ghosttyView?.bufferInfo()?.alternate_screen ?? false
+  }
+
   func textSnapshot() -> TerminalTextSnapshot {
     if let text = ghosttyView?.readText(includeScrollback: true, maximumLines: 10_000) {
       return .init(firstAbsoluteRow: 0, lines: text.components(separatedBy: "\n"))

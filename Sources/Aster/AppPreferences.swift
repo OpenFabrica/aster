@@ -282,6 +282,13 @@ final class AppPreferences: ObservableObject {
     set { defaults.set(newValue, forKey: Keys.memoryExtractionEnabled) }
   }
 
+  /// 「允许编程 agent 申请主机访问」。默认关闭：打开后 agent 才能经 `host.*` 申请在已保存
+  /// 主机上执行命令，每台主机仍要用户逐一批准。改动经 AgentHostRuntime.setEnabled 写审计。
+  var agentHostAccessEnabled: Bool {
+    get { defaults.bool(forKey: Keys.agentHostAccessEnabled) }
+    set { defaults.set(newValue, forKey: Keys.agentHostAccessEnabled) }
+  }
+
   /// 用于提炼的 provider rawValue（如 `claudeCode`）。
   var memoryExtractionProvider: String? {
     get { defaults.string(forKey: Keys.memoryExtractionProvider) }
@@ -1121,5 +1128,6 @@ final class AppPreferences: ObservableObject {
     static let memoryExtractionProvider = "aster.memory.extraction-provider.v1"
     static let memoryExtractionAcknowledged = "aster.memory.extraction-acknowledged.v1"
     static let updateChannel = "aster.update.channel.v1"
+    static let agentHostAccessEnabled = "aster.agent-hosts.enabled.v1"
   }
 }

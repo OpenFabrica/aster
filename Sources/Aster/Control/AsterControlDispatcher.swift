@@ -41,6 +41,8 @@ final class AsterControlDispatcher {
   var hostSnapshotProvider: (@MainActor () -> HostControlSnapshot)?
   /// `workspace.*` 的依赖；nil 表示取生产注册表与窗口，测试注入替身。
   var workspaceContextProvider: (@MainActor () -> WorkspaceControlContext)?
+  /// `host.exec` 等 agent 远程执行方法的服务；nil 表示取 `AgentHostService.shared`，测试注入替身。
+  var agentHostService: AgentHostService?
 
   init(
     bridge: AsterControlBridge, version: String,
@@ -68,6 +70,7 @@ final class AsterControlDispatcher {
         return response
       }
       if let response = handleHostMethod(request) { return response }
+      if let response = await handleAgentHostMethod(request, client: client) { return response }
       if let response = await handleWorkspaceMethod(request) { return response }
       let method = try request.resolvedMethod()
       let result = try await dispatch(method, request: request, client: client)
@@ -415,7 +418,7 @@ final class AsterControlDispatcher {
   // MARK: - 等待类
 
   /// 每连接最多 4 个待决等待，超出直接拒绝，避免单个客户端挂满主线程任务。
-  private func withWaitSlot<T>(_ client: any AsterControlClient, _ body: () async throws -> T) async throws -> T {
+  func withWaitSlot<T>(_ client: any AsterControlClient, _ body: () async throws -> T) async throws -> T {
     guard client.pendingWaits < Self.maximumPendingWaitsPerClient else {
       throw AsterControlError(code: .tooManyWaits, message: "同一连接最多 \(Self.maximumPendingWaitsPerClient) 个待决等待")
     }

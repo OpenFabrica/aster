@@ -22,6 +22,8 @@ struct HostControlRow: Codable, Equatable, Sendable {
   var jumpHostID: String?
   /// 跳板主机的名称；跳板引用已失效时为 nil，`jumpHostID` 仍原样回显。
   var jumpHostName: String?
+  /// agent 远程执行的授权状态：`always`（有「一直允许」授权）或 `ask`（每次需要批准）。
+  var agentAccess: String?
 }
 
 struct HostListResult: Codable, Equatable, Sendable {
@@ -35,11 +37,15 @@ struct HostControlSnapshot: Sendable {
   /// 含默认项的全部主机；默认项只用于合并字段，不出现在输出里。
   var hosts: [SSHHostProfile]
   var loadError: String?
+  /// 有「一直允许」agent 授权的主机。
+  var alwaysGrantedHostIDs: Set<UUID> = []
 
   /// 从主机目录取当前快照。
   @MainActor
   static func live(_ directory: SSHHostDirectory = .shared) -> HostControlSnapshot {
-    HostControlSnapshot(hosts: directory.hosts, loadError: directory.loadError)
+    HostControlSnapshot(
+      hosts: directory.hosts, loadError: directory.loadError,
+      alwaysGrantedHostIDs: AgentHostService.shared?.grants.alwaysGrantedHostIDs ?? [])
   }
 }
 
@@ -53,8 +59,12 @@ extension AsterControlDispatcher {
     do {
       switch method {
       case .hostList:
-        let result = HostListResult(
-          hosts: Self.hostRows(snapshot.hosts), configurationError: snapshot.loadError)
+        var rows = Self.hostRows(snapshot.hosts)
+        for index in rows.indices {
+          let granted = UUID(uuidString: rows[index].id).map(snapshot.alwaysGrantedHostIDs.contains) ?? false
+          rows[index].agentAccess = granted ? "always" : "ask"
+        }
+        let result = HostListResult(hosts: rows, configurationError: snapshot.loadError)
         return AsterControlResponse(id: request.id, result: try JSONValue(encoding: result))
       }
     } catch {
