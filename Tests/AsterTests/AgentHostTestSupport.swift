@@ -40,9 +40,9 @@ final class FakeShellSurface: AgentHostTerminalSurface {
       return true
     }
     if let nonce = Self.capture(text, #"printf '\\074aster:%s\\076\\n' ([0-9a-f]{12})b; eval"#),
-      let quoted = Self.capture(text, #"eval '((?:[^']|'\\''|'"\$\(printf '\\011'\)"')*)'; printf"#)
+      let quoted = Self.capture(text, #"eval '((?:[^']|'\\''|'"\$\(printf '(?:\\[0-7]{3})+'\)"')*)'; printf"#)
     {
-      let command = quoted.replacingOccurrences(of: "'\\''", with: "'")
+      let command = Self.unquote(quoted)
       commands.append(command)
       screen += "\n<aster:\(nonce)b>\n"
       switch behavior(command) {
@@ -71,6 +71,27 @@ final class FakeShellSurface: AgentHostTerminalSurface {
   func terminate() {
     terminated = true
     isProcessRunning = false
+  }
+
+  /// 还原 `AgentHostCommandFraming.quoted` 的引号内文本：`'\''` 回到 `'`，
+  /// `'"$(printf '\ooo…')"'` 组按八进制解回原始字节。
+  private static func unquote(_ quoted: String) -> String {
+    let pattern = #"'\\''|'"\$\(printf '((?:\\[0-7]{3})+)'\)"'"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return quoted }
+    var bytes: [UInt8] = []
+    var cursor = quoted.startIndex
+    for match in regex.matches(in: quoted, range: NSRange(quoted.startIndex..., in: quoted)) {
+      guard let range = Range(match.range, in: quoted) else { continue }
+      bytes += Array(quoted[cursor..<range.lowerBound].utf8)
+      if let octal = Range(match.range(at: 1), in: quoted) {
+        bytes += quoted[octal].split(separator: "\\").compactMap { UInt8($0, radix: 8) }
+      } else {
+        bytes.append(UInt8(ascii: "'"))
+      }
+      cursor = range.upperBound
+    }
+    bytes += Array(quoted[cursor...].utf8)
+    return String(decoding: bytes, as: UTF8.self)
   }
 
   /// 正则第一个捕获组。
