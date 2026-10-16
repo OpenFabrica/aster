@@ -24,6 +24,8 @@ struct SSHHostDocument: Codable, Equatable {
 public final class SSHHostStore: @unchecked Sendable {
   /// 分组名的最大 UTF-8 字节数。
   public static let maximumGroupBytes = 64
+  /// 一台主机最多引用的保险库密钥数。
+  public static let maximumVaultKeys = 16
 
   /// 默认路径：`~/Library/Application Support/Aster/hosts.json`。
   public static func defaultFileURL(fileManager: FileManager = .default) -> URL {
@@ -122,12 +124,15 @@ public final class SSHHostStore: @unchecked Sendable {
     }
   }
 
-  /// 规范化：默认项放到第一位（缺失就补上），分组名去空白、空串变 nil。
+  /// 规范化：默认项放到第一位（缺失就补上），分组名去空白、空串变 nil；
+  /// 空的保险库密钥列表变 nil（都表示继承）。
   public static func normalized(_ hosts: [SSHHostProfile]) -> [SSHHostProfile] {
     var defaults = hosts.first { $0.isDefaults } ?? .emptyDefaults()
     defaults.group = nil
+    if defaults.vaultKeyIDs?.isEmpty == true { defaults.vaultKeyIDs = nil }
     let others = hosts.filter { !$0.isDefaults }.map { profile -> SSHHostProfile in
       var copy = profile
+      if copy.vaultKeyIDs?.isEmpty == true { copy.vaultKeyIDs = nil }
       let group = copy.group?.trimmingCharacters(in: .whitespacesAndNewlines)
       copy.group = (group?.isEmpty ?? true) ? nil : group
       copy.name = copy.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -168,6 +173,12 @@ public final class SSHHostStore: @unchecked Sendable {
         if !(0...65535).contains(rule.bind.port) || !targetOK {
           reasons.append("\(tag) invalid forward")
         }
+      }
+      // 保险库密钥：同一把不能引用两次；引用已删除的密钥是允许的（解析时跳过）。
+      if let vaultKeyIDs = host.vaultKeyIDs,
+        vaultKeyIDs.count > maximumVaultKeys || Set(vaultKeyIDs).count != vaultKeyIDs.count
+      {
+        reasons.append("\(tag) invalid vaultKeyIDs")
       }
       if let jump = host.jumpHostID, jump == host.id || !ids.contains(jump) {
         reasons.append("\(tag) invalid jumpHostID")

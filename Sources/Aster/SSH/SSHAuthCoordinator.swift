@@ -111,6 +111,8 @@ final class SSHAuthCoordinator: SSHAuthCoordinating {
 
   private let store: any SSHCredentialStoring
   private let presenter: any SSHAuthPresenting
+  /// 保险库目录里是否有这把密钥；只为目录里登记过的 ID 读钥匙串。
+  private let vaultKeyExists: (UUID) -> Bool
   private let now: () -> Date
   private let sheetQueue = SSHAuthSheetQueue()
   private var pending: [String: PendingSecret] = [:]
@@ -120,10 +122,12 @@ final class SSHAuthCoordinator: SSHAuthCoordinating {
   init(
     store: any SSHCredentialStoring = SSHCredentialStore(),
     presenter: (any SSHAuthPresenting)? = nil,
+    vaultKeyExists: ((UUID) -> Bool)? = nil,
     now: @escaping () -> Date = Date.init
   ) {
     self.store = store
     self.presenter = presenter ?? SSHAuthWindowPresenter()
+    self.vaultKeyExists = vaultKeyExists ?? { SSHVaultKeyDirectory.shared.key($0) != nil }
     self.now = now
   }
 
@@ -137,6 +141,33 @@ final class SSHAuthCoordinator: SSHAuthCoordinating {
       return await answerSecret(request)
     case .keyboardInteractive:
       return await answerKeyboardInteractive(request)
+    case .privateKey:
+      return await answerVaultKey(request)
+    }
+  }
+
+  /// 保险库私钥：只从钥匙串作答，从不弹窗，`interactive:false` 也照常回答。
+  ///
+  /// 不进 `pending`：服务器拒绝某把密钥只说明这台主机不认它，不能因此删除保险库里的私钥。
+  /// 目录里没有的 ID、钥匙串里没有条目或读取失败都回 null，broker 据此跳到下一把密钥。
+  /// 私钥文本只经返回值交给控制通道，不存进任何属性。
+  private func answerVaultKey(_ request: SSHAuthRequest) async -> SSHBrokerCommand {
+    let skip = SSHBrokerCommand.authAnswer(id: request.id, secret: nil, responses: nil)
+    guard let id = request.vaultKeyID, vaultKeyExists(id) else { return skip }
+    await keychainTail?.value
+    let store = store
+    let result = await Task.detached { () -> Result<String?, Error> in
+      Result { try store.vaultPrivateKey(id: id) }
+    }.value
+    switch result {
+    case .success(let privateKey?):
+      return .authAnswer(id: request.id, secret: privateKey, responses: nil)
+    case .success(nil):
+      Self.recordKeychainFailure("ssh.keychain.vault-key-missing", kind: "vaultKey", error: nil)
+      return skip
+    case .failure(let error):
+      Self.recordKeychainFailure("ssh.keychain.read-failed", kind: "vaultKey", error: error)
+      return skip
     }
   }
 
@@ -299,7 +330,7 @@ final class SSHAuthCoordinator: SSHAuthCoordinating {
     switch request.kind {
     case .password: .password(endpoint: request.endpoint)
     case .passphrase: request.keyDigest.map { .passphrase(digest: $0) }
-    case .keyboardInteractive: nil
+    case .keyboardInteractive, .privateKey: nil
     }
   }
 
@@ -354,8 +385,15 @@ final class SSHAuthCoordinator: SSHAuthCoordinating {
       case .password: "password"
       case .passphrase: "passphrase"
       }
+    recordKeychainFailure(event, kind: kind, error: error)
+  }
+
+  /// 记录钥匙串失败的实现：只记类别与 OSStatus。
+  nonisolated private static func recordKeychainFailure(
+    _ event: String, kind: String, error: Error?
+  ) {
     var attributes = ["kind": kind]
-    if case SSHCredentialStoreError.keychain(let status) = error {
+    if case SSHCredentialStoreError.keychain(let status)? = error {
       attributes["status"] = String(status)
     }
     DiagnosticsCenter.shared.record(

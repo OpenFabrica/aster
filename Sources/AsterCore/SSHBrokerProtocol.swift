@@ -123,6 +123,8 @@ public enum SSHAuthRequestKind: String, Codable, Sendable {
   case password
   case passphrase
   case keyboardInteractive
+  /// 保险库私钥：`secret` 回答未加密的 OpenSSH 私钥文本，或 null 跳过这把密钥。
+  case privateKey
 }
 
 /// broker 发来的凭证请求。
@@ -136,6 +138,8 @@ public struct SSHAuthRequest: Codable, Equatable, Sendable {
   public var keyFile: String?
   /// passphrase 请求时私钥文件内容 SHA-512 的小写 hex，是钥匙串账户名。
   public var keyDigest: String?
+  /// privateKey 请求要的保险库密钥 ID；其它类型为 nil。
+  public var vaultKeyID: UUID?
   public var name: String?
   public var instruction: String?
   public var prompts: [SSHAuthPrompt]
@@ -147,7 +151,7 @@ public struct SSHAuthRequest: Codable, Equatable, Sendable {
     id: String, endpoint: String, kind: SSHAuthRequestKind, hostID: UUID? = nil,
     keyFile: String? = nil, keyDigest: String? = nil, name: String? = nil,
     instruction: String? = nil, prompts: [SSHAuthPrompt] = [], attempt: Int = 1,
-    interactive: Bool = true
+    interactive: Bool = true, vaultKeyID: UUID? = nil
   ) {
     self.id = id
     self.endpoint = endpoint
@@ -160,6 +164,7 @@ public struct SSHAuthRequest: Codable, Equatable, Sendable {
     self.prompts = prompts
     self.attempt = attempt
     self.interactive = interactive
+    self.vaultKeyID = vaultKeyID
   }
 }
 
