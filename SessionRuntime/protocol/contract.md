@@ -83,7 +83,8 @@ service_connection.zig 接管已认证的非阻塞 socket，在任何业务回�
 
 server status 通过私有 socket 查询当前实例，不能从 PID 或磁盘文件推断服务运行成功。
 Hello 与响应共用 3 秒期限，所有回复都核对请求关联及目标身份。允许未知可选字段，但必需字段
-不能缺失，result/error 必须互斥；状态能力按集合与 Hello 一致。
+不能缺失，result/error 必须互斥；状态能力按集合与 Hello 一致。macOS 上 result 额外带可选的
+`loginSession`（服务进程的审计会话 ID），供本机 App 识别活过注销的旧服务；其他平台不返回。
 
 成功时 stdout 为已校验的 response JSON；已校验的服务端 error 保留 RPC 信封并返回非零退出码。
 本地连接/校验失败使用独立 client_error JSON，不能冒充有 requestID 的服务端错误。status 不创建

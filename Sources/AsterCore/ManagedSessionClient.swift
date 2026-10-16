@@ -241,17 +241,21 @@ public struct SessionServerIdentity: Equatable, Sendable {
   public var serverEpoch: String
   public var capabilities: [String]
   public var version: String
+  /// 服务进程所在的 macOS 登录（审计）会话 ID；旧版本服务与非 macOS 平台没有该字段。
+  public var loginSession: UInt32?
 
   public init(
     reference: SessionServerReference,
     serverEpoch: String,
     capabilities: [String],
-    version: String
+    version: String,
+    loginSession: UInt32? = nil
   ) {
     self.reference = reference
     self.serverEpoch = serverEpoch
     self.capabilities = capabilities
     self.version = version
+    self.loginSession = loginSession
   }
 }
 
@@ -276,7 +280,8 @@ public enum ManagedSessionReplyDecoder {
       ),
       serverEpoch: serverEpoch,
       capabilities: (result["capabilities"] as? [String]) ?? [],
-      version: (result["version"] as? String) ?? ""
+      version: (result["version"] as? String) ?? "",
+      loginSession: (result["loginSession"] as? NSNumber)?.uint32Value
     )
   }
 
@@ -378,6 +383,38 @@ public struct LocalManagedSessionClient: ManagedSessionClient {
       machineProfileID: endpoint.machineProfileID,
       from: try ManagedSessionReplyDecoder.envelope(output)
     )
+  }
+
+  /// 请求服务排空并退出；返回时服务已接受停止，进程可能仍在收尾。
+  public func stopServer(_ endpoint: ManagedSessionEndpoint) throws {
+    _ = try ManagedSessionReplyDecoder.envelope(
+      try run(endpoint, ManagedSessionCommand.serverStop(endpoint)))
+  }
+
+  /// 连接本机服务，并保证它和调用方处在同一个登录会话里。
+  ///
+  /// 后台服务会活过一次注销再登录，但它和它开出的 Shell 仍留在旧的审计会话里，
+  /// `open`、剪贴板等都连不上当前桌面（例如 `claude /login` 打不开浏览器），新开的
+  /// 终端也一样坏。此时只能停掉旧服务再起新服务，旧会话里的终端随之结束。
+  /// 只在本机 App 里调用：从 SSH 登进本机时审计会话本来就不同，不能拿来替换服务。
+  public func ensureServerInLoginSession(
+    _ endpoint: ManagedSessionEndpoint,
+    current: UInt32? = LoginSession.current
+  ) throws -> SessionServerIdentity {
+    _ = try ensureServer(endpoint)
+    let identity = try serverStatus(endpoint)
+    guard LoginSession.isStale(server: identity.loginSession, current: current) else {
+      return identity
+    }
+    try stopServer(endpoint)
+    // 停止只是排空请求；等旧进程放掉 socket 再启动，否则 start 会报 already_running
+    // 并把仍在退出的旧服务交回来。
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline, (try? serverStatus(endpoint)) != nil {
+      Thread.sleep(forTimeInterval: 0.1)
+    }
+    _ = try ensureServer(endpoint)
+    return try serverStatus(endpoint)
   }
 
   public func createTerminal(

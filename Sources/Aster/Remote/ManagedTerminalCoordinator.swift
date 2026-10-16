@@ -215,8 +215,7 @@ final class ManagedTerminalCoordinator {
     let client = self.client
     let outcome = await Task.detached(priority: .userInitiated) { () -> Result<SessionServerIdentity, any Error> in
       do {
-        _ = try client.ensureServer(endpoint)
-        return .success(try client.serverStatus(endpoint))
+        return .success(try Self.establish(client, endpoint))
       } catch {
         return .failure(error)
       }
@@ -232,6 +231,18 @@ final class ManagedTerminalCoordinator {
       lastError = String(describing: error)
       return nil
     }
+  }
+
+  /// 确保服务在运行并取回身份。本机服务额外核对登录会话，活过注销的旧服务会被替换；
+  /// 远端服务按原样附加（远端没有本机桌面会话的概念）。
+  nonisolated private static func establish(
+    _ client: any ManagedSessionClient, _ endpoint: ManagedSessionEndpoint
+  ) throws -> SessionServerIdentity {
+    if let local = client as? LocalManagedSessionClient {
+      return try local.ensureServerInLoginSession(endpoint)
+    }
+    _ = try client.ensureServer(endpoint)
+    return try client.serverStatus(endpoint)
   }
 
   /// 异步创建受管终端。失败向上抛出，调用方必须显示明确错误。
@@ -290,8 +301,7 @@ final class ManagedTerminalCoordinator {
     }
     connectionState = .connecting
     do {
-      _ = try client.ensureServer(endpoint)
-      let identity = try client.serverStatus(endpoint)
+      let identity = try Self.establish(client, endpoint)
       serverIdentity = identity
       connectionState = .online
       lastError = nil

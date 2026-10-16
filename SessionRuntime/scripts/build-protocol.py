@@ -114,7 +114,7 @@ op('integration.list','session','agent_integration','P5','read',obj(),obj({'inte
 op('integration.install','session','agent_integration','P5','mutation',obj({'provider':SHORT}),obj({'installed':BOOL}),('provider_unsupported',))
 op('integration.remove','session','agent_integration','P5','mutation',obj({'provider':SHORT}),obj({'removed':BOOL}))
 op('server.prepare','bootstrap',None,'P3','create',obj({'sessionName':SHORT,'allowStart':BOOL,'requiredCapabilities':array(SHORT,128)}),obj({'session':ref('session'),'protocolMajor':integer(),'protocolMinor':integer(),'capabilities':array(SHORT,128)}),('setup_required','incompatible_protocol'))
-op('server.status','session','health_check','P1','read',obj(),obj({'version':SHORT,'protocolMajor':integer(),'protocolMinor':integer(),'capabilities':array(SHORT,128)}))
+op('server.status','session','health_check','P1','read',obj(),obj({'version':SHORT,'protocolMajor':integer(),'protocolMinor':integer(),'capabilities':array(SHORT,128)},{'loginSession':integer(1,4294967295)}))
 op('server.stop','session','server_lifecycle','P1','mutation',obj(),obj({'stopping':enum(True)}))
 op('server.replace','session','server_replace','P8','mutation',obj({'installedVersion':SHORT,'expectedServerEpoch':ID,'stopRunningTerminals':BOOL}),obj({'operationID':ID,'state':enum('prepared','replacing','completed')}),('replacement_not_authorized','version_unavailable'))
 op('server.handoff','session','live_handoff','P8','mutation',obj({'installedVersion':SHORT,'expectedServerEpoch':ID}),obj({'operationID':ID,'state':enum('prepared','transferring','committed','rolled_back')}),('handoff_unsupported','handoff_failed'))

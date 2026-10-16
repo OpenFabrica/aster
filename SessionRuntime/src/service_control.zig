@@ -29,7 +29,29 @@ pub const Status = struct {
     protocolMajor: u16 = protocol.major,
     protocolMinor: u16 = protocol.minor,
     capabilities: []const []const u8 = &capabilities,
+    /// macOS audit (login) session of this process; absent elsewhere. The app
+    /// compares it with its own session to spot a service that outlived a
+    /// logout: its children can no longer reach the GUI (open, pasteboard).
+    loginSession: ?u32 = null,
 };
+
+/// Returns the audit session ID on macOS, or null when unavailable. Declared
+/// against libSystem directly so test targets that link only libc still build.
+pub fn loginSession() ?u32 {
+    if (builtin.os.tag != .macos) return null;
+    // Mirrors `auditinfo_addr_t` from <bsm/audit.h> (48 bytes, asid at offset 36).
+    const AuditInfoAddr = extern struct {
+        auid: u32,
+        mask: extern struct { success: u32, failure: u32 },
+        termid: extern struct { port: i32, kind: u32, address: [4]u32 },
+        asid: i32,
+        flags: u64,
+    };
+    const getaudit_addr = @extern(*const fn (*AuditInfoAddr, c_uint) callconv(.c) c_int, .{ .name = "getaudit_addr" });
+    var info: AuditInfoAddr = undefined;
+    if (getaudit_addr(&info, @sizeOf(AuditInfoAddr)) != 0 or info.asid <= 0) return null;
+    return @intCast(info.asid);
+}
 
 /// Owns handshake strings; returned Hello slices borrow this instance. Only
 /// implemented handlers advertise capabilities. Caller authenticates the peer
@@ -104,7 +126,7 @@ pub const Control = struct {
                 if (request.params.object.count() != 0)
                     return try failure(allocator, request, "invalid_request", "This operation accepts no parameters.", .never);
                 if (request.operation == .@"server.status")
-                    return try self.success(allocator, request, Status{ .capabilities = self.advertised_capabilities });
+                    return try self.success(allocator, request, Status{ .capabilities = self.advertised_capabilities, .loginSession = loginSession() });
                 return try self.success(allocator, request, .{ .alive = true });
             },
             // P8.3: server.replace (cold) dispatched to domain handler.
@@ -216,6 +238,8 @@ test "status and health replies satisfy the shared response envelope" {
         try response.value.validate(request.value);
         if (operation == .@"server.status") {
             try std.testing.expectEqualStrings(version, response.value.result.object.get("version").?.string);
+            if (builtin.os.tag == .macos)
+                try std.testing.expectEqual(@as(i64, loginSession().?), response.value.result.object.get("loginSession").?.integer);
         } else try std.testing.expect(response.value.result.object.get("alive").?.bool);
     }
 }
