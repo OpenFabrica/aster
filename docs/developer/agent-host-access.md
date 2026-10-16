@@ -248,8 +248,14 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   `host_read`、`host_interrupt`、`host_close`。结果是文本（状态行 + 代码块输出）加 `structuredContent`；
   错误是 `isError: true` 的工具结果，带按错误码给出的下一步提示。
 - 设置里的「安装到 Claude Code / Codex」：执行 `claude mcp add --scope user aster -- <aster> mcp` /
-  `codex mcp add aster -- <aster> mcp`（先 remove 再 add，便于 App 移动后覆盖旧路径）；CLI 路径优先用
-  `aster` 稳定 symlink。命令找不到或失败时把手动配置片段放进剪贴板。不直接改它们的配置文件。
+  `codex mcp add aster -- <aster> mcp`（先 remove 再 add，便于覆盖旧路径）。`<aster>` **只能**是 PATH 里的
+  `aster` 稳定 symlink（`AgentHostMCPInstallService.stableCommandPath`），没装时先由 `AsterCLIInstaller` 装上；
+  从不写 App 包内的 `aster-cli` 绝对路径——开发构建删除、App 移动或换装正式版后它会失效，客户端启动即报错。
+  symlink 指向另一个 Aster 时照样写稳定路径，并提示那个版本需支持 `aster mcp`。
+  命令找不到或失败时把手动配置片段放进剪贴板。不直接改它们的配置文件。
+- 登记检查：设置页在后台只读 `~/.claude.json` 的 `mcpServers.aster.command` 与 `~/.codex/config.toml` 的
+  `[mcp_servers.aster]`（`AgentHostMCPRegistration`）。登记的命令不是稳定路径、在 App 包内或已不存在时，
+  按钮变成「修复 …」并显示原因。
 
 ## 设置页
 

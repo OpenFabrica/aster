@@ -24,13 +24,32 @@ final class SettingsAgentAccessBridge {
     return await AgentHostMCPInstallService.install(client, locator: locator)
   }
 
+  /// 读取客户端登记状态；测试注入。真实实现读 `~/.claude.json` 与 `~/.codex/config.toml`。
+  var readRegistrations: @Sendable () -> [AgentHostMCPInstallService.Client: (command: String?, status: AgentHostMCPRegistration.Status)] = {
+    AgentHostMCPInstallService.registrations()
+  }
+  /// 最近一次读取的登记状态（快照只读这份缓存，读文件在后台）。
+  private(set) var registrations: [AgentHostMCPInstallService.Client: (command: String?, status: AgentHostMCPRegistration.Status)] = [:]
+
   init(owner: SettingsHostsBridge) {
     self.owner = owner
   }
 
-  /// 运行时状态变化时请求设置页刷新。
+  /// 运行时状态变化时请求设置页刷新；同时在后台检查已登记的 MCP 命令是否会失效。
   func start() {
     runtime()?.onChange = { [weak self] in self?.owner?.scheduleRefresh() }
+    refreshRegistrations()
+  }
+
+  /// 后台重读客户端配置里的 aster 登记，回到主线程后刷新快照。
+  func refreshRegistrations() {
+    let read = readRegistrations
+    Task { @MainActor [weak self] in
+      let result = await Task.detached(priority: .utility) { read() }.value
+      guard let self else { return }
+      self.registrations = result
+      self.owner?.scheduleRefresh()
+    }
   }
 
   // MARK: - 快照
@@ -77,6 +96,11 @@ final class SettingsAgentAccessBridge {
       "auditDirectory": (runtime.audit.directory.path as NSString).abbreviatingWithTildeInPath,
     ]
     object["cliPath"] = cli
+    object["registrations"] = Dictionary(uniqueKeysWithValues: registrations.map { client, entry -> (String, Any) in
+      var row: [String: Any] = ["status": entry.status.rawValue]
+      row["command"] = entry.command
+      return (client.rawValue, row)
+    })
     return object
   }
 
@@ -152,6 +176,7 @@ final class SettingsAgentAccessBridge {
         NSPasteboard.general.setString(snippet, forType: .string)
       }
       self.owner?.toast(outcome.message, !outcome.succeeded)
+      self.refreshRegistrations()
       complete(outcome.succeeded)
     }
   }

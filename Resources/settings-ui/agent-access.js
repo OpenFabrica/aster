@@ -251,12 +251,16 @@
   }
 
   /// 接入 agent 卡片：把 aster mcp 注册到 Claude Code / Codex，并显示命令行工具路径。
+  /// 已登记的命令会失效（App 包内路径、已不存在）时提示，按钮改成「修复」。
   function installSection(info, send, t) {
     const [section, card] = makeGroup(t("接入 agent"));
-    const buttons = [
-      button(t("安装到 Claude Code"), "", () => send("hosts.installAgentMCP", { client: "claude" })),
-      button(t("安装到 Codex"), "", () => send("hosts.installAgentMCP", { client: "codex" })),
-    ];
+    const registrations = info.registrations || {};
+    const clients = [["claude", "Claude Code"], ["codex", "Codex"]];
+    const buttons = clients.map(([client, name]) => {
+      const repair = registrations[client]?.status === "needsRepair";
+      const label = repair ? t("修复 {name}", { name }) : t("安装到 {name}", { name });
+      return button(label, repair ? "primary" : "", () => send("hosts.installAgentMCP", { client }));
+    });
     const row = settingRow(t("MCP 服务"), t("把 aster mcp 注册为 Claude Code / Codex 的 MCP server（用户级）。"), buttons);
     const copy = row.querySelector(".setting-copy");
     if (info.cliPath) {
@@ -265,6 +269,14 @@
       copy.appendChild(path);
     } else {
       copy.appendChild(element("span", "setting-warning", t("尚未安装 aster 命令；点「安装」时会一并安装，MCP 配置只写这个稳定路径")));
+    }
+    for (const [client, name] of clients) {
+      const entry = registrations[client];
+      if (entry?.status !== "needsRepair") continue;
+      const warning = element("span", "setting-warning",
+        t("{name} 里登记的命令会失效：{command}。点「修复」改成稳定路径，否则启动时会报错。", { name, command: entry.command || "" }));
+      warning.title = entry.command || "";
+      copy.appendChild(warning);
     }
     card.appendChild(row);
     return section;

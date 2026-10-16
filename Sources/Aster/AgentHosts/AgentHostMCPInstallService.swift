@@ -56,6 +56,25 @@ enum AgentHostMCPInstallService {
     var message: String
   }
 
+  /// 各客户端已登记的 aster MCP 命令及状态。读客户端配置文件，较慢，只在后台调用。
+  nonisolated static func registrations(
+    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+    stablePath: String? = stableCommandPath()
+  ) -> [Client: (command: String?, status: AgentHostMCPRegistration.Status)] {
+    let claudeData = try? Data(contentsOf: home.appendingPathComponent(".claude.json"))
+    let codexText = try? String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
+    let commands: [Client: String?] = [
+      .claude: claudeData.flatMap { AgentHostMCPRegistration.claudeCommand(fromJSON: $0, serverName: serverName) },
+      .codex: codexText.flatMap { AgentHostMCPRegistration.codexCommand(fromTOML: $0, serverName: serverName) },
+    ]
+    return commands.mapValues { command in
+      let status = AgentHostMCPRegistration.status(
+        command: command, stablePath: stablePath,
+        isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
+      return (command, status)
+    }
+  }
+
   /// 手动配置片段。
   static func snippet(for client: Client, cliPath: String) -> String {
     switch client {
