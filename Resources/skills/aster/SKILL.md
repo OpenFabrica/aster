@@ -1,6 +1,6 @@
 ---
 name: aster
-description: "Control Aster, a macOS terminal workspace for coding agents. Use only when the user explicitly mentions Aster or asks to use Aster to inspect or control panes, tabs, windows, commands, or another agent. Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires ASTER_ENV=1."
+description: "Control Aster, a macOS terminal workspace for coding agents. Use only when the user explicitly mentions Aster or asks to use Aster to inspect or control panes, tabs, windows, commands, or another agent. Also use when the user asks to run commands on their saved SSH hosts (for example 'run df -h on host prod'). Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires ASTER_ENV=1."
 ---
 
 # Aster
