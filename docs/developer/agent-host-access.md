@@ -208,7 +208,7 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
 
 ## 设置页
 
-「主机 → Agent 访问」子页（`agent-access.js`，入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send)`；
+「主机 → Agent 访问」子页（`agent-access.js`，入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`，`ui.t` 为翻译函数，`send` 返回的 Promise 失败时忽略、以下一次快照为准；
 数据在 `hosts.agentAccess`）：总开关、授权列表与撤销、agent 终端列表、MCP 安装、分页活动记录
 （`hosts.agentAuditPage {before?, limit≤50}`，结果经消息 `agentAccessAuditPage` 异步送回；修改显示
 `字段 原值 → 新值`，新建 / 删除显示属性清单）。动作在 `SettingsAgentAccessBridge`。

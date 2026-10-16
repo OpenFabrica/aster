@@ -90,7 +90,7 @@ scripts/build-app.sh
 - 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
 - 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
 - 「Agent 访问」子页（agent 远程执行的总开关、授权、agent 终端、MCP 安装与活动记录）：`Resources/settings-ui/agent-access.js`
-  （入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send)`），Swift 侧协作者 `SettingsAgentAccessBridge`。
+  （入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`，`ui.t` 为翻译函数，`send` 返回的 Promise 失败时忽略、以下一次快照为准），Swift 侧协作者 `SettingsAgentAccessBridge`。
   数据在快照的 `hosts.agentAccess`；动作 `hosts.setAgentAccessEnabled`、`hosts.revokeAgentGrant`、`hosts.revokeAllAgentGrants`、
   `hosts.agentAuditPage`（分页读审计，结果经消息 `agentAccessAuditPage` 异步送回）、`hosts.installAgentMCP`。
   语义与审计字段见 [Agent 远程执行](agent-host-access.md)。
