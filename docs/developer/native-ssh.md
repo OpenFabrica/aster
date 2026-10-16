@@ -160,7 +160,9 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 解析只有一份：`aster-ssh known-hosts list|remove`（`SshRuntime/src/known_hosts_cli.rs`）复用连接校验用的 `known_hosts.rs`，能处理 hashed、`[host]:port`、通配、取反、`@revoked` 与 `@cert-authority`。请求走 stdin JSON，协议见 `SshRuntime/PROTOCOL.md`「known-hosts 子命令」。
 - 查询参数（`SSHKnownHostsQuery`，AsterCore）：文件 = 默认文件 + 各主机（含跳板各跳）`knownHostsFiles` 的并集，系统级文件只读列出；`match` = 各可解析主机及其跳板的 `host:port`，再加没有绑定主机的旧机器 target。hashed 记录只能靠 `matches` 显示主机名。
 - 删除防误删：`remove` 带 `lineDigest`（原行 SHA-256），行已变化时退出码 3（stale），App toast 提示并重新列出。`host` 非空时只删多主机行里命中的模式，其余字节不变。系统级文件一律拒绝。
-- App 侧 `SettingsKnownHostsBridge` 只接受上一次列表里出现过、所在文件可写、摘要一致的记录；指定主机时它必须是该记录的 `matches` 之一。同一时刻只跑一个删除，删除后不论成败都重新列出，旧行号不再复用。
+- App 侧规则只有一份：`SSHKnownHostsService`（`Sources/Aster/SSH/`，与界面形式无关）只接受上一次列表里出现过、所在文件可写、摘要一致的记录；指定主机时它必须是该记录的 `matches` 之一。同一时刻只跑一个删除，删除后不论成败都重新列出，旧行号不再复用。列出用加载代次丢弃过期结果，子进程不占主线程。结果提示走服务的 `toast`，状态变化走 `didChange`。
+- 使用方：侧栏主机页的「已知主机」子页（`KnownHostsPageViewController`，在 `HostsHubViewController.defaultFactories()` 登记）与设置页网页桥接 `SettingsKnownHostsBridge`。桥接只把服务状态写成网页快照、把 payload 还原成 `SSHKnownHostsRemoveRequest`；网页页面与桥接之后会删掉。
+- 原生页面：分组、徽章、hashed 记录的名称、搜索与删除选项由纯函数 `KnownHostsPageContent` 推导。删除用 `NSAlert` sheet：单模式行只有「删除」，多模式行再给每个命中主机一个「只删除 <host>」。首次显示时自动列出一次；之后只在点「重新加载」或删除后重新列出，因为工作区每次整树重建（例如弹出 toast）都会回调 `pageDidAppear`。提示写到外壳所属窗口的 `AppModel.notice`。
 - 写入修复：改写走 `atomic_file::write`，先顺着符号链接找到真实文件，在它的目录写临时文件（`create_new`）再 rename，保留原权限。之前 `replace()` 直接 rename 会把指向 dotfiles 的 `~/.ssh/known_hosts` 链接换成普通文件。
 
 ## 主机标签
@@ -196,5 +198,5 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 ## 验证
 
 - Rust：`cd SshRuntime && cargo test`。用进程内的 russh 服务端覆盖认证、known_hosts、exec 退出码、pty、channel 关闭时限、跳板链、结构化错误行和协议样例。
-- Swift：`./scripts/test.sh --no-parallel --filter 'nativeTransport|sshBrokerSupervisor|machineHostBinding|sshAuthCoordinator|sshCredentialStore|sshHostProfile|sshHostStore|sshBrokerProtocol|settingsHosts|sshConfigImport|nativeSSHTicket|nativeSSHRunners|Vault|SettingsSSHKeys|knownHosts|SettingsKnownHosts'`。保险库的真实二进制往返用例（`SSHVaultKeyToolTests`）需要先跑 `./scripts/build-ssh-runtime.sh .build/debug`，找不到二进制时跳过。
+- Swift：`./scripts/test.sh --no-parallel --filter 'nativeTransport|sshBrokerSupervisor|machineHostBinding|sshAuthCoordinator|sshCredentialStore|sshHostProfile|sshHostStore|sshBrokerProtocol|settingsHosts|sshConfigImport|nativeSSHTicket|nativeSSHRunners|Vault|SettingsSSHKeys|knownHosts|KnownHosts'`。保险库的真实二进制往返用例（`SSHVaultKeyToolTests`）需要先跑 `./scripts/build-ssh-runtime.sh .build/debug`，找不到二进制时跳过。
 - 打包：`./scripts/build-app.sh` 会构建 aster-ssh、复制进 `Contents/MacOS/`、签名并运行 `--version` 自检。
