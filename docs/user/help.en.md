@@ -329,6 +329,8 @@ The **View** menu saves the current tab as `.asterrecipe` or opens a Recipe. Rec
 
 External commands are fully listed for confirmation by default, including command 21 onward. **Settings → Recipes** offers never replay, one confirmation, confirmation per command, or trust only identical SHA-256 content. Trust follows contents, not paths; edits ask again. Per-command confirmation offers run/skip/stop immediately before sending each command. Commands send sequentially only after Shell Integration is ready at an idle prompt and the preceding command has a completion marker.
 
+**Command snippets** are Recipes that contain only commands. In **Settings → Recipes**, click **New Command Snippet** and enter a name, commands (one per line), and optional comma-separated tags; **Edit…** and **Delete…** on a snippet row change it or move the file to the Trash. In Open Quickly (`⌘⇧O`, then `⌘E` for Recipes), snippets show a Snippet badge, the first command, and `#tags`, so you can search by command or tag. `↩` pastes the commands into the current pane and **never presses Return**; check them and press Return yourself. **Run** in the `⌘K` menu runs them one by one in the current pane after the same full command review as opening a Recipe (changed file contents ask again); **Open in New Tab** runs them in a new tab. When the current pane is a saved SSH host, snippets whose tags match that host's tags appear first.
+
 **Settings → Shell → Session Restore** controls what returns in each terminal after quitting and reopening Aster:
 
 - **Restore tmux / screen Sessions**: if the foreground process was `tmux`/`screen` at snapshot, the first prompt runs `tmux attach -t <session>` or `screen -r <session>`, or attaches without arguments if the name cannot be parsed.

@@ -12,6 +12,7 @@ Aster 把 Otty 的工作区流程、CLI 与代码 Agent 能力放在同一安全
 
 - `WorkflowRecipe`：可移植的 tab/window、Pane 树、内容级别和可选命令；不含 PID、FD 或运行对象。
 - `WorkflowRecipeTrustStore`：按规范化内容 SHA-256 记录信任，不按路径授权。
+- 命令片段（Snippet）：`.commands` scope 的 Recipe，可带 `tags`；规则在 `WorkflowSnippet`，不另建存储。
 - `WorkflowCLIAction`：已解析、有限大小的 CLI 意图；交付层再执行 IPC 和敏感会话门禁。
 - `WorkflowSessionRecoveryPlanner`：根据正常退出、崩溃、更新和 crash loop 决定恢复行为。
 - `AgentProvider` / `AgentSetupPlan`：八类 provider（含 Grok Build）的能力和最小增量安装步骤。
@@ -70,6 +71,14 @@ pnpm 的常见 bin 目录；不会启动登录 shell 或执行用户 rc 文件�
 版本造成 CLI 暂不可见时，已经存在的受管集成不会被误报为未安装。
 
 内置 `AsterNerdSymbols-Regular.ttf` 以进程级 CoreText 注册，并作为终端基础字体 cascade fallback；来源和许可证见 `THIRD-PARTY-NOTICES.md`。
+
+### 命令片段
+
+- 存储：Recipes 目录里的 `.commands` scope `.asterrecipe`。`[recipe]` 表新增可选 `tags = [...]`，只允许 `.commands` scope（布局 Recipe 带标签是 `invalidStructure`），最多 16 个、每个 ≤32 字节，不含逗号与控制字符；为空时不写出，所以没有标签的片段旧版本照样能读；带标签的文件在旧版本里会因未知键 `tags` 报 `unknownKey`。JSON 解码缺 `tags` 时补空数组。v1 不支持变量。
+- 编辑：`SnippetEditorSheet`（AppKit，NSAlert + accessoryView）收集名称、多行命令（一行一条，丢空行）和标签，`WorkflowSnippet.make` 规范化并按 `WorkflowRecipeTOML.validate` 校验，非法时带原输入重弹。设置页 Recipes 动作 `createTextSnippet`、`editSnippet {id}`、`deleteSnippet {id}`；`SnippetRecipeFiles` 只接受 Recipes 目录的直接子文件与 `.commands` scope，删除用 `trashItem`。
+- Open Quickly：`OpenQuicklySnippetCatalog` 把片段行的标题设为片段名、detail 为「首条命令 · 共 N 条 · #tags」，徽章「片段」。主动作 `AppModel.pasteSnippetIntoActivePane` 用 `pastePromptText`（bracketed paste + 粘贴保护），命令以 `\n` 连接，不发 Return。菜单「运行」`AppModel.runSnippet` 与打开 Recipe 共用 `authorizeRecipeReplay`（`WorkflowRecipeOpenPlanner` 信任审查 → 重放模式确认），再把命令放进当前 Pane 的 `pendingRecipeCommands`，经 `sendRecipeCommand`（`.recipeReplay` 来源）逐条发送；同一 Pane 已有未发完的 Recipe 命令时拒绝。「在新标签页打开」走原 `openRecipe`。
+- 排序：当前活动 Pane 是原生 SSH 主机（`TerminalSession.nativeSSH.hostID`）时，片段标签与该主机标签的交集数作为 `OpenQuicklyItem.score`，同匹配质量内排前。
+- 信任：Recipes 目录里的文件按 `recipeFile` 来源加载，内容 SHA-256 变化（包括改标签）后「运行」会重新要求审查；「粘贴」不执行命令，不需要审查。
 
 ### Project Memory MCP
 

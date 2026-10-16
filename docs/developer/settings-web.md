@@ -11,6 +11,7 @@ Aster 设置页以 Otty 1.3.1 应用包内的 `settings-ui.html` 为功能与视
 
 - `Resources/settings-ui/index.html`：静态入口与 CSP，只允许同目录脚本、样式和图片，禁止网络连接、对象、表单和外部 base URL。
 - `Resources/settings-ui/settings.js`：十一类字段清单、搜索、Otty 外观页专用渲染器、主题/Agent/Recipe/快捷键列表和消息协议。
+  Recipe 列表里的命令片段行（快照 `recipes[].snippet == true`）多出「编辑…」「删除…」，分别发 `editSnippet` / `deleteSnippet {id}`，由原生表单与确认框处理；见 [Workflows 与 Agent](workflows-and-agents.md)「命令片段」。
 - `Resources/settings-ui/settings.css`：Otty 风格的 200px 侧栏、单列卡片、外观预览、明暗外观、键盘焦点和响应式布局。
 - `Resources/settings-ui/nav-icons.js` / `nav-icons.css`：侧栏分区图标（24 网格，淡色填充 + 描边）与点击动画，对齐 Otty。`renderNav` 用 `AsterNavIcons.svg(id)` 填图标；点击时 `setSection` 会重建侧栏，所以动画要播在重建后的新按钮上（`AsterNavIcons.play`）。系统开启「减弱动态效果」时不播放。新增分区要同时补图标、动画名和测试 `SettingsNavIconsTests` 里的清单。
 - 滚动面包屑：`index.html` 的 `.content-column` 里 `#content-topbar` 悬浮在滚动区之上。内容滚过 24px 时 `#app` 加 `content-scrolled`，面包屑（Aster 标志 / 设置 / 当前分区）淡入，页内大标题淡出，过渡 200ms；切换分区或搜索时回到顶部并复位。

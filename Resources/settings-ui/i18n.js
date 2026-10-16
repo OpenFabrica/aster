@@ -983,7 +983,8 @@ window.AsterI18n = {
     "正在读取…": "Reading…",
     "证书颁发机构": "Certificate Authority",
     "只读": "Read-only",
-    "只删除 {host}": "Remove Only {host}"
+    "只删除 {host}": "Remove Only {host}",
+    "新建命令片段": "New Command Snippet"
   },
   "ja": {
     "界面文字": "インターフェースの文字",
@@ -1968,7 +1969,8 @@ window.AsterI18n = {
     "正在读取…": "読み込み中…",
     "证书颁发机构": "認証局",
     "只读": "読み取り専用",
-    "只删除 {host}": "{host} のみ削除"
+    "只删除 {host}": "{host} のみ削除",
+    "新建命令片段": "新規コマンドスニペット"
   },
   "fr": {
     "界面文字": "Texte de l’interface",
@@ -2953,7 +2955,8 @@ window.AsterI18n = {
     "正在读取…": "Lecture…",
     "证书颁发机构": "Autorité de certification",
     "只读": "Lecture seule",
-    "只删除 {host}": "Supprimer seulement {host}"
+    "只删除 {host}": "Supprimer seulement {host}",
+    "新建命令片段": "Nouvel extrait de commande"
   },
   "de": {
     "界面文字": "Text der Oberfläche",
@@ -3938,7 +3941,8 @@ window.AsterI18n = {
     "正在读取…": "Wird gelesen…",
     "证书颁发机构": "Zertifizierungsstelle",
     "只读": "Schreibgeschützt",
-    "只删除 {host}": "Nur {host} entfernen"
+    "只删除 {host}": "Nur {host} entfernen",
+    "新建命令片段": "Neues Befehls-Snippet"
   },
   "zh-Hant": {
     "界面文字": "介面文字",
@@ -4923,6 +4927,7 @@ window.AsterI18n = {
     "正在读取…": "正在讀取…",
     "证书颁发机构": "憑證授權單位",
     "只读": "唯讀",
-    "只删除 {host}": "只刪除 {host}"
+    "只删除 {host}": "只刪除 {host}",
+    "新建命令片段": "新增命令片段"
   }
 };

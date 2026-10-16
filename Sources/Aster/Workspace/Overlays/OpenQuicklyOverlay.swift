@@ -779,15 +779,31 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
         )
       ]
     }
-    for url in readRecipeURLs() {
-      result.append(
-        Target(
-          item: .init(
-            id: "recipe:\(url.path)", kind: .recipe,
-            title: url.deletingPathExtension().lastPathComponent, detail: url.path),
-          symbol: "doc.text", badge: "Recipe", accented: false, actionTitle: L("打开 Recipe")
-        ) { [weak model] in model?.openRecipe(from: url) })
-      result[result.count - 1].menuActions = [
+    let recipeRows = OpenQuicklySnippetCatalog.rows(
+      urls: readRecipeURLs(), hostTags: model.activeNativeSSHHostTags,
+      load: { try WorkflowRecipeTOML.load(from: $0).recipe })
+    for row in recipeRows {
+      let url = row.url
+      let item = OpenQuicklyItem(id: row.id, kind: .recipe, title: row.title, detail: row.detail, score: row.score)
+      if let snippet = row.snippet {
+        // 片段：主动作粘贴到当前 Pane 且不回车；「运行」与新标签页打开都走 Recipe 信任审查。
+        let text = WorkflowSnippet.pasteText(snippet)
+        result.append(
+          Target(
+            item: item, symbol: "text.insert", badge: L("片段"), accented: false,
+            actionTitle: L("粘贴到当前 Pane")
+          ) { [weak model] in model?.pasteSnippetIntoActivePane(text) })
+        result[result.count - 1].menuActions = [
+          (title: L("运行"), handler: { [weak model] in model?.runSnippet(from: url) }),
+          (title: L("在新标签页打开"), handler: { [weak model] in model?.openRecipe(from: url) }),
+        ]
+      } else {
+        result.append(
+          Target(
+            item: item, symbol: "doc.text", badge: "Recipe", accented: false, actionTitle: L("打开 Recipe")
+          ) { [weak model] in model?.openRecipe(from: url) })
+      }
+      result[result.count - 1].menuActions += [
         (
           title: L("在 Finder 中显示"),
           handler: { [weak model] in

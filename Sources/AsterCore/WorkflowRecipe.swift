@@ -147,6 +147,8 @@ public struct WorkflowRecipe: Codable, Equatable, Sendable {
   public var content: WorkflowRecipeContent
   public var tabs: [WorkflowRecipeTab]
   public var commands: [String]
+  /// 命令片段的标签，只用于 `.commands` scope；为空时不写进 TOML，旧版本仍能读取该文件。
+  public var tags: [String]
 
   public init(
     name: String,
@@ -154,7 +156,8 @@ public struct WorkflowRecipe: Codable, Equatable, Sendable {
     scope: WorkflowRecipeScope,
     content: WorkflowRecipeContent,
     tabs: [WorkflowRecipeTab] = [],
-    commands: [String] = []
+    commands: [String] = [],
+    tags: [String] = []
   ) {
     self.name = name
     self.version = version
@@ -162,6 +165,23 @@ public struct WorkflowRecipe: Codable, Equatable, Sendable {
     self.content = content
     self.tabs = tabs
     self.commands = commands
+    self.tags = tags
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case name, version, scope, content, tabs, commands, tags
+  }
+
+  /// JSON 解码：`tags` 是后加字段，缺失时为空数组。
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    name = try container.decode(String.self, forKey: .name)
+    version = try container.decode(Int.self, forKey: .version)
+    scope = try container.decode(WorkflowRecipeScope.self, forKey: .scope)
+    content = try container.decode(WorkflowRecipeContent.self, forKey: .content)
+    tabs = try container.decode([WorkflowRecipeTab].self, forKey: .tabs)
+    commands = try container.decode([String].self, forKey: .commands)
+    tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
   }
 
   /// 按 Tab、Pane 顺序返回所有命令，供信任提示完整展示将要 replay 的内容。
@@ -226,6 +246,9 @@ public enum WorkflowRecipeTOML {
   public static let maximumCommands = 128
   public static let maximumCommandBytes = 4_096
   public static let maximumPathBytes = 4_096
+  /// 命令片段最多的标签数与单个标签的 UTF-8 字节上限，与主机标签一致。
+  public static let maximumTags = 16
+  public static let maximumTagBytes = 32
   /// 布局载荷另设上限，避免小量 Pane 借递归 Codable 字符串消耗完整 2 MiB 文件预算。
   public static let maximumLayoutBytes = 256 * 1_024
   public static let maximumLayoutDepth = 16
@@ -288,6 +311,7 @@ public enum WorkflowRecipeTOML {
 
     if recipe.scope == .commands {
       lines.append("commands = \(encodeArray(recipe.commands))")
+      if !recipe.tags.isEmpty { lines.append("tags = \(encodeArray(recipe.tags))") }
     } else {
       for tab in recipe.tabs {
         lines.append("")
@@ -332,6 +356,16 @@ public enum WorkflowRecipeTOML {
       throw WorkflowRecipeTOMLError.unsupportedVersion(recipe.version)
     }
     try validateText(recipe.name, maximumBytes: 256, field: "recipe.name", allowEmpty: false)
+
+    // 标签只属于命令片段；布局 Recipe 带标签视为结构错误，而不是静默丢弃。
+    guard recipe.scope == .commands || recipe.tags.isEmpty else {
+      throw WorkflowRecipeTOMLError.invalidStructure
+    }
+    guard recipe.tags.count <= maximumTags else { throw WorkflowRecipeTOMLError.valueTooLong("recipe.tags") }
+    for tag in recipe.tags {
+      try validateText(tag, maximumBytes: maximumTagBytes, field: "recipe.tags", allowEmpty: false)
+      guard !tag.contains(",") else { throw WorkflowRecipeTOMLError.invalidValue("recipe.tags", line: 0) }
+    }
 
     switch recipe.scope {
     case .commands:
@@ -635,6 +669,7 @@ public enum WorkflowRecipeTOML {
     var recipeVersion: Int?
     var recipeScope: WorkflowRecipeScope?
     var recipeCommands: [String]?
+    var recipeTags: [String]?
     var tabs: [TabBuilder] = []
 
     private enum Context {
@@ -721,7 +756,8 @@ public enum WorkflowRecipeTOML {
         scope: recipeScope,
         content: hasCommands ? .includeCommands : .layoutOnly,
         tabs: builtTabs,
-        commands: commands
+        commands: commands,
+        tags: recipeTags ?? []
       )
     }
 
@@ -761,6 +797,11 @@ public enum WorkflowRecipeTOML {
             throw WorkflowRecipeTOMLError.duplicateKey(key, line: line)
           }
           recipeCommands = try Self.parseStringArray(value, line: line)
+        case "tags":
+          guard recipeTags == nil else {
+            throw WorkflowRecipeTOMLError.duplicateKey(key, line: line)
+          }
+          recipeTags = try Self.parseStringArray(value, line: line)
         default:
           throw WorkflowRecipeTOMLError.unknownKey(key, line: line)
         }
