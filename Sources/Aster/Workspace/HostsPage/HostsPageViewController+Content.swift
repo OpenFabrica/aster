@@ -40,44 +40,55 @@ extension HostsPageViewController {
     return HostsPageCardView(
       content: content, showsTrailingDetail: listMode,
       onOpen: { [weak self] in self?.model.openNativeSSH(hostID: id) },
-      onEdit: { [weak self] in self?.model.showHostSettings(hostID: id) },
+      onEdit: { [weak self] in self?.openEditor(.edit(id)) },
       menuProvider: { [weak self] in self?.makeHostMenu(id) ?? NSMenu() })
   }
 
   // MARK: - 菜单
 
-  /// 主机卡片的右键菜单：连接 / 编辑… / 复制 / 复制 SSH 命令 / 删除…。
+  /// 主机卡片的右键菜单：连接 / 编辑… / 复制 / 复制 SSH 命令 / 添加为远程机器… / 删除…。
   func makeHostMenu(_ id: UUID) -> NSMenu {
     let menu = NSMenu()
     menu.autoenablesItems = false
     menu.addItem(ActionMenuItem(title: L("连接")) { [weak self] in self?.model.openNativeSSH(hostID: id) })
-    menu.addItem(ActionMenuItem(title: L("编辑主机…")) { [weak self] in self?.model.showHostSettings(hostID: id) })
+    menu.addItem(ActionMenuItem(title: L("编辑主机…")) { [weak self] in self?.openEditor(.edit(id)) })
     menu.addItem(.separator())
-    menu.addItem(ActionMenuItem(title: L("创建副本")) { [weak self] in self?.model.duplicateHost(hostID: id) })
+    menu.addItem(ActionMenuItem(title: L("创建副本")) { [weak self] in self?.duplicateHost(id) })
     menu.addItem(ActionMenuItem(title: L("复制 SSH 命令")) { [weak self] in self?.model.copySSHCommand(hostID: id) })
+    menu.addItem(ActionMenuItem(title: L("添加为远程机器…")) { [weak self] in self?.deferred { $0.addHostAsMachine(id) } })
     menu.addItem(.separator())
     menu.addItem(
       ActionMenuItem(title: L("删除主机…")) { [weak self] in
-        guard let self else { return }
-        // 菜单还在追踪事件时开 sheet 会卡住菜单收尾；推到下一轮主循环。
-        DispatchQueue.main.async { [weak self] in
-          self?.model.confirmAndDeleteHost(hostID: id, in: self?.view.window)
+        self?.deferred { page in
+          page.confirmAndDeleteHost(id) { [weak page] deleted in
+            // 删掉的正是面板里在编辑的主机时，一起关掉面板。
+            guard deleted, let page, page.editorPanel?.mode == .edit(id) else { return }
+            page.closeEditor()
+          }
         }
       })
     return menu
   }
 
-  /// 「新建主机」旁的下拉：新建主机… / 从 ~/.ssh/config 导入 / 在设置中管理主机…。
+  /// 「新建主机」旁的下拉：新建主机… / 默认设置… / 从 ~/.ssh/config 导入 / 在 ~/.ssh/config 中编辑。
   func makeNewHostMenu() -> NSMenu {
     let menu = NSMenu()
     menu.autoenablesItems = false
     menu.addItem(ActionMenuItem(title: L("新建主机…")) { [weak self] in self?.createHost() })
-    menu.addItem(
-      ActionMenuItem(title: L("从 ~/.ssh/config 导入")) { [weak self] in self?.model.importHostsFromSSHConfig() })
+    menu.addItem(ActionMenuItem(title: L("默认设置…")) { [weak self] in self?.openEditor(.defaults) })
     menu.addItem(.separator())
     menu.addItem(
-      ActionMenuItem(title: L("在设置中管理主机…")) { [weak self] in self?.model.showHostSettings(hostID: nil) })
+      ActionMenuItem(title: L("从 ~/.ssh/config 导入")) { [weak self] in self?.model.importHostsFromSSHConfig() })
+    menu.addItem(ActionMenuItem(title: L("在 ~/.ssh/config 中编辑")) { [weak self] in self?.editSSHConfig() })
     return menu
+  }
+
+  /// 菜单还在追踪事件时开 sheet 或模态流程会卡住菜单收尾；推到下一轮主循环再执行。
+  private func deferred(_ action: @escaping (HostsPageViewController) -> Void) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      action(self)
+    }
   }
 
   /// 标签筛选菜单：「全部标签」+ 已有标签，当前选择打勾。
@@ -113,21 +124,5 @@ extension HostsPageViewController {
       menu.addItem(item)
     }
     return menu
-  }
-
-  // MARK: - 动作
-
-  /// 新建主机：搜索框里是地址时预填它；钻在分组里时预填该分组。保存后可选立即连接。
-  func createHost() {
-    let typed = QuickConnectTarget.looksLikeTarget(query.search)
-      ? QuickConnectTarget.parse(query.search) : nil
-    let prefill = SaveSSHHostSheet.Prefill(
-      name: typed?.host ?? "", group: query.group,
-      target: typed ?? QuickConnectTarget(user: nil, host: "", port: nil))
-    let window = view.window
-    // 按钮回调里直接开模态表单会打断按钮自身的事件收尾；推到下一轮主循环。
-    DispatchQueue.main.async { [weak self] in
-      self?.model.presentSaveHost(prefill: prefill, title: L("新建主机"), in: window)
-    }
   }
 }
