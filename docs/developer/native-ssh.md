@@ -94,6 +94,15 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 安全上限：单个文件 1MB，最多 64 个文件。
 - 与 OpenSSH 的差异：Host 匹配不区分大小写。
 
+## 主机标签
+
+- 模型：`SSHHostProfile.tags: [String]?`，nil 表示没有标签。默认项不使用标签，`SSHHostStore.normalized` 会把它清成 nil，标签也不参与继承。
+- 规范化（`SSHHostStore.normalizedTags`）：去首尾空白、丢弃空串、不分大小写去重并保留第一次出现的写法，结果为空时存成 nil。
+- 校验（`SSHHostStore.tagsAreValid`）：最多 16 个，每个不超过 32 个 UTF-8 字节，不含逗号、换行和控制字符；违反时原因是 `invalid tags`，设置页显示「标签过长或包含逗号/换行」。
+- 兼容：`hosts.json` 版本号仍是 1，新字段是增量加的，旧文件没有 `tags` 键也能读。降级到旧版后再保存会丢掉标签。
+- 字段同步：设置页桥接按字段手写，`SettingsHostsBridge.profileJSON`、`+Actions.swift` 的 `duplicate()` 和 `decodeProfile`（控制字符扫描）都带上了 `tags`；以后加字段也要同时改这三处，否则从网页保存会悄悄丢字段。
+- 使用方：设置页筛选与 chip、Open Quickly 主机行的 detail（`connectString · group · #tag1 #tag2`，模糊搜索能命中标签）、`host.list` 的 `tags` 输出与 `{tags:[…]}` 筛选（AND、不分大小写；CLI 为 `aster-cli host list --tag X`，可重复）。
+
 ## 验证
 
 - Rust：`cd SshRuntime && cargo test`。用进程内的 russh 服务端覆盖认证、known_hosts、exec 退出码、pty、channel 关闭时限、跳板链、结构化错误行和协议样例。

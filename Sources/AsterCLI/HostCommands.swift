@@ -9,7 +9,7 @@ import Foundation
 enum HostCommands {
   static let usage = """
     已保存主机：
-      host list [--json]
+      host list [--tag <标签>]... [--json]
     """
 
   /// 判断这组 argv 是否属于本模块。返回 false 表示交回其它解析器。
@@ -24,11 +24,35 @@ enum HostCommands {
     let rest = argv.dropFirst(2)
     switch subcommand {
     case "list":
-      guard rest.isEmpty else { throw usageError("host list 不接受额外参数：\(rest.joined(separator: " "))") }
-      return MachineCommands.Invocation(method: "host.list", params: nil, render: renderHostList)
+      let tags = try parseTagOptions(Array(rest))
+      let params: JSONValue? = tags.isEmpty ? nil : .object(["tags": .array(tags.map { .string($0) })])
+      return MachineCommands.Invocation(method: "host.list", params: params, render: renderHostList)
     default:
       throw usageError("未知子命令: host \(subcommand)")
     }
+  }
+
+  /// 解析 `host list` 的 `--tag X` / `--tag=X`（可重复）；其它参数都是用法错误。
+  static func parseTagOptions(_ arguments: [String]) throws -> [String] {
+    var tags: [String] = []
+    var index = 0
+    while index < arguments.count {
+      let argument = arguments[index]
+      if argument == "--tag" {
+        guard index + 1 < arguments.count else { throw usageError("--tag 需要一个标签") }
+        tags.append(arguments[index + 1])
+        index += 2
+      } else if argument.hasPrefix("--tag=") {
+        tags.append(String(argument.dropFirst("--tag=".count)))
+        index += 1
+      } else {
+        throw usageError("host list 不接受参数：\(argument)")
+      }
+    }
+    if tags.contains(where: { $0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+      throw usageError("--tag 不能为空")
+    }
+    return tags
   }
 
   private static func usageError(_ message: String) -> ControlClientError {
@@ -37,7 +61,7 @@ enum HostCommands {
 
   // MARK: - 文本渲染
 
-  /// 主机列表：每行「id 名称 分组 user@host:port 跳板」，缺省字段写 `-`。
+  /// 主机列表：每行「id 名称 分组 user@host:port 跳板 标签」，标签用逗号连接，缺省字段写 `-`。
   static func renderHostList(_ value: JSONValue) throws -> String {
     var lines: [String] = []
     if case .string(let error)? = value["configurationError"] {
@@ -50,9 +74,20 @@ enum HostCommands {
           text(host["id"]), text(host["name"]), text(host["group"], fallback: "-"),
           text(host["target"]),
           text(host["jumpHostName"], fallback: text(host["jumpHostID"], fallback: "-")),
+          tagText(host["tags"]),
         ].joined(separator: "\t"))
     }
     return lines.joined(separator: "\n")
+  }
+
+  /// 标签数组连成逗号分隔文本；没有标签时写 `-`。
+  private static func tagText(_ value: JSONValue?) -> String {
+    guard case .array(let tags)? = value else { return "-" }
+    let names = tags.compactMap { tag -> String? in
+      if case .string(let name) = tag { return name }
+      return nil
+    }
+    return names.isEmpty ? "-" : names.joined(separator: ",")
   }
 
   private static func text(_ value: JSONValue?, fallback: String = "") -> String {

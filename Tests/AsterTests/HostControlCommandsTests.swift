@@ -51,7 +51,7 @@ func hostControlListShape() async throws {
     Issue.record("hosts 不是对象数组")
     return
   }
-  #expect(Set(row.keys).isSubset(of: ["id", "name", "group", "target", "jumpHostID", "jumpHostName"]))
+  #expect(Set(row.keys).isSubset(of: ["id", "name", "group", "target", "jumpHostID", "jumpHostName", "tags"]))
   let encoded = String(decoding: try JSONEncoder().encode(result), as: UTF8.self)
   for secret in ["password", "secret_key", "nc %h", "auth", "identity", "proxy"] {
     #expect(!encoded.contains(secret), "输出不应包含 \(secret)")
@@ -122,6 +122,8 @@ func hostWorkspaceCLIRejectsBadInvocations() throws {
     (["host"], "host list"),
     (["host", "bogus"], "host list"),
     (["host", "list", "extra"], "host list"),
+    (["host", "list", "--tag"], "host list"),
+    (["host", "list", "--tag", " "], "host list"),
     (["workspace"], "workspace list"),
     (["workspace", "bogus"], "workspace list"),
     (["workspace", "list", "extra"], "workspace list"),
@@ -172,4 +174,41 @@ func hostWorkspaceCLIAcceptsLeadingSocketOption() throws {
     // 显式 socket 优先于环境变量：错误必须指向这里给的路径，而不是 ASTER_SOCKET_PATH。
     #expect(result.stderr.contains(missing), "\(arguments) 应使用显式 socket：\(result.stderr)")
   }
+}
+
+@Test("host.list：输出标签；tags 参数按全部标签筛选，不分大小写")
+@MainActor
+func hostControlListFiltersByTags() async throws {
+  let web = SSHHostProfile(name: "web", host: "10.0.0.5", tags: ["Prod", "web"])
+  let db = SSHHostProfile(name: "db", host: "10.0.0.6", tags: ["prod", "db"])
+  let lab = SSHHostProfile(name: "lab", host: "10.0.0.7")
+  let dispatcher = hostDispatcher(
+    HostControlSnapshot(hosts: [.emptyDefaults(), web, db, lab], loadError: nil))
+
+  let all = try #require(
+    await dispatcher.handle(controlRequest("host.list"), client: ControlFakeClient()).result
+  ).decoded(as: HostListResult.self)
+  #expect(all.hosts.map(\.name) == ["web", "db", "lab"])
+  #expect(all.hosts[0].tags == ["Prod", "web"])
+  #expect(all.hosts[2].tags.isEmpty)
+
+  let prod = try #require(
+    await dispatcher.handle(
+      controlRequest("host.list", .object(["tags": .array([.string("PROD")])])),
+      client: ControlFakeClient()
+    ).result
+  ).decoded(as: HostListResult.self)
+  #expect(prod.hosts.map(\.name) == ["web", "db"])
+
+  let both = try #require(
+    await dispatcher.handle(
+      controlRequest("host.list", .object(["tags": .array([.string("prod"), .string("db")])])),
+      client: ControlFakeClient()
+    ).result
+  ).decoded(as: HostListResult.self)
+  #expect(both.hosts.map(\.name) == ["db"])
+
+  let invalid = await dispatcher.handle(
+    controlRequest("host.list", .object(["tags": .string("prod")])), client: ControlFakeClient())
+  #expect(invalid.error?.code == .invalidParams)
 }

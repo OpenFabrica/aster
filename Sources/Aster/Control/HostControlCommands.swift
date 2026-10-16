@@ -1,4 +1,4 @@
-// `host.*` 控制协议方法：只读列出已保存的 SSH 主机，供 `aster-cli host list` 使用。
+// `host.*` 控制协议方法：只读列出已保存的 SSH 主机（可按标签筛选），供 `aster-cli host list` 使用。
 import AsterCore
 import Foundation
 
@@ -22,6 +22,13 @@ struct HostControlRow: Codable, Equatable, Sendable {
   var jumpHostID: String?
   /// 跳板主机的名称；跳板引用已失效时为 nil，`jumpHostID` 仍原样回显。
   var jumpHostName: String?
+  /// 主机标签（保持保存时的写法与顺序）；没有标签时为空数组。
+  var tags: [String] = []
+}
+
+/// `host.list` 的可选参数。`tags` 非空时只返回同时带有全部这些标签的主机（不分大小写）。
+struct HostListParams: Codable, Equatable, Sendable {
+  var tags: [String]?
 }
 
 struct HostListResult: Codable, Equatable, Sendable {
@@ -53,10 +60,14 @@ extension AsterControlDispatcher {
     do {
       switch method {
       case .hostList:
+        let params = try request.decodeParams(HostListParams.self)
         let result = HostListResult(
-          hosts: Self.hostRows(snapshot.hosts), configurationError: snapshot.loadError)
+          hosts: Self.filter(Self.hostRows(snapshot.hosts), tags: params.tags ?? []),
+          configurationError: snapshot.loadError)
         return AsterControlResponse(id: request.id, result: try JSONValue(encoding: result))
       }
+    } catch let error as AsterControlError {
+      return AsterControlResponse(id: request.id, error: error)
     } catch {
       return AsterControlResponse(
         id: request.id, error: AsterControlError(code: .internalError, message: "\(error)"))
@@ -83,8 +94,16 @@ extension AsterControlDispatcher {
         group: profile.group,
         target: hostTarget(host: profile.host, user: user, port: port),
         jumpHostID: jumpID?.uuidString,
-        jumpHostName: jumpID.flatMap { names[$0] })
+        jumpHostName: jumpID.flatMap { names[$0] },
+        tags: profile.tags ?? [])
     }
+  }
+
+  /// 按标签筛选：每个要求的标签都必须出现在主机标签里（不分大小写、忽略首尾空白）；空条件不筛选。
+  static func filter(_ rows: [HostControlRow], tags: [String]) -> [HostControlRow] {
+    let wanted = Set(tags.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
+    guard !wanted.isEmpty else { return rows }
+    return rows.filter { row in wanted.isSubset(of: Set(row.tags.map { $0.lowercased() })) }
   }
 
   /// `user@host:port`；IPv6 地址加方括号，避免和端口分隔符混淆。

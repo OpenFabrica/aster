@@ -24,6 +24,10 @@ struct SSHHostDocument: Codable, Equatable {
 public final class SSHHostStore: @unchecked Sendable {
   /// 分组名的最大 UTF-8 字节数。
   public static let maximumGroupBytes = 64
+  /// 每台主机最多的标签数。
+  public static let maximumTags = 16
+  /// 单个标签的最大 UTF-8 字节数。
+  public static let maximumTagBytes = 32
 
   /// 默认路径：`~/Library/Application Support/Aster/hosts.json`。
   public static func defaultFileURL(fileManager: FileManager = .default) -> URL {
@@ -122,10 +126,12 @@ public final class SSHHostStore: @unchecked Sendable {
     }
   }
 
-  /// 规范化：默认项放到第一位（缺失就补上），分组名去空白、空串变 nil。
+  /// 规范化：默认项放到第一位（缺失就补上），分组名去空白、空串变 nil，标签按 `normalizedTags` 整理。
   public static func normalized(_ hosts: [SSHHostProfile]) -> [SSHHostProfile] {
     var defaults = hosts.first { $0.isDefaults } ?? .emptyDefaults()
     defaults.group = nil
+    // 默认项不是真实主机，标签对它没有意义，也不参与继承。
+    defaults.tags = nil
     let others = hosts.filter { !$0.isDefaults }.map { profile -> SSHHostProfile in
       var copy = profile
       let group = copy.group?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -133,9 +139,29 @@ public final class SSHHostStore: @unchecked Sendable {
       copy.name = copy.name.trimmingCharacters(in: .whitespacesAndNewlines)
       copy.host = copy.host.trimmingCharacters(in: .whitespacesAndNewlines)
       copy.user = copy.user.trimmingCharacters(in: .whitespacesAndNewlines)
+      copy.tags = normalizedTags(copy.tags)
       return copy
     }
     return [defaults] + others
+  }
+
+  /// 整理标签：去首尾空白、丢弃空串、不分大小写去重（保留第一次出现的写法）；结果为空时返回 nil。
+  public static func normalizedTags(_ tags: [String]?) -> [String]? {
+    guard let tags else { return nil }
+    var seen: Set<String> = []
+    let result = tags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    return result.isEmpty ? nil : result
+  }
+
+  /// 标签是否合法：数量、单个长度不超限，且不含逗号（网页用逗号分隔输入）、换行或控制字符。
+  public static func tagsAreValid(_ tags: [String]?) -> Bool {
+    guard let tags else { return true }
+    guard tags.count <= maximumTags else { return false }
+    return tags.allSatisfy { tag in
+      tag.utf8.count <= maximumTagBytes && !tag.contains(",")
+        && !tag.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
   }
 
   /// 逐条校验，返回全部原因；空数组表示合法。
@@ -158,6 +184,7 @@ public final class SSHHostStore: @unchecked Sendable {
           reasons.append("\(tag) invalid group")
         }
       }
+      if !tagsAreValid(host.tags) { reasons.append("\(tag) invalid tags") }
       if let port = host.port, !(1...65535).contains(port) { reasons.append("\(tag) invalid port") }
       for proxy in [host.socksProxy, host.httpProxy].compactMap({ $0 })
       where !(1...65535).contains(proxy.port) || proxy.host.isEmpty {

@@ -710,6 +710,11 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .hosts-empty { min-height: 40px; }
 .hosts-badge { padding: 1px 7px; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 10px; white-space: nowrap; }
 .hosts-more { min-width: 28px; padding: 0 6px; }
+.hosts-tag-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 10px; }
+.hosts-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.hosts-tag { padding: 0 7px; color: var(--text-secondary); background: var(--bg-hover); border: 1px solid transparent; border-radius: 999px; font-size: 10.5px; line-height: 17px; white-space: nowrap; }
+.action-button.hosts-tag { min-height: 0; cursor: pointer; }
+.action-button.hosts-tag.selected { color: var(--accent); background: var(--accent-muted); border-color: var(--accent); }
 .hosts-menu { position: fixed; z-index: 1100; min-width: 168px; padding: 4px; background: var(--bg-card); border: 1px solid var(--border-active); border-radius: var(--radius-control); box-shadow: 0 10px 30px rgb(0 0 0 / 22%); }
 .hosts-menu-item { display: block; width: 100%; padding: 6px 9px; color: var(--text-primary); background: transparent; border: 0; border-radius: 5px; text-align: left; cursor: pointer; }
 .hosts-menu-item:hover, .hosts-menu-item:focus-visible { background: var(--bg-hover); outline: none; }

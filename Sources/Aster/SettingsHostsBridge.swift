@@ -132,6 +132,7 @@ final class SettingsHostsBridge {
   /// 网页快照的 `hosts` 字段。
   ///
   /// 形状：`defaults`（默认项）、`hosts`（已排序的主机行）、`groups`（已有分组，供 datalist）、
+  /// `tags`（已有标签，供候选与筛选）、
   /// `builtin`（内置缺省值，供占位符）、`importedGroup`、`sshConfigPath`、`loadError`。
   func snapshot() -> [String: Any] {
     let hosts = directory.hosts
@@ -175,6 +176,7 @@ final class SettingsHostsBridge {
       "defaults": Self.profileJSON(defaults),
       "hosts": rows,
       "groups": groups,
+      "tags": Self.orderedTags(saved),
       "builtin": [
         "port": 22,
         "user": dependencies.localUser,
@@ -219,6 +221,11 @@ final class SettingsHostsBridge {
     return sortedHosts.compactMap(\.group).filter { seen.insert($0).inserted }
   }
 
+  /// 已排序主机里出现过的标签（不分大小写去重，保留第一次出现的写法与显示顺序）。
+  static func orderedTags(_ sortedHosts: [SSHHostProfile]) -> [String] {
+    SSHHostStore.normalizedTags(sortedHosts.flatMap { $0.tags ?? [] }) ?? []
+  }
+
   /// 每台可解析主机的凭证 endpoint（`user@host:port`）。解析失败的主机没有 endpoint，
   /// 也就不可能有已保存口令，这不是需要报告的错误。
   static func credentialEndpoints(_ hosts: [SSHHostProfile]) -> [UUID: String] {
@@ -258,6 +265,7 @@ final class SettingsHostsBridge {
     object["identitiesOnly"] = profile.identitiesOnly
     object["knownHostsFiles"] = profile.knownHostsFiles
     object["identityAgent"] = profile.identityAgent
+    object["tags"] = profile.tags
     return object
   }
 

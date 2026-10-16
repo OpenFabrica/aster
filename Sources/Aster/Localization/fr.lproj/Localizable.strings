@@ -1906,3 +1906,4 @@
 "，系统报告已生成 core dump" = ", le système a signalé la génération d'un core dump";
 "；" = " ; ";
 "；如 PATH 未包含 ~/.local/bin 请自行加入" = "; si le PATH ne contient pas ~/.local/bin, veuillez l'ajouter vous-même";
+"标签过长或包含逗号/换行" = "Les étiquettes sont trop longues ou trop nombreuses, ou contiennent une virgule ou un saut de ligne";

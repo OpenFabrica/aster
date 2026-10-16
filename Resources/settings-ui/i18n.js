@@ -956,7 +956,12 @@ window.AsterI18n = {
     "认证用的 ssh-agent 套接字路径（IdentityAgent），可用 ~；填 none 不用 agent，留空使用 SSH_AUTH_SOCK": "Path of the ssh-agent socket used for authentication (IdentityAgent); ~ is allowed. Enter none to use no agent; leave empty to use SSH_AUTH_SOCK",
     "{field} 必须是整数": "{field} must be an integer",
     "{field} 要写成 主机:端口": "{field} must be written as host:port",
-    "第 {index} 条转发规则的地址要写成 主机:端口": "The address in forwarding rule {index} must be written as host:port"
+    "第 {index} 条转发规则的地址要写成 主机:端口": "The address in forwarding rule {index} must be written as host:port",
+    "按标签筛选": "Filter by tag",
+    "没有带所选标签的主机": "No hosts have all the selected tags",
+    "标签": "Tags",
+    "例如：prod, db": "For example: prod, db",
+    "用逗号分隔，最多 16 个": "Separate with commas; up to 16"
   },
   "ja": {
     "界面文字": "インターフェースの文字",
@@ -1914,7 +1919,12 @@ window.AsterI18n = {
     "认证用的 ssh-agent 套接字路径（IdentityAgent），可用 ~；填 none 不用 agent，留空使用 SSH_AUTH_SOCK": "認証に使う ssh-agent ソケットのパス（IdentityAgent）。~ が使えます。none で agent を使いません。空欄なら SSH_AUTH_SOCK を使います",
     "{field} 必须是整数": "{field} は整数で入力してください",
     "{field} 要写成 主机:端口": "{field} は ホスト:ポート の形式で入力してください",
-    "第 {index} 条转发规则的地址要写成 主机:端口": "転送ルール {index} のアドレスは ホスト:ポート の形式で入力してください"
+    "第 {index} 条转发规则的地址要写成 主机:端口": "転送ルール {index} のアドレスは ホスト:ポート の形式で入力してください",
+    "按标签筛选": "タグで絞り込む",
+    "没有带所选标签的主机": "選択したタグをすべて持つホストはありません",
+    "标签": "タグ",
+    "例如：prod, db": "例：prod, db",
+    "用逗号分隔，最多 16 个": "カンマ区切り、最大 16 個"
   },
   "fr": {
     "界面文字": "Texte de l’interface",
@@ -2872,7 +2882,12 @@ window.AsterI18n = {
     "认证用的 ssh-agent 套接字路径（IdentityAgent），可用 ~；填 none 不用 agent，留空使用 SSH_AUTH_SOCK": "Chemin du socket ssh-agent utilisé pour l'authentification (IdentityAgent) ; ~ est accepté. Saisissez none pour ne pas utiliser d'agent ; laissez vide pour utiliser SSH_AUTH_SOCK",
     "{field} 必须是整数": "{field} doit être un entier",
     "{field} 要写成 主机:端口": "{field} doit être au format hôte:port",
-    "第 {index} 条转发规则的地址要写成 主机:端口": "L'adresse de la règle de redirection {index} doit être au format hôte:port"
+    "第 {index} 条转发规则的地址要写成 主机:端口": "L'adresse de la règle de redirection {index} doit être au format hôte:port",
+    "按标签筛选": "Filtrer par étiquette",
+    "没有带所选标签的主机": "Aucun hôte ne possède toutes les étiquettes sélectionnées",
+    "标签": "Étiquettes",
+    "例如：prod, db": "Par exemple : prod, db",
+    "用逗号分隔，最多 16 个": "Séparez par des virgules ; 16 au maximum"
   },
   "de": {
     "界面文字": "Text der Oberfläche",
@@ -3830,7 +3845,12 @@ window.AsterI18n = {
     "认证用的 ssh-agent 套接字路径（IdentityAgent），可用 ~；填 none 不用 agent，留空使用 SSH_AUTH_SOCK": "Pfad des ssh-agent-Sockets für die Authentifizierung (IdentityAgent); ~ ist erlaubt. none verwendet keinen Agent; leer lassen, um SSH_AUTH_SOCK zu verwenden",
     "{field} 必须是整数": "{field} muss eine ganze Zahl sein",
     "{field} 要写成 主机:端口": "{field} muss als Host:Port angegeben werden",
-    "第 {index} 条转发规则的地址要写成 主机:端口": "Die Adresse in Weiterleitungsregel {index} muss als Host:Port angegeben werden"
+    "第 {index} 条转发规则的地址要写成 主机:端口": "Die Adresse in Weiterleitungsregel {index} muss als Host:Port angegeben werden",
+    "按标签筛选": "Nach Tag filtern",
+    "没有带所选标签的主机": "Kein Host hat alle ausgewählten Tags",
+    "标签": "Tags",
+    "例如：prod, db": "Zum Beispiel: prod, db",
+    "用逗号分隔，最多 16 个": "Durch Kommas getrennt; höchstens 16"
   },
   "zh-Hant": {
     "界面文字": "介面文字",
@@ -4788,6 +4808,11 @@ window.AsterI18n = {
     "认证用的 ssh-agent 套接字路径（IdentityAgent），可用 ~；填 none 不用 agent，留空使用 SSH_AUTH_SOCK": "認證用的 ssh-agent 通訊端路徑（IdentityAgent），可用 ~；填 none 不用 agent，留空使用 SSH_AUTH_SOCK",
     "{field} 必须是整数": "{field} 必須是整數",
     "{field} 要写成 主机:端口": "{field} 要寫成 主機:連接埠",
-    "第 {index} 条转发规则的地址要写成 主机:端口": "第 {index} 條轉發規則的位址要寫成 主機:連接埠"
+    "第 {index} 条转发规则的地址要写成 主机:端口": "第 {index} 條轉發規則的位址要寫成 主機:連接埠",
+    "按标签筛选": "依標籤篩選",
+    "没有带所选标签的主机": "沒有帶有所選標籤的主機",
+    "标签": "標籤",
+    "例如：prod, db": "例如：prod, db",
+    "用逗号分隔，最多 16 个": "以逗號分隔，最多 16 個"
   }
 };

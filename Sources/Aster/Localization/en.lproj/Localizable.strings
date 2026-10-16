@@ -1906,3 +1906,4 @@
 "，系统报告已生成 core dump" = ", system reported a core dump was generated";
 "；" = "; ";
 "；如 PATH 未包含 ~/.local/bin 请自行加入" = "; if PATH does not include ~/.local/bin, please add it yourself";
+"标签过长或包含逗号/换行" = "Tags are too long, too many, or contain a comma or line break";

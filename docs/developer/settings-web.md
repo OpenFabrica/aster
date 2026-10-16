@@ -84,8 +84,9 @@ scripts/build-app.sh
 
 「主机」排在「智能体」之后，使用 `special:"hosts"` 渲染器（`Resources/settings-ui/hosts.js`，表单在 `hosts-form.js`）。Swift 侧是协作者 `SettingsHostsBridge`（`SettingsHostsBridge.swift` 与 `+Actions.swift`），`SettingsView` 只负责接线，没有放宽任何 private 成员。
 
-- 快照键 `hosts`：`defaults`、`hosts[{profile, connect, hasPassword, machines, jumpDependents, credentialSharedWith, jumpName}]`、`groups`、`builtin`、`importedGroup`、`sshConfigPath`、`loadError`。主机对象的键与 `SSHHostProfile` 的 Codable 键一致。
+- 快照键 `hosts`：`defaults`、`hosts[{profile, connect, hasPassword, machines, jumpDependents, credentialSharedWith, jumpName}]`、`groups`、`tags`（已有标签，不分大小写去重，供表单候选与列表筛选）、`builtin`、`importedGroup`、`sshConfigPath`、`loadError`。主机对象的键与 `SSHHostProfile` 的 Codable 键一致。
 - 动作白名单：`hosts.` 前缀，包括 `save`、`duplicate`、`delete`、`forgetPassword`、`addMachine`、`import`、`editSSHConfig`。成功后先推快照再发回执；`hosts.json` 或机器引用在外部变化时另行刷新。
 - 导入：调用 `aster-ssh config list --json`，合并规则是纯函数 `SSHConfigImport.merge`，只更新 `~/.ssh/config` 导入组，保留用户改过的认证方式、代理和主机密钥校验。汇总通过 `hostsImportReport` 消息展示，其中包括 ignored 列表。
+- 主机标签：表单是逗号分隔的输入框（`parseTags` 同时接受全角逗号），候选来自快照 `tags`；列表行显示 `#tag` chip，标签筛选行按「全部选中标签都要有」过滤，搜索框也匹配标签。规范化与校验只在 `SSHHostStore`，网页只做拆分。
 - 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
 - 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
