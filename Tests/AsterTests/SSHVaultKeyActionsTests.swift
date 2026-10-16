@@ -19,13 +19,13 @@ func vaultActionsRowsCarryUsageAndStatus() async throws {
   var defaults = try #require(fixture.hosts.hosts.first { $0.isDefaults })
   defaults.vaultKeyIDs = [deploy.id]
   try fixture.hosts.upsert(defaults)
-  try fixture.hosts.upsert(SSHHostProfile(name: "db", host: "db", vaultKeyIDs: [deploy.id]))
+  try fixture.hosts.upsert(SSHHostProfile(name: "mysql", host: "mysql", vaultKeyIDs: [deploy.id]))
   try fixture.credentials.deleteVaultPrivateKey(id: deploy.id)
   await fixture.keys.refreshKeychainPresence().value
 
   let rows = fixture.actions.rows(hosts: fixture.hosts.hosts)
   #expect(rows.map(\.key.label) == ["Deploy", "work"])
-  #expect(rows[0].usedBy == [L("默认"), "db"])
+  #expect(rows[0].usedBy == [L("默认"), "mysql"])
   #expect(rows[0].keychainMissing)
   #expect(!rows[0].canDeleteOriginal)
   #expect(rows[0].originText == L("在 Aster 中生成"))
@@ -33,9 +33,10 @@ func vaultActionsRowsCarryUsageAndStatus() async throws {
   #expect(rows[1].originalExists && rows[1].canDeleteOriginal)
   #expect(!rows[1].keychainMissing)
 
-  // 搜索：名称、主机名、指纹都能命中，不区分大小写。
+  // 搜索：名称、主机名、指纹都能命中，不区分大小写。搜索词要含十六进制以外的字母：
+  // 原文件路径在带随机 UUID 的临时目录里，像 "db" 这样的词会偶尔命中路径。
   #expect(rows.filter { $0.matches("DEPLOY") }.map(\.id) == [deploy.id])
-  #expect(rows.filter { $0.matches("db") }.map(\.id) == [deploy.id])
+  #expect(rows.filter { $0.matches("mysql") }.map(\.id) == [deploy.id])
   #expect(rows.filter { $0.matches("sha256:w") }.map(\.id) == [work.id])
   #expect(rows.filter { $0.matches("  ") }.count == 2)
   #expect(SSHVaultKeyRow.shortFingerprint("SHA256:abcdefghijklmnopqrstu") == "SHA256:abcdefghijklmnop…")
