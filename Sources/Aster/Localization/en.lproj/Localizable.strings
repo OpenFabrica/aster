@@ -393,6 +393,7 @@
 "原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除" = "The original private key file is not in ~/.ssh. Aster will not delete it; delete it manually";
 "名称 A–Z" = "Name A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "The name must not be empty, longer than 64 bytes, or contain line breaks";
+"在 Aster 中生成" = "Generated in Aster";
 "在设置中管理主机…" = "Manage Hosts in Settings…";
 "复制 SSH 命令" = "Copy SSH Command";
 "密钥不存在，可能已被删除" = "The key does not exist. It may have been deleted";
@@ -400,10 +401,12 @@
 "密钥参数无效" = "Invalid key parameters";
 "密钥已从列表删除，但没能从钥匙串删除私钥" = "The key was removed from the list, but its private key could not be deleted from the keychain";
 "导入的密钥" = "Imported key";
+"导入自 %@" = "Imported from %@";
 "已从 ~/.ssh/config 导入：新增 %@ 台，更新 %@ 台" = "Imported from ~/.ssh/config: %@ added, %@ updated";
 "已删除原私钥文件" = "Deleted the original private key file";
 "已复制 SSH 命令" = "SSH command copied";
 "已复制“%@”的公钥" = "Copied the public key of “%@”";
+"已导入" = "Imported";
 "已导入“%@”" = "Imported “%@”";
 "已把 %@ 台主机改为使用“%@”" = "Switched %@ hosts to use “%@”";
 "已生成“%@”，可以复制公钥添加到服务器" = "Generated “%@”. Copy its public key to add it to your servers";
@@ -425,6 +428,7 @@
 "没有匹配的主机。" = "No matching hosts.";
 "没有匹配的主机。按回车或点「连接」直接连接 %@。" = "No matching hosts. Press Return or click “Connect” to connect to %@ directly.";
 "没能读取 ~/.ssh/config，无法确认其中是否还引用这个文件。" = "Could not read ~/.ssh/config, so Aster cannot tell whether it still refers to this file.";
+"注释不能超过 256 字节，也不能包含换行" = "The comment must be at most 256 bytes and cannot contain line breaks";
 "私钥已加密，需要 passphrase" = "The private key is encrypted and needs a passphrase";
 "私钥已安全存进钥匙串并核对过指纹。文件会被直接删除，不进废纸篓；同名 .pub 公钥文件保留。" = "The private key is safely stored in the keychain and its fingerprint was verified. The file is deleted immediately, not moved to the Trash; the matching .pub public key file is kept.";
 "读写 ssh-keys.json 失败：%@" = "Could not read or write ssh-keys.json: %@";

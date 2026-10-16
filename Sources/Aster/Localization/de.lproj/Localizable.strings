@@ -393,6 +393,7 @@
 "原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除" = "Die ursprüngliche private Schlüsseldatei liegt nicht in ~/.ssh. Aster löscht sie nicht; bitte manuell löschen";
 "名称 A–Z" = "Name A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Der Name darf nicht leer sein, höchstens 64 Byte lang sein und keine Zeilenumbrüche enthalten";
+"在 Aster 中生成" = "In Aster erzeugt";
 "在设置中管理主机…" = "Hosts in den Einstellungen verwalten…";
 "复制 SSH 命令" = "SSH-Befehl kopieren";
 "密钥不存在，可能已被删除" = "Der Schlüssel existiert nicht. Er wurde möglicherweise gelöscht";
@@ -400,10 +401,12 @@
 "密钥参数无效" = "Ungültige Schlüsselparameter";
 "密钥已从列表删除，但没能从钥匙串删除私钥" = "Der Schlüssel wurde aus der Liste entfernt, aber der private Schlüssel konnte nicht aus dem Schlüsselbund gelöscht werden";
 "导入的密钥" = "Importierter Schlüssel";
+"导入自 %@" = "Importiert aus %@";
 "已从 ~/.ssh/config 导入：新增 %@ 台，更新 %@ 台" = "Aus ~/.ssh/config importiert: %@ hinzugefügt, %@ aktualisiert";
 "已删除原私钥文件" = "Ursprüngliche private Schlüsseldatei gelöscht";
 "已复制 SSH 命令" = "SSH-Befehl kopiert";
 "已复制“%@”的公钥" = "Öffentlicher Schlüssel von „%@“ kopiert";
+"已导入" = "Importiert";
 "已导入“%@”" = "„%@“ importiert";
 "已把 %@ 台主机改为使用“%@”" = "%@ Hosts verwenden jetzt „%@“";
 "已生成“%@”，可以复制公钥添加到服务器" = "„%@“ erzeugt. Kopieren Sie den öffentlichen Schlüssel, um ihn auf Ihren Servern einzutragen";
@@ -425,6 +428,7 @@
 "没有匹配的主机。" = "Keine passenden Hosts.";
 "没有匹配的主机。按回车或点「连接」直接连接 %@。" = "Keine passenden Hosts. Drücken Sie den Zeilenschalter oder klicken Sie auf „Verbinden“, um direkt mit %@ zu verbinden.";
 "没能读取 ~/.ssh/config，无法确认其中是否还引用这个文件。" = "~/.ssh/config konnte nicht gelesen werden; es lässt sich nicht prüfen, ob dort noch auf diese Datei verwiesen wird.";
+"注释不能超过 256 字节，也不能包含换行" = "Der Kommentar darf höchstens 256 Byte lang sein und keine Zeilenumbrüche enthalten";
 "私钥已加密，需要 passphrase" = "Der private Schlüssel ist verschlüsselt und benötigt eine Passphrase";
 "私钥已安全存进钥匙串并核对过指纹。文件会被直接删除，不进废纸篓；同名 .pub 公钥文件保留。" = "Der private Schlüssel ist sicher im Schlüsselbund gespeichert und sein Fingerabdruck wurde geprüft. Die Datei wird direkt gelöscht, nicht in den Papierkorb gelegt; die gleichnamige .pub-Datei mit dem öffentlichen Schlüssel bleibt erhalten.";
 "读写 ssh-keys.json 失败：%@" = "ssh-keys.json konnte nicht gelesen oder geschrieben werden: %@";

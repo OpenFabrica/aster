@@ -393,6 +393,7 @@
 "原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除" = "Le fichier de clé privée d’origine n’est pas dans ~/.ssh. Aster ne le supprimera pas ; supprimez-le manuellement";
 "名称 A–Z" = "Nom A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Le nom ne peut pas être vide, dépasser 64 octets ni contenir de saut de ligne";
+"在 Aster 中生成" = "Générée dans Aster";
 "在设置中管理主机…" = "Gérer les hôtes dans les réglages…";
 "复制 SSH 命令" = "Copier la commande SSH";
 "密钥不存在，可能已被删除" = "La clé n’existe pas. Elle a peut-être été supprimée";
@@ -400,10 +401,12 @@
 "密钥参数无效" = "Paramètres de clé non valides";
 "密钥已从列表删除，但没能从钥匙串删除私钥" = "La clé a été retirée de la liste, mais sa clé privée n’a pas pu être supprimée du trousseau";
 "导入的密钥" = "Clé importée";
+"导入自 %@" = "Importée depuis %@";
 "已从 ~/.ssh/config 导入：新增 %@ 台，更新 %@ 台" = "Importé depuis ~/.ssh/config : %@ ajoutés, %@ mis à jour";
 "已删除原私钥文件" = "Fichier de clé privée d’origine supprimé";
 "已复制 SSH 命令" = "Commande SSH copiée";
 "已复制“%@”的公钥" = "Clé publique de « %@ » copiée";
+"已导入" = "Importée";
 "已导入“%@”" = "« %@ » importée";
 "已把 %@ 台主机改为使用“%@”" = "%@ hôtes utilisent désormais « %@ »";
 "已生成“%@”，可以复制公钥添加到服务器" = "« %@ » générée. Copiez sa clé publique pour l’ajouter à vos serveurs";
@@ -425,6 +428,7 @@
 "没有匹配的主机。" = "Aucun hôte correspondant.";
 "没有匹配的主机。按回车或点「连接」直接连接 %@。" = "Aucun hôte correspondant. Appuyez sur Retour ou cliquez sur « Connecter » pour vous connecter directement à %@.";
 "没能读取 ~/.ssh/config，无法确认其中是否还引用这个文件。" = "Impossible de lire ~/.ssh/config : impossible de vérifier s’il fait encore référence à ce fichier.";
+"注释不能超过 256 字节，也不能包含换行" = "Le commentaire ne doit pas dépasser 256 octets ni contenir de saut de ligne";
 "私钥已加密，需要 passphrase" = "La clé privée est chiffrée et nécessite une phrase secrète";
 "私钥已安全存进钥匙串并核对过指纹。文件会被直接删除，不进废纸篓；同名 .pub 公钥文件保留。" = "La clé privée est enregistrée en sécurité dans le trousseau et son empreinte a été vérifiée. Le fichier est supprimé directement, sans passer par la Corbeille ; le fichier de clé publique .pub du même nom est conservé.";
 "读写 ssh-keys.json 失败：%@" = "Impossible de lire ou d’écrire ssh-keys.json : %@";
