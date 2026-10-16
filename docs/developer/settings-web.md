@@ -89,3 +89,8 @@ scripts/build-app.sh
 - 导入：调用 `aster-ssh config list --json`，合并规则是纯函数 `SSHConfigImport.merge`，只更新 `~/.ssh/config` 导入组，保留用户改过的认证方式、代理和主机密钥校验。汇总通过 `hostsImportReport` 消息展示，其中包括 ignored 列表。
 - 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
 - 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
+- 「Agent 访问」子页（agent 远程执行的总开关、授权、agent 终端、MCP 安装与活动记录）：`Resources/settings-ui/agent-access.js`
+  （入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send)`），Swift 侧协作者 `SettingsAgentAccessBridge`。
+  数据在快照的 `hosts.agentAccess`；动作 `hosts.setAgentAccessEnabled`、`hosts.revokeAgentGrant`、`hosts.revokeAllAgentGrants`、
+  `hosts.agentAuditPage`（分页读审计，结果经消息 `agentAccessAuditPage` 异步送回）、`hosts.installAgentMCP`。
+  语义与审计字段见 [Agent 远程执行](agent-host-access.md)。

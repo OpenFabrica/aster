@@ -659,6 +659,30 @@ A card at the Pane top explains the recovery type and details.
 - **Save as Host…** in a local tab's context menu prefills an address after manually connecting with `ssh user@host`. Configure options such as `-i`/`-J` in host settings.
 - **OpenSSH fallback**: select OpenSSH in **Settings → Advanced → SSH Engine**, then restart. Manually typed `ssh` always uses system OpenSSH regardless of this choice.
 
+## Let Coding Agents Run Commands on Hosts
+
+Coding agents such as Claude Code and Codex can run commands on your saved SSH hosts (see **SSH Hosts and Quick Connect**). Commands are typed into a floating terminal you can watch. Agents never receive your passwords or private keys, and every host needs your approval.
+
+- **Enable**: in **Settings → Hosts → Agent Access**, turn on "Allow coding agents to request host access". It is off by default. Turning it on only lets agents *request* access; each host still needs your approval.
+- **Connect Claude Code / Codex**: on the same page, click "Install to Claude Code" or "Install to Codex" to register `aster mcp` as an MCP server for them (user scope). You can also configure it yourself with the command `aster mcp`. Agents running in an Aster pane can also use the CLI: `aster host list` shows hosts, and `aster host exec <host> -- <command>` runs a command.
+- **Approve**: the first time an agent accesses a host, Aster shows an approval panel with the agent, the host, the reason, and the full original command. Buttons: **Deny** (default), **Allow once**, **Allow for this agent session**, **Always allow this host**. Return never approves, only denies; closing the panel counts as Deny. After a denial, that agent session is not asked about the same host again for 10 minutes. The panel never blocks the rest of Aster, so you can answer later; if you do not answer within about 50 seconds, the agent is told approval is still pending and retries.
+  - "Allow for this agent session" lasts for that agent session only and expires when Aster quits or after 12 hours of inactivity. "Always allow this host" is stored in your login keychain. If the host's address, user, port, or jump hosts change, the old approval is voided and Aster asks again; renaming the host does not matter.
+- **Floating terminal**: after approval, Aster opens a floating window for that agent on that host. It is a real native SSH terminal, and its title shows which agent and host. You can:
+  - **Watch**: every agent command runs and appears there;
+  - **Take over**: click into the terminal and type, as in any terminal;
+  - **Interrupt**: sends Ctrl-C to the running command;
+  - **Pause agent**: the agent's new commands are all refused (a running command is unaffected); click "Resume agent" to continue;
+  - **Close terminal**: ends the agent terminal on that host.
+  The window's close button only hides it and the terminal keeps running; bring it back from **Window → Agent Terminals**. An idle terminal closes itself after 30 minutes. Agent terminals never appear in workspace tabs.
+- **sudo and password prompts**: when a command stops at a prompt such as `[sudo] password for…`, `Password:`, or `[y/N]`, the agent is only told it "needs input"; the window comes to the front and a system notification appears. **Type the answer yourself in the floating terminal**, and the agent continues. Never give a password to the agent or ask it to type one.
+- **Revoke**: the "Authorized" list on **Settings → Hosts → Agent Access** can revoke grants one by one or all at once. Turning the master switch off also dismisses pending approval panels. Deleting a host voids its grants.
+- **Activity log**: every execution, grant change, and master-switch change is written to `~/Library/Application Support/Aster/audit/agent-hosts-YYYY-MM.jsonl` (one file per month, kept for 13 months), and you can browse it under "Activity log" on the Agent Access page. Records hold the command only and **never its output**; anything in a command that looks like a password, token, or key is replaced with `***`.
+- **Limits**:
+  - The remote shell must be POSIX (bash, zsh, sh, ksh); fish is not supported.
+  - The agent cannot see inside full-screen programs such as vim, top, or less; agents should use non-interactive flags.
+  - If you type or run a program in the terminal yourself, the agent's next command first checks that the terminal is back at a prompt, and otherwise reports the terminal as busy.
+  - This is not a sandbox: approval means "this agent session may use this host", and commands run on the remote host as your login account without per-command review. Approve only agents and hosts you trust.
+
 ## Named Workspaces
 
 A workspace is a set of tabs. A window can have several, such as one per project, and each can contain multiple tabs. Workspaces can also be remote.

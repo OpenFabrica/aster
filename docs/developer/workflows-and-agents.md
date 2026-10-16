@@ -185,6 +185,45 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
 `Resources/skills/aster/` 复制到 `~/.claude/skills/aster` 或 `~/.codex/skills/aster`，
 写 `.aster-skill-version`（App 版本 + SKILL.md sha256）；只接管带标记的目录，符号链接一律拒绝。
 
+### Agent 远程执行（`host.*`）
+
+编程 agent 经控制协议在**已保存的 SSH 主机**上执行命令，命令敲进一个用户看得见的原生 SSH 浮动终端。
+这组方法的协议常量在 `Sources/AsterCore/AgentHostAccess/AgentHostControlProtocol.swift`（`AgentHostControlMethod`），
+服务端分发在 `Sources/Aster/Control/AgentHostControlCommands.swift`，业务在 `Sources/Aster/AgentHosts/`。
+设计、标记符协议、授权与审计全文见 [Agent 远程执行](agent-host-access.md)，这里只写与控制 API 相关的约定。
+
+| 方法 | 说明 |
+| --- | --- |
+| `host.list` | 已有方法；行里新增 `agentAccess`（`always` / `ask`） |
+| `host.open` | 批准后建立或复用主机终端并等就绪 |
+| `host.exec` | 在持久 Shell 里执行命令（默认等 120 s，上限 600 s；输出默认 64 KiB，上限 1 MiB） |
+| `host.wait` | 继续等未结束的命令；只有发起会话能等 |
+| `host.read` | 读该主机终端的活动屏幕（≤500 行） |
+| `host.interrupt` / `host.close` | 对运行中的命令发 Ctrl-C / 关闭终端 |
+| `host.terminals` | 列出 agent 终端；带 `agent` 时只列本会话的 |
+
+- 结果状态 `status`：`completed`（带 `exit_code`）、`running`、`needs_input`、`interrupted`、`ended`。`running` 与
+  `needs_input` 不是错误：命令仍在终端里，用 `host.wait` 继续；sudo 口令之类只能由用户在浮动终端里输入，
+  v1 没有任何让 agent 授权或发送任意输入的方法。
+- 新增错误码：`agent_access_disabled`（总开关关着）、`approval_pending`（批准面板还在等用户，稍后重试同一请求）、
+  `approval_denied`（用户拒绝，该会话对该主机 10 分钟冷却）、`agent_paused`（用户在浮动终端里暂停了 agent）、
+  `host_not_ready`（SSH 终端期限内没就绪）、`terminal_ended`、`limit_exceeded`。沿用 `not_found`、
+  `ambiguous_target`、`pane_busy`、`invalid_params`。消息文本是给 agent 的协议文本，不走界面本地化。
+- **不走 IPC 写门禁。** `host.*` 不受「设置 → 控制 → IPC 允许发送输入」与「允许敏感会话」约束，也不经
+  `AsterControlWriteGate`；它有自己的总开关（设置「主机 → Agent 访问」，默认关）和**按主机的批准**。
+  `pane.*`、`session.snapshot`、`agent.*` 碰不到 agent 终端：它们是独立的 `TerminalSession`，不在任何标签里。
+- **批准是非模态的。** 需要批准时弹浮动面板（不 `runModal`、不用 sheet，否则会挂住控制连接），请求最多等
+  `min(剩余期限, 50 s)`，超时回 `approval_pending`，面板保留，agent 重试即可。50 s 是因为 Codex 工具调用默认 60 s 超时。
+  等待类方法（`host.exec` / `wait` / `open` / `interrupt`）占用每连接 4 个等待名额，等待只挂起 Task，不阻塞主线程。
+- **会话标识。** 所有方法带 `agent: {session, client?, caller_pane?}`；服务端把 `caller_pane` 解析出的 provider 与
+  agent session ID 并进有效会话键，新开的 agent 会话不继承旧会话的「本会话允许」。
+- **入口。** CLI `aster host exec|wait|read|interrupt|close|open|terminals`（`Sources/AsterCLI/HostExecCommands.swift`；
+  `--` 之后的词原样作为命令，未完成时 stderr 一行 JSON 并以退出码 75 退出）；`aster mcp`（`MCPCommand.swift`，
+  stdio MCP server，工具 `list_hosts`、`host_exec`、`host_wait`、`host_read`、`host_interrupt`、`host_close`，
+  目录在 `AgentHostMCPToolCatalog.swift`；Codex 沙箱多半连不上控制 socket，MCP 是它的主路径）。
+- **审计。** 每次执行、授权变化与总开关改动都追加到 `~/Library/Application Support/Aster/audit/agent-hosts-YYYY-MM.jsonl`
+  （保留 13 个月，命令先脱敏、从不记录输出内容）；设置「主机 → Agent 访问」可分页查看。
+
 ## 失败语义
 
 - 无法验证 Recipe、CLI token、Agent 配置所有权或文件身份：拒绝操作，不做部分写入。
