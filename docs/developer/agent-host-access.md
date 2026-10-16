@@ -40,7 +40,7 @@ ssh-agent、模拟点击。这不是沙箱。目标是：agent 拿不到秘密�
 | `…/MCPJSONRPC.swift` | JSON-RPC 类型（由 aster-memory-mcp 与 aster mcp 共用） |
 | `Sources/Aster/AgentHosts/` | 终端、注册表、浮动面板、批准、授权存储、审计落盘、MCP 安装、运行时装配 |
 | `Sources/Aster/Control/AgentHostControlCommands.swift` | `host.*` 方法的分发 |
-| `Sources/Aster/SettingsAgentAccessBridge.swift`、`Resources/settings-ui/agent-access.js` | 设置「主机 → Agent 访问」 |
+| `Sources/Aster/SettingsAgentAccessBridge.swift`、`Resources/settings-ui/agent-access.js` | 设置「主机」分类（只含 Agent 访问） |
 | `Sources/AsterCLI/HostExecCommands.swift`、`MCPCommand.swift` | CLI 与 MCP 前端 |
 
 ## 控制方法
@@ -201,7 +201,7 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   记诊断事件 `agent_hosts.grants_untrusted` 与一条 `grant.invalidated` 审计，**不删除**条目，留给用户排查。
   Aster 写入时不带 `kSecAttrAccess`，默认 ACL 的解密项只信任 Aster 自身；发现已有条目不可信时先删再建。
   剩余限制：用显式受信任列表建的条目（如 `-T /Applications/Aster.app`）与 Aster 自己建的分不出来，
-  这类预埋只能靠审计和设置页的授权列表发现。读失败同样按「没有 always 授权」处理（只会多问，不会多放行）。
+  这类预埋只能靠审计和设置页「主机」分类里的授权列表发现。读失败同样按「没有 always 授权」处理（只会多问，不会多放行）。
 - 总开关「允许编程 agent 申请主机访问」默认关（`aster.agent-hosts.enabled.v1`）。它在 defaults 里，
   agent 改得到它，但改了也只是能**申请**，每台主机仍要批准。改动写 `setting.changed` 审计。
   关掉时撤掉全部挂起的批准面板并关闭全部 agent 终端；`host.read` 也要求开关开着。
@@ -259,7 +259,7 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
 
 ## 设置页
 
-「主机 → Agent 访问」子页（`agent-access.js`，入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`，`ui.t` 为翻译函数，`send` 返回的 Promise 失败时忽略、以下一次快照为准；
+设置「主机」分类只承载这一页（没有子标签；页顶有指向侧栏「主机」页的说明与「打开主机页」按钮，动作 `hosts.openHostsPage`）。页面由 `hosts.js` 挂载 `agent-access.js`（入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`，`ui.t` 为翻译函数，`send` 返回的 Promise 失败时忽略、以下一次快照为准；
 数据在 `hosts.agentAccess`）：总开关、授权列表与撤销、agent 终端列表、MCP 安装、分页活动记录
 （`hosts.agentAuditPage {before?, limit≤50}`，结果经消息 `agentAccessAuditPage` 异步送回；修改显示
 `字段 原值 → 新值`，新建 / 删除显示属性清单）。动作在 `SettingsAgentAccessBridge`。

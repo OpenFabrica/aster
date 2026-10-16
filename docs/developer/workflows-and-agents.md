@@ -220,7 +220,7 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
   `host_not_ready`（SSH 终端期限内没就绪）、`terminal_ended`、`limit_exceeded`。沿用 `not_found`、
   `ambiguous_target`、`pane_busy`、`invalid_params`。消息文本是给 agent 的协议文本，不走界面本地化。
 - **不走 IPC 写门禁。** `host.*` 不受「设置 → 控制 → IPC 允许发送输入」与「允许敏感会话」约束，也不经
-  `AsterControlWriteGate`；它有自己的总开关（设置「主机 → Agent 访问」，默认关）和**按主机的批准**。
+  `AsterControlWriteGate`；它有自己的总开关（设置「主机」分类里的「Agent 访问」，默认关）和**按主机的批准**。
   `pane.*`、`session.snapshot`、`agent.*` 碰不到 agent 终端：它们是独立的 `TerminalSession`，不在任何标签里。
 - **批准是非模态的。** 需要批准时弹浮动面板（不 `runModal`、不用 sheet，否则会挂住控制连接），请求最多等
   `min(剩余期限, 50 s)`，超时回 `approval_pending`，面板保留，agent 重试即可。50 s 是因为 Codex 工具调用默认 60 s 超时。
@@ -232,7 +232,7 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
   stdio MCP server，工具 `list_hosts`、`host_exec`、`host_wait`、`host_read`、`host_interrupt`、`host_close`，
   目录在 `AgentHostMCPToolCatalog.swift`；Codex 沙箱多半连不上控制 socket，MCP 是它的主路径）。
 - **审计。** 每次执行、授权变化与总开关改动都追加到 `~/Library/Application Support/Aster/audit/agent-hosts-YYYY-MM.jsonl`
-  （保留 13 个月，命令先脱敏、从不记录输出内容）；设置「主机 → Agent 访问」可分页查看。
+  （保留 13 个月，命令先脱敏、从不记录输出内容）；设置「主机」分类里的「Agent 访问」可分页查看。
 
 ## 失败语义
 

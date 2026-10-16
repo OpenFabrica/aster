@@ -83,57 +83,25 @@ scripts/build-app.sh
 
 ## 「主机」分类
 
-「主机」排在「智能体」之后，使用 `special:"hosts"` 渲染器（`Resources/settings-ui/hosts.js`，表单在 `hosts-form.js`）。Swift 侧是协作者 `SettingsHostsBridge`（`SettingsHostsBridge.swift` 与 `+Actions.swift`），`SettingsView` 只负责接线，没有放宽任何 private 成员。
+「主机」排在「智能体」之后，**只承载「Agent 访问」**（agent 远程执行的总开关、授权、agent 终端、MCP 安装与活动记录），没有子标签控件。主机列表、编辑器、密钥保险库和已知主机都不在设置里，只在侧栏「主机」页（见 [原生 SSH](native-ssh.md) 的「侧栏主机页」）。
 
-- 快照键 `hosts`：`defaults`、`hosts[{profile, connect, hasPassword, machines, jumpDependents, credentialSharedWith, jumpName}]`、`groups`、`tags`（已有标签，不分大小写去重，供表单候选与列表筛选）、`builtin`、`importedGroup`、`sshConfigPath`、`loadError`。主机对象的键与 `SSHHostProfile` 的 Codable 键一致。
-- 动作白名单：`hosts.` 前缀，包括 `save`、`duplicate`、`delete`、`forgetPassword`、`addMachine`、`import`、`editSSHConfig`。成功后先推快照再发回执；`hosts.json` 或机器引用在外部变化时另行刷新。
-- 导入：调用 `aster-ssh config list --json`，合并规则是纯函数 `SSHConfigImport.merge`，只更新 `~/.ssh/config` 导入组，保留用户改过的认证方式、代理和主机密钥校验。汇总通过 `hostsImportReport` 消息展示，其中包括 ignored 列表。
-- 已知主机：`Resources/settings-ui/known-hosts.js` 暴露 `window.AsterKnownHosts.render(container, hostsSnapshot, send)`，由「主机」页的子标签挂载；数据在快照 `hosts.knownHosts`（`state` 为 `idle|loading|loaded|error`，另有 `error`、`files[{path, rawPath, exists, writable, global, error}]`、`entries[{file, line, marker, hosts, hashed, algorithm, fingerprint, comment, matches, names, removable, lineDigest}]`、`skipped`）。首次显示时网页发 `hosts.knownHosts.refresh`；删除发 `hosts.knownHosts.remove {file, line, lineDigest, host?}`，确认面板在行内（多主机行可只删一台）。协作者是 `SettingsKnownHostsBridge`，由 `SettingsHostsBridge` 持有并转交 `hosts.knownHosts.*`。
-- 主机标签：表单是逗号分隔的输入框（`parseTags` 同时接受全角逗号），候选来自快照 `tags`；列表行显示 `#tag` chip，标签筛选行按「全部选中标签都要有」过滤，搜索框也匹配标签。规范化与校验只在 `SSHHostStore`，网页只做拆分。
-- 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
-- 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
+- 前端：分类入口是 `special:"hosts"` 渲染器 `Resources/settings-ui/hosts.js`（`window.AsterHosts.render(ctx)`），它只画页顶说明与按钮，再把 Agent 访问交给 `Resources/settings-ui/agent-access.js`，入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`。`container` 是页面容器，每次快照都会传入新节点，不要缓存；`hostsSnapshot` 即快照里的 `hosts` 对象；`ui` 为 `{ t, makeDialog, showToast, element, button }`（翻译函数、模态框骨架、toast 与节点工具）。新文案要补进 `i18n.js` 五种语言。
+- 页顶说明与入口：一行说明「主机、密钥与已知主机已移到侧栏「主机」页。」和按钮「打开主机页」。按钮发动作 `hosts.openHostsPage`，由原生在最前面的工作区窗口里打开侧栏「主机」页。
+- 快照键 `hosts`：只有 `agentAccess`。
+- Swift 侧：这一类的 bridge 只有协作者 `SettingsAgentAccessBridge`，`SettingsView` 只负责接线，没有放宽任何 private 成员。
+- 动作白名单（`hosts.` 前缀）：`setAgentAccessEnabled`、`revokeAgentGrant`、`revokeAllAgentGrants`、`agentAuditPage`、`installAgentMCP`、`openHostsPage`。`send(action, payload = {})` 等价于 `mutate("action", { action, payload })`，返回 Promise：原生回执成功时 resolve；失败、桥不可用或 5 秒内没有回执时 reject。失败原因原生侧已经用 toast 说明，不关心结果的调用方要写 `.catch(() => {})`，并以下一次快照为准。
+- 消息：`agentAccessAuditPage`（`hosts.agentAuditPage {before?, limit≤50}` 的分页结果，异步送回）。
+- 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）在「高级」分类，走普通 set 管线。**重启后生效**。
 
-### 子标签与扩展契约
+语义与审计字段见 [Agent 远程执行](agent-host-access.md)。
 
-「主机」页顶部是分段控件形式的子标签：主机 | 密钥 | 已知主机 | Agent 访问，键依次为 `hosts`、`keys`、`knownHosts`、`agentAccess`。当前子标签记在 `hosts.js` 的模块级 `state.tab`，快照整页重绘后保持；原生「编辑主机…」深链（`hostsEdit`）总是切回 `hosts` 再打开表单。左右方向键在子标签间切换。
+### 已移除的网页入口
 
-`hosts` 子页就是上面的主机列表。其余子页由 `hosts.js` 建一个空容器 `div.hosts-subpage`（`role="tabpanel"`），再交给对应的全局模块：
+主机列表与表单、密钥保险库、已知主机的网页实现已整体删除，不再有对应的快照键、动作或消息：
 
-| 子标签 | 模块 | 脚本 |
-| --- | --- | --- |
-| `keys` | `window.AsterSSHKeys` | `ssh-keys.js` |
-| `knownHosts` | `window.AsterKnownHosts` | `known-hosts.js` |
-| `agentAccess` | `window.AsterAgentAccess` | `agent-access.js` |
+- 模块：`hosts-form.js`、`ssh-keys.js`、`known-hosts.js`；`hosts.js` 只剩上面的最小分类入口。
+- Swift bridge：`SettingsHostsBridge`（含 `+Actions`）、`SettingsKnownHostsBridge`、`SettingsSSHKeysBridge`（含 `+Actions`、`+Original`）。
+- 消息：`hostsEdit`（原生「编辑主机…」深链）、`hostsImportReport`。
+- 动作：`hosts.save`、`duplicate`、`delete`、`forgetPassword`、`addMachine`、`import`、`editSSHConfig`，`hosts.keys.*`，`hosts.knownHosts.*`。
 
-模块只需实现 `render(container, hostsSnapshot, send, ui)`：
-
-- `container`：空的 `div.hosts-subpage`，模块往里追加内容。每次快照或切换子标签都会传入新容器，模块不要缓存旧节点。
-- `hostsSnapshot`：快照里的 `hosts` 对象（即 `snapshot.hosts`），各模块的数据都挂在这里，键名各自约定。
-- `send(action, payload = {})`：等价于 `mutate("action", { action, payload })`，提交 `hosts.` 前缀的原生动作。返回 Promise：原生回执成功时 resolve；失败、桥不可用或 5 秒内没有回执时 reject。失败原因原生侧已经用 toast 说明，不关心结果的调用方要写 `.catch(() => {})`。原生动作若要等用户操作（文件面板、确认框），回执可能晚于 5 秒，此时 Promise 已经 reject，原生侧要自己防重入。
-- `ui`：`{ t, makeDialog, showToast, element, button }`，即设置页的翻译函数、模态框骨架、toast 与 `hosts.js` 的节点工具。
-
-模块按需在渲染时查找，脚本加载顺序无关；模块未加载时子页显示占位文字。新模块的脚本要加进 `index.html`，`t("…")` 文案要补进 `i18n.js` 五种语言。
-
-### 密钥保险库
-
-`ssh-keys.js`（`window.AsterSSHKeys`）只展示密钥元数据并提交意图，私钥从不进入网页。侧栏「主机 → 密钥」已有同功能的原生页（见 [原生 SSH](native-ssh.md) 的「侧栏主机页」）；两者都调用 `SSHVaultKeyActions`，`SettingsSSHKeysBridge` 只做快照与 payload 适配，网页页移除时一起删掉。
-
-- 快照：`hosts.vaultKeys` 按名称排序，每项为 `{id, label, algorithm, fingerprint, publicKey, comment, createdAt, origin: "generated"|"imported", importedFrom, usedBy: [主机名], migratableHosts: [主机名], originalExists, keychainMissing}`。`importedFrom` 用 `~` 缩写，`migratableHosts` 是 `identityFiles` 仍指向原文件的主机。另有 `hosts.vaultKeysError`（`ssh-keys.json` 读取失败的原因，正常为空串）与 `hosts.sshEngine`（`native` 或 `openssh`；后者时页顶提示保险库密钥不生效）。
-- 主机对象可带 `vaultKeyIDs`（大写 UUID 数组）；缺省表示继承默认项，原生侧把空数组规范成缺省。主机表单的「保险库密钥」是勾选列表，保存时按保险库顺序写入勾选项，并原样保留快照里找不到的 ID，避免从网页保存时悄悄丢掉引用。
-- 动作：
-  - `hosts.keys.import {}`：原生 `NSOpenPanel` 读取文件，加密私钥再询问 passphrase；网页不传任何内容。
-  - `hosts.keys.generate {label, comment}`：生成 Ed25519 密钥。
-  - `hosts.keys.rename {id, label}`。名称不超过 64 字节、不含控制字符，由原生校验。
-  - `hosts.keys.copyPublicKey {id}`：原生写入剪贴板。
-  - `hosts.keys.delete {id}`：网页先列出 `usedBy` 确认；删除同时清掉主机引用和钥匙串条目。
-  - `hosts.keys.migrateReferences {id}`：网页先列出 `migratableHosts` 确认，再把这些主机里的原文件路径换成该密钥。
-  - `hosts.keys.deleteOriginal {id}`：原生弹出自己的确认框说明全部后果，网页不再重复确认。
-- 不提供私钥导出。
-
-### Agent 访问
-
-- 「Agent 访问」子页（agent 远程执行的总开关、授权、agent 终端、MCP 安装与活动记录）：`Resources/settings-ui/agent-access.js`
-  （入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`，`ui.t` 为翻译函数，`send` 返回的 Promise 失败时忽略、以下一次快照为准；契约见上文「子标签与扩展契约」），Swift 侧协作者 `SettingsAgentAccessBridge`。
-  数据在快照的 `hosts.agentAccess`；动作 `hosts.setAgentAccessEnabled`、`hosts.revokeAgentGrant`、`hosts.revokeAllAgentGrants`、
-  `hosts.agentAuditPage`（分页读审计，结果经消息 `agentAccessAuditPage` 异步送回）、`hosts.installAgentMCP`。
-  语义与审计字段见 [Agent 远程执行](agent-host-access.md)。
+原来从设置打开主机编辑器的入口改为打开侧栏「主机」页：终端标签右键菜单的「编辑主机…」和 Open Quickly 主机行的「编辑主机…」经 `AppModel.showHostEditor(hostID:)` 打开主机页并带出该主机的原生编辑面板；「新建工作区」面板里的「添加主机…」打开主机页并带出新建主机面板。详见 [原生 SSH](native-ssh.md)。
