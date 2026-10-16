@@ -21,6 +21,23 @@ extension AppModel {
     presentHostsPage()
   }
 
+  /// 打开主机页并打开指定主机的原生编辑面板。主机已不存在时面板不打开，主机页停在列表并提示。
+  func showHostEditor(hostID: UUID) {
+    showHostEditor(.edit(hostID))
+  }
+
+  /// 打开主机页的「主机」子页并请求打开编辑面板。
+  ///
+  /// 请求先记在 `pendingHostEditor`，由 `HostsPageViewController.pageDidAppear` 消费：主机页
+  /// 尚未显示、正显示别的子页或已经显示时都走同一条路径。
+  func showHostEditor(_ mode: HostEditorMode) {
+    pendingHostEditor = mode
+    // 主机页已显示在「主机」子页时下面的属性都不变、不会触发刷新；主动发一次变化，
+    // 让工作区重建内容区并调用 `pageDidAppear`。
+    objectWillChange.send()
+    presentHostsPage(section: .hosts)
+  }
+
   /// 关闭主机页、回到当前标签的终端。
   func dismissHostsPage() {
     if isHostsPagePresented { isHostsPagePresented = false }

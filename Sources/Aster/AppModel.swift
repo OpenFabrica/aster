@@ -1574,6 +1574,9 @@ final class AppModel: ObservableObject {
   @Published var isHostsPagePresented = false
   /// 主机页当前子页（主机 / 密钥 / 已知主机）。只属于本窗口、不持久化。
   @Published var hostsPageSection: HostsHubSection = .hosts
+  /// 其它入口（标签菜单、Open Quickly、新建工作区）请求主机页打开的编辑面板；
+  /// 主机页在 `pageDidAppear` 消费后清空。不发布变化，见 `showHostEditor(_:)`。
+  var pendingHostEditor: HostEditorMode?
   /// 在主机页打开的原生 SSH 标签。远端会话结束、标签自动关闭后回到主机页；不持久化。
   var hostsPageOriginTabIDs: Set<UUID> = []
   /// 活动徽章的窗口级局部事件。视图只更新对应 Tab 的附件，Dock 只重新聚合状态；

@@ -295,7 +295,7 @@ final class OpenQuicklyHostTargets {
         }),
         (L("编辑主机…"), { [weak self] in
           self?.dismiss()
-          self?.model.showHostSettings(hostID: id)
+          self?.model.showHostEditor(hostID: id)
         }),
       ]
       return entry

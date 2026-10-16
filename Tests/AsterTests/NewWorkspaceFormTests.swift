@@ -78,7 +78,7 @@ func newWorkspaceFormDispatchesSubmission() throws {
   // 「添加主机…」是跳转，不校验名称。
   #expect(
     try NewWorkspaceForm.submission(choice: .addHost, name: "", openInNewWindow: false)
-      == .openHostSettings)
+      == .openNewHostEditor)
 }
 
 @MainActor

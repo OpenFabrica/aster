@@ -51,8 +51,8 @@ enum NewWorkspaceSubmission: Equatable {
   case createRemote(machineID: UUID, name: String, inNewWindow: Bool)
   /// 先添加机器，成功后再在新机器上建远端工作区。
   case addMachineThenCreate(prefill: MachineSetupFlow.Prefill, name: String, inNewWindow: Bool)
-  /// 打开设置的「主机」分类。
-  case openHostSettings
+  /// 打开侧栏「主机」页并展开新建主机面板。
+  case openNewHostEditor
 }
 
 /// 表单的纯逻辑：下拉选项构建与提交分派。不碰任何窗口，测试直接调用。
@@ -100,7 +100,7 @@ enum NewWorkspaceForm {
   static func submission(
     choice: NewWorkspaceHostChoice, name rawName: String, openInNewWindow: Bool
   ) throws -> NewWorkspaceSubmission {
-    if choice == .addHost { return .openHostSettings }
+    if choice == .addHost { return .openNewHostEditor }
     let name = try NamedWorkspaceRegistry.validatedName(rawName)
     switch choice {
     case .local:
@@ -114,7 +114,7 @@ enum NewWorkspaceForm {
       return .addMachineThenCreate(
         prefill: .init(label: alias, sshTarget: alias), name: name, inNewWindow: openInNewWindow)
     case .addHost:
-      return .openHostSettings
+      return .openNewHostEditor
     }
   }
 
@@ -269,7 +269,7 @@ enum NewWorkspaceSheet {
         form.alert = alert
         let response = WorkspaceSheetPresenter.run(alert, in: window)
         if response == addHostResponse {
-          openHostSettings()
+          openNewHostEditor(controller: controller)
           return
         }
         guard response == .alertFirstButtonReturn else { return }
@@ -311,8 +311,8 @@ enum NewWorkspaceSheet {
       await createRemote(
         machineID: machineID, name: name, inNewWindow: inNewWindow, window: window,
         controller: controller, directory: directory)
-    case .openHostSettings:
-      openHostSettings()
+    case .openNewHostEditor:
+      openNewHostEditor(controller: controller)
     }
   }
 
@@ -357,9 +357,15 @@ enum NewWorkspaceSheet {
     }
   }
 
-  /// 打开设置并定位到「主机」分类。
-  private static func openHostSettings() {
-    (NSApplication.shared.delegate as? AsterAppDelegate)?.showSettings(section: .hosts)
+  /// 打开侧栏「主机」页并展开新建主机面板；没有目标窗口时交给 AppDelegate 找最前面的工作区窗口。
+  private static func openNewHostEditor(controller: WorkspaceViewController?) {
+    let mode = HostEditorMode.new(SSHHostDraft())
+    guard let controller else {
+      (NSApplication.shared.delegate as? AsterAppDelegate)?.showHostsPage(editor: mode)
+      return
+    }
+    WorkspaceGroupNavigator.bringToFront(controller)
+    controller.model.showHostEditor(mode)
   }
 
   /// 本机默认名：沿用目标窗口的编号规则；没有窗口时按新窗口只有默认工作区来编号。

@@ -87,6 +87,12 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
     searchBar.needsDisplay = true
     editorPanel?.view.needsDisplay = true
     reload()
+    // 其它入口（标签菜单、Open Quickly、新建工作区）请求的编辑面板在这里打开；
+    // 下面的异步聚焦会把焦点交给面板。
+    if let mode = model.pendingHostEditor {
+      model.pendingHostEditor = nil
+      openEditor(mode)
+    }
     DispatchQueue.main.async { [weak self] in
       guard let self, let window = self.view.window else { return }
       if let editorPanel = self.editorPanel {

@@ -247,23 +247,13 @@ extension AppModel {
     let profile: SSHHostProfile
     do {
       profile = try SaveSSHHostSheet.makeProfile(draft)
-      try SettingsHostsBridge.validate(profile, in: SSHHostDirectory.shared.hosts + [profile])
+      try SSHHostEditing.validate(profile, in: SSHHostDirectory.shared.hosts + [profile])
       try SSHHostDirectory.shared.upsert(profile)
     } catch {
       MachineSetupSheet.presentFailure(SaveSSHHostSheet.describe(error), in: window)
       return
     }
     if draft.connectNow { openNativeSSH(hostID: profile.id) }
-  }
-
-  /// 打开设置的「主机」分类并编辑指定主机（主机不存在时停在列表）。
-  func showHostSettings(hostID: UUID?) {
-    guard let delegate = NSApp.delegate as? AsterAppDelegate else { return }
-    delegate.showSettings(section: .hosts)
-    guard let hostID else { return }
-    let settings = NSApp.windows.lazy
-      .compactMap { $0.contentViewController as? SettingsViewController }.first
-    settings?.showHost(hostID)
   }
 
   /// 标签右键菜单里的主机项：原生 SSH 标签给「编辑主机…」，手敲 ssh 的本地标签给「保存为主机…」。
@@ -273,7 +263,7 @@ extension AppModel {
       if let hostID = spec.hostID {
         return [
           ActionMenuItem(title: L("编辑主机…")) { [weak self] in
-            self?.showHostSettings(hostID: hostID)
+            self?.showHostEditor(hostID: hostID)
           }
         ]
       }

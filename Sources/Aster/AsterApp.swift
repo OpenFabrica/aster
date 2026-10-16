@@ -842,6 +842,19 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
       .showSection(section)
   }
 
+  /// 在最前面的工作区窗口里显示侧栏「主机」页，可同时请求打开原生编辑面板。
+  /// 设置页「打开主机页」与新建工作区表单「添加主机…」共用；没有可见工作区窗口时先恢复主窗口。
+  func showHostsPage(section: HostsHubSection = .hosts, editor: HostEditorMode? = nil) {
+    if WorkspaceGroupNavigator.frontmostController() == nil { showMainWindow() }
+    guard let controller = WorkspaceGroupNavigator.frontmostController() else { return }
+    WorkspaceGroupNavigator.bringToFront(controller)
+    if let editor {
+      controller.model.showHostEditor(editor)
+    } else {
+      controller.model.presentHostsPage(section: section)
+    }
+  }
+
   /// 设置控件会广播全局配置。打开设置期间让所有工作区只就地更新现存终端，并把
   /// 结构刷新合并到设置窗口关闭时执行一次，避免独立窗口中的 NSSwitch 动画卡顿。
   private func setWorkspaceSettingsPresentationActive(_ active: Bool) {
