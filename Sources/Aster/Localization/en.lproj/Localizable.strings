@@ -49,6 +49,7 @@
 "%@ 条 Memory" = "%@ Memories";
 "%@ 条命令" = "%@ commands";
 "%@ 条失败" = "%@ failed";
+"%@ 核" = "%@ cores";
 "%@ 次失败" = "%@ failures";
 "%@ 正在等待确认或输入。" = "%@ is waiting for confirmation or input.";
 "%@ 没有可用的屏幕检测结果：该 Agent 没有检测清单，或当前终端不支持读屏。" = "%@ has no screen detection results: this Agent has no detection manifest, or the current terminal does not support screen reading.";
@@ -123,6 +124,9 @@
 "CPU" = "CPU";
 "CPU %@ · 内存 %@" = "CPU %@ · Memory %@";
 "CPU %@ · 内存 %@ · %@ 个进程" = "CPU %@ · Memory %@ · %@ processes";
+"CPU：%@" = "CPU: %@";
+"CPU：%@ 核" = "CPU: %@ cores";
+"CPU：%@（%@ 核）" = "CPU: %@ (%@ cores)";
 "Comment 超过 8 KiB 上限。" = "Comment exceeds the 8 KiB limit.";
 "Composer 发送失败：%@" = "Composer send failed: %@";
 "Composer 草稿超过大小上限。" = "Composer draft exceeds the size limit.";
@@ -171,6 +175,7 @@
 "SSH target 缺少主机段。" = "SSH target is missing the host part.";
 "SSH target，例如 root@ubuntu@orb" = "SSH target, e.g. root@ubuntu@orb";
 "SSH 别名" = "SSH Aliases";
+"SSH 失败：%@" = "SSH failed: %@";
 "SSH 远端" = "SSH Remote";
 "SSH 连接" = "Connect via SSH";
 "SSH 连接 %@" = "Connect to %@ via SSH";
@@ -229,6 +234,7 @@
 "— transcript 过长，其余 %@ 条未显示；完整内容见会话文件 —" = "— Transcript too long; %@ more entries not shown. See the session file for full content. —";
 "“%@”尚无可用的 macOS 操作" = "No macOS action is available yet for \"%@\"";
 "“%@”已保存。" = "\"%@\" has been saved.";
+"“%@”是导入组，由导入流程管理，不能新建、改名或删除" = "“%@” is the imported group, managed by the import flow; it cannot be created, renamed or deleted";
 "… 已省略 %@ 行，完整 diff 请在终端中查看。" = "… %@ lines omitted, view the full diff in the terminal.";
 "…（已截断，共 %@ 字符）" = "… (truncated, %@ characters total)";
 "…（本条已截断，共 %@ 字符）" = "… (this entry truncated, %@ characters total)";
@@ -279,6 +285,7 @@
 "主机、密钥与已知主机" = "Hosts, Keys, and Known Hosts";
 "主机、密钥与已知主机已移到侧栏「主机」页。" = "Hosts, keys, and known hosts have moved to the Hosts page in the sidebar.";
 "主机参数无效" = "Invalid host parameters";
+"主机名：%@" = "Hostname: %@";
 "主机和用户名不能换行" = "Host and username must not contain line breaks";
 "主机已删除，但没能从钥匙串删除口令：%@" = "The host was deleted, but its password could not be removed from the Keychain: %@";
 "主机无法解析，找不到对应的口令" = "Cannot resolve the host, so its password cannot be found";
@@ -550,7 +557,9 @@
 "其它 Agent 没有本地配额数据，只统计 token。" = "Other agents keep no local quota data; only tokens are counted.";
 "内存" = "Memory";
 "内存占比" = "Memory share";
+"内存：%@" = "Memory: %@";
 "内容" = "Content";
+"内核：%@" = "Kernel: %@";
 "内置 Fig 命令规格（含子命令、选项与参数）；只在手动操作时联网" = "Built-in Fig command specs (including subcommands, options, and arguments); goes online only for manual actions";
 "内置字体不是可安全读取的普通文件：%@" = "Built-in font is not a safely readable regular file: %@";
 "内置字体注册失败：%@" = "Built-in font registration failed: %@";
@@ -569,6 +578,10 @@
 "分支名" = "Branch name";
 "分数与罗马数字等 Number Forms 字符" = "Number Forms Characters Like Fractions and Roman Numerals";
 "分离受管终端" = "Detach Managed Terminal";
+"分组不存在，可能已被删除或改名" = "Group not found; it may have been deleted or renamed";
+"分组只是一个名字；之后新建或编辑主机时选这个分组即可。" = "A group is just a name. Pick it when you create or edit a host.";
+"分组名" = "Group Name";
+"分组名不能为空" = "Group name cannot be empty";
 "分组名过长或包含换行" = "Group name is too long or contains a line break";
 "分组（可选）" = "Group (optional)";
 "切换 Composer" = "Toggle Composer";
@@ -589,6 +602,8 @@
 "创建可编辑副本" = "Create an Editable Copy";
 "删除" = "Delete";
 "删除…" = "Delete…";
+"删除分组“%@”？" = "Delete group “%@”?";
+"删除分组…" = "Delete Group…";
 "删除到行尾" = "Delete to End of Line";
 "删除到行首" = "Delete to Beginning of Line";
 "删除右侧词" = "Delete Word Right";
@@ -597,6 +612,7 @@
 "删除左侧词" = "Delete Word Left";
 "删除这条 Memory？" = "Delete This Memory?";
 "刷新" = "Refresh";
+"刷新系统信息" = "Refresh System Info";
 "前台通知" = "Foreground Notifications";
 "前景色" = "Foreground";
 "前置全部窗口" = "Bring All to Front";
@@ -753,6 +769,7 @@
 "在新窗口打开" = "Open in New Window";
 "在新终端中打开所在目录" = "Open Containing Directory in New Terminal";
 "在本机脱敏记录命令，并允许 README 与沙箱 help 规格学习" = "Record commands locally with sensitive data redacted, and allow README and sandboxed help spec learning";
+"在此分组新建主机…" = "New Host in This Group…";
 "在系统状态栏显示 Claude、Codex 的配额，点击打开用量浮动窗" = "Show Claude and Codex quota in the system menu bar; click to open the floating usage window";
 "在线" = "Online";
 "在终端 cd 过去" = "cd Here in Terminal";
@@ -925,6 +942,7 @@
 "已是 Aster：" = "Already Aster: ";
 "已是最新版本" = "Up to date";
 "已显示 %@ / %@ 项，已截断" = "Showing %@ of %@ items; truncated";
+"已更新“%@”的系统信息：%@" = "Updated system info for “%@”: %@";
 "已更新主题“%@”的 ANSI 参数。" = "ANSI parameters of theme \"%@\" have been updated.";
 "已更新主题“%@”的字体参数。" = "Font parameters of theme \"%@\" have been updated.";
 "已更新主题“%@”的颜色" = "Colors of theme \"%@\" have been updated";
@@ -948,6 +966,7 @@
 "已禁用" = "Disabled";
 "已移除 %@。" = "%@ has been removed.";
 "已移除 aster 命令。" = "The aster command has been removed.";
+"已经有叫“%@”的分组" = "A group named “%@” already exists";
 "已被取代" = "Superseded";
 "已记录本地诊断信息，不包含命令、终端内容或路径。" = "Local diagnostics recorded. No commands, terminal content, or paths are included.";
 "已跟踪文件夹" = "Tracked Folders";
@@ -1175,6 +1194,8 @@
 "新建 Agent" = "New Agent";
 "新建 Agent…" = "New Agent…";
 "新建 Task" = "New Task";
+"新建分组" = "New Group";
+"新建分组…" = "New Group…";
 "新建工作区" = "New Workspace";
 "新建工作区…" = "New Workspace…";
 "新建文件浏览器" = "New File Browser";
@@ -1385,6 +1406,7 @@
 "来源" = "Source";
 "来源：%@" = "Source: %@";
 "来自 Agent transcript 的补录，非终端实测：%@" = "Supplemental from Agent transcript, not terminal output: %@";
+"架构：%@" = "Architecture: %@";
 "查找" = "Find";
 "查看" = "View";
 "查看会话历史" = "View Session History";
@@ -1409,6 +1431,7 @@
 "标题栏文字" = "Title Bar Text";
 "标题栏背景" = "Title Bar Background";
 "标题颜色" = "Title Color";
+"根分区：%@" = "Root volume: %@";
 "根据 OSC 7 目录变化更新本机 frecency 排名；忽略列表中的目录不会重新出现" = "Update local frecency ranking based on OSC 7 directory changes; directories in the ignore list will not reappear";
 "格式" = "Format";
 "检查已取消。" = "Inspection cancelled.";
@@ -1447,6 +1470,8 @@
 "正在读取远端目录…" = "Reading remote directory…";
 "正在读取项目记忆…" = "Reading project memory…";
 "正在运行" = "Running";
+"正在采集系统信息…" = "Collecting system info…";
+"正在采集这台主机的系统信息" = "System info for this host is already being collected";
 "此 Agent 不支持 Branch。" = "This Agent does not support branching.";
 "此 Pane 正在画中画小窗中" = "This pane is in a Picture in Picture window";
 "此 Pane 没有 Outline。" = "This pane has no Outline.";
@@ -1473,6 +1498,7 @@
 "没有可注册的项目，请先在工作区打开一个目录" = "No project to register; please open a directory in the workspace first";
 "没有可集成的 Agent" = "No Agent Available to Integrate";
 "没有活动 Pane" = "No Active Pane";
+"没有读到系统信息，远端可能没有 /bin/sh" = "No system info was returned; the remote may not have /bin/sh";
 "没能全部清除——把网页窗格关掉再试一次。" = "Could not clear everything — close the web pane and try again.";
 "注册后，在该项目里运行的 Claude Code 就能查到这个项目的历史记忆。" = "Once registered, Claude Code running in this project can look up its historical memory.";
 "活动 Pane 已关闭或没有可镜像的终端画面" = "The active Pane has been closed or has no terminal surface to mirror";
@@ -1624,10 +1650,13 @@
 "系统等宽字体" = "System Monospace Font";
 "系统集成" = "System Integration";
 "系统默认" = "System Default";
+"系统：%@" = "System: %@";
 "紧凑 (1.0)" = "Compact (1.0)";
 "紫" = "Purple";
 "红" = "Red";
 "约 %@ token" = "~%@ tokens";
+"组里的 %@ 台主机会保留，变成未分组。" = "The %@ hosts in it are kept and become ungrouped.";
+"组里的主机会一起改到新分组名下。" = "Hosts in the group move to the new name together.";
 "终止信号 %@%@。最后画面已保留。" = "Terminated by signal %@%@. The last screen has been preserved.";
 "终端" = "Terminal";
 "终端不可用" = "Terminal unavailable";
@@ -1811,8 +1840,11 @@
 "还没有 Agent 取用过上下文。" = "No Agent has consumed context yet.";
 "还没有 token 用量数据。" = "No token usage data yet.";
 "还没有配额数据。启动一次 Claude Code 或 Codex 后这里会显示。" = "No quota data yet. It appears here after you run Claude Code or Codex once.";
+"这个分组是空的，删除后不再显示。" = "This group is empty; it will no longer be shown.";
+"这个分组还没有主机。点「新建主机」会直接加到这一组；也可以在编辑主机时填这个分组名。" = "This group has no hosts yet. “New Host” adds one to this group; you can also type this group name when editing a host.";
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "This workspace is still open. Close its window before deleting it.";
 "这台主机已被删除，无法连接。" = "This host has been deleted and cannot be connected to.";
+"这台主机是远程机器“%@”的连接目标，删除后这些机器无法再连接。" = "This host is the connection target of remote machine “%@”; after deletion those machines can no longer connect.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "This is the first connection to this host. Check the fingerprint below with the server administrator, and connect only if it matches.\n\nAlgorithm: %@\nFingerprint: %@";
 "这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "This command uses options such as %@; saving only the address would connect with a different configuration. Create a new host on the Hosts page in the sidebar and fill in these options.";
 "进入" = "Open";
@@ -1826,6 +1858,8 @@
 "进程（按 CPU）" = "Processes (by CPU)";
 "进程（按内存）" = "Processes (by memory)";
 "进行中" = "In Progress";
+"远程机器" = "Remote Machine";
+"远程机器：%@" = "Remote machines: %@";
 "远端" = "Remote";
 "远端 %@ 的协议主版本 %@ 与客户端 %@ 不兼容，需要显式替换；后台不会停止它。" = "Remote %@'s protocol major version %@ is incompatible with client %@; explicit replacement is required. It will not be stopped in the background.";
 "远端 %@/%@ 上没有可用的 aster-session，需要显式安装。" = "No usable aster-session on remote %@/%@; explicit installation is required.";
@@ -2193,6 +2227,10 @@
 "还没有分组" = "No groups yet";
 "还没有转发规则。" = "No forwarding rules yet.";
 "选择已有分组" = "Choose an Existing Group";
+"采集“%@”的系统信息失败：%@" = "Could not collect system info for “%@”: %@";
+"采集系统信息失败（退出码 %@）" = "Collecting system info failed (exit code %@)";
+"重命名分组“%@”" = "Rename Group “%@”";
+"重命名分组…" = "Rename Group…";
 "键盘交互" = "Keyboard-Interactive";
 "默认设置" = "Defaults";
 "默认设置…" = "Defaults…";

@@ -113,7 +113,9 @@ extension HostsPageViewController: HostEditorPanelHost {
     case .defaults:
       draft = SSHHostDraft(profile: hosts.first(where: \.isDefaults) ?? .emptyDefaults())
     }
-    return HostEditorContext(draft: draft, hosts: hosts, vaultKeys: editorServices.vaultKeys(), localUser: localUser)
+    return HostEditorContext(
+      draft: draft, hosts: hosts, declaredGroups: directory.groups, vaultKeys: editorServices.vaultKeys(),
+      localUser: localUser)
   }
 
   /// 询问是否放弃未保存的修改，确认后执行 `discard`。

@@ -49,6 +49,7 @@
 "%@ 条 Memory" = "%@ mémoires";
 "%@ 条命令" = "%@ commandes";
 "%@ 条失败" = "%@ échoués";
+"%@ 核" = "%@ cœurs";
 "%@ 次失败" = "%@ échecs";
 "%@ 正在等待确认或输入。" = "%@ attend une confirmation ou une saisie.";
 "%@ 没有可用的屏幕检测结果：该 Agent 没有检测清单，或当前终端不支持读屏。" = "%@ n’a aucun résultat de détection d’écran : cet Agent n’a pas de manifeste de détection, ou le terminal actuel ne prend pas en charge la lecture d’écran.";
@@ -123,6 +124,9 @@
 "CPU" = "CPU";
 "CPU %@ · 内存 %@" = "CPU %@ · Mémoire %@";
 "CPU %@ · 内存 %@ · %@ 个进程" = "CPU %@ · Mémoire %@ · %@ processus";
+"CPU：%@" = "CPU : %@";
+"CPU：%@ 核" = "CPU : %@ cœurs";
+"CPU：%@（%@ 核）" = "CPU : %@ (%@ cœurs)";
 "Comment 超过 8 KiB 上限。" = "Le commentaire dépasse la limite de 8 Kio.";
 "Composer 发送失败：%@" = "Échec de l'envoi Composer : %@";
 "Composer 草稿超过大小上限。" = "Le brouillon Composer dépasse la limite de taille.";
@@ -171,6 +175,7 @@
 "SSH target 缺少主机段。" = "La cible SSH ne contient pas de partie hôte.";
 "SSH target，例如 root@ubuntu@orb" = "Cible SSH, par ex. root@ubuntu@orb";
 "SSH 别名" = "Alias SSH";
+"SSH 失败：%@" = "Échec SSH : %@";
 "SSH 远端" = "SSH distant";
 "SSH 连接" = "Connexion SSH";
 "SSH 连接 %@" = "Connexion SSH à %@";
@@ -229,6 +234,7 @@
 "— transcript 过长，其余 %@ 条未显示；完整内容见会话文件 —" = "— Transcript trop long, %@ entrées restantes non affichées ; consultez le fichier de session pour le contenu complet —";
 "“%@”尚无可用的 macOS 操作" = "Aucune action macOS disponible pour « %@ » pour le moment";
 "“%@”已保存。" = "« %@ » a été enregistré.";
+"“%@”是导入组，由导入流程管理，不能新建、改名或删除" = "« %@ » est le groupe importé, géré par l’importation ; il ne peut pas être créé, renommé ni supprimé";
 "… 已省略 %@ 行，完整 diff 请在终端中查看。" = "… %@ lignes omises, consultez le diff complet dans le terminal.";
 "…（已截断，共 %@ 字符）" = "… (tronqué, %@ caractères au total)";
 "…（本条已截断，共 %@ 字符）" = "… (cette entrée est tronquée, %@ caractères au total)";
@@ -279,6 +285,7 @@
 "主机、密钥与已知主机" = "Hôtes, clés et hôtes connus";
 "主机、密钥与已知主机已移到侧栏「主机」页。" = "Les hôtes, les clés et les hôtes connus se trouvent désormais dans la page « Hôtes » de la barre latérale.";
 "主机参数无效" = "Paramètres d'hôte non valides";
+"主机名：%@" = "Nom d’hôte : %@";
 "主机和用户名不能换行" = "L'hôte et le nom d'utilisateur ne doivent pas contenir de saut de ligne";
 "主机已删除，但没能从钥匙串删除口令：%@" = "L'hôte a été supprimé, mais son mot de passe n'a pas pu être retiré du trousseau : %@";
 "主机无法解析，找不到对应的口令" = "Impossible de résoudre l'hôte ; le mot de passe correspondant est introuvable";
@@ -550,7 +557,9 @@
 "其它 Agent 没有本地配额数据，只统计 token。" = "Les autres agents ne stockent pas de quota en local ; seuls les tokens sont comptés.";
 "内存" = "Mémoire";
 "内存占比" = "Part de mémoire";
+"内存：%@" = "Mémoire : %@";
 "内容" = "Contenu";
+"内核：%@" = "Noyau : %@";
 "内置 Fig 命令规格（含子命令、选项与参数）；只在手动操作时联网" = "Spécifications de commandes Fig intégrées (sous-commandes, options et arguments inclus) ; se connecte uniquement lors d'une action manuelle";
 "内置字体不是可安全读取的普通文件：%@" = "La police intégrée n’est pas un fichier régulier lisible en toute sécurité : %@";
 "内置字体注册失败：%@" = "Échec de l’enregistrement de la police intégrée : %@";
@@ -569,6 +578,10 @@
 "分支名" = "Nom de la branche";
 "分数与罗马数字等 Number Forms 字符" = "Caractères Number Forms comme les fractions et chiffres romains";
 "分离受管终端" = "Détacher le terminal géré";
+"分组不存在，可能已被删除或改名" = "Groupe introuvable ; il a peut-être été supprimé ou renommé";
+"分组只是一个名字；之后新建或编辑主机时选这个分组即可。" = "Un groupe n’est qu’un nom. Choisissez-le lorsque vous créez ou modifiez un hôte.";
+"分组名" = "Nom du groupe";
+"分组名不能为空" = "Le nom du groupe ne peut pas être vide";
 "分组名过长或包含换行" = "Le nom du groupe est trop long ou contient un saut de ligne";
 "分组（可选）" = "Groupe (facultatif)";
 "切换 Composer" = "Afficher/Masquer le Composer";
@@ -589,6 +602,8 @@
 "创建可编辑副本" = "Créer une copie modifiable";
 "删除" = "Supprimer";
 "删除…" = "Supprimer…";
+"删除分组“%@”？" = "Supprimer le groupe « %@ » ?";
+"删除分组…" = "Supprimer le groupe…";
 "删除到行尾" = "Supprimer jusqu’à la fin de la ligne";
 "删除到行首" = "Supprimer jusqu’au début de la ligne";
 "删除右侧词" = "Supprimer le mot à droite";
@@ -597,6 +612,7 @@
 "删除左侧词" = "Supprimer le mot à gauche";
 "删除这条 Memory？" = "Supprimer cette Memory ?";
 "刷新" = "Actualiser";
+"刷新系统信息" = "Actualiser les informations système";
 "前台通知" = "Notifications au premier plan";
 "前景色" = "Premier plan";
 "前置全部窗口" = "Tout ramener au premier plan";
@@ -753,6 +769,7 @@
 "在新窗口打开" = "Ouvrir dans une nouvelle fenêtre";
 "在新终端中打开所在目录" = "Ouvrir le répertoire dans un nouveau terminal";
 "在本机脱敏记录命令，并允许 README 与沙箱 help 规格学习" = "Enregistrer les commandes localement avec les données sensibles masquées, et autoriser l'apprentissage des spécifications README et help en bac à sable";
+"在此分组新建主机…" = "Nouvel hôte dans ce groupe…";
 "在系统状态栏显示 Claude、Codex 的配额，点击打开用量浮动窗" = "Affiche le quota Claude et Codex dans la barre des menus ; cliquez pour ouvrir la fenêtre flottante d’utilisation";
 "在线" = "En ligne";
 "在终端 cd 过去" = "cd ici dans le terminal";
@@ -925,6 +942,7 @@
 "已是 Aster：" = "Déjà Aster : ";
 "已是最新版本" = "À jour";
 "已显示 %@ / %@ 项，已截断" = "%@ éléments sur %@ affichés ; liste tronquée";
+"已更新“%@”的系统信息：%@" = "Informations système de « %@ » mises à jour : %@";
 "已更新主题“%@”的 ANSI 参数。" = "Les paramètres ANSI du thème « %@ » ont été mis à jour.";
 "已更新主题“%@”的字体参数。" = "Les paramètres de police du thème « %@ » ont été mis à jour.";
 "已更新主题“%@”的颜色" = "Les couleurs du thème « %@ » ont été mises à jour";
@@ -948,6 +966,7 @@
 "已禁用" = "Désactivé";
 "已移除 %@。" = "%@ a été supprimé.";
 "已移除 aster 命令。" = "La commande aster a été supprimée.";
+"已经有叫“%@”的分组" = "Un groupe nommé « %@ » existe déjà";
 "已被取代" = "Remplacé";
 "已记录本地诊断信息，不包含命令、终端内容或路径。" = "Informations de diagnostic locales enregistrées. Aucune commande, contenu de terminal ou chemin inclus.";
 "已跟踪文件夹" = "Dossiers suivis";
@@ -1175,6 +1194,8 @@
 "新建 Agent" = "Nouvel Agent";
 "新建 Agent…" = "Nouvel Agent…";
 "新建 Task" = "Nouveau Task";
+"新建分组" = "Nouveau groupe";
+"新建分组…" = "Nouveau groupe…";
 "新建工作区" = "Nouvel espace de travail";
 "新建工作区…" = "Nouvel espace de travail…";
 "新建文件浏览器" = "Nouvel explorateur de fichiers";
@@ -1385,6 +1406,7 @@
 "来源" = "Source";
 "来源：%@" = "Source : %@";
 "来自 Agent transcript 的补录，非终端实测：%@" = "Enregistrement complémentaire du transcript Agent, pas une sortie terminale : %@";
+"架构：%@" = "Architecture : %@";
 "查找" = "Rechercher";
 "查看" = "Afficher";
 "查看会话历史" = "Voir l’historique des sessions";
@@ -1409,6 +1431,7 @@
 "标题栏文字" = "Texte de la barre de titre";
 "标题栏背景" = "Arrière-plan de la barre de titre";
 "标题颜色" = "Couleur du titre";
+"根分区：%@" = "Volume racine : %@";
 "根据 OSC 7 目录变化更新本机 frecency 排名；忽略列表中的目录不会重新出现" = "Met à jour le classement frecency local en fonction des changements de dossier OSC 7 ; les dossiers de la liste d'exclusion ne réapparaîtront pas";
 "格式" = "Format";
 "检查已取消。" = "Inspection annulée.";
@@ -1447,6 +1470,8 @@
 "正在读取远端目录…" = "Lecture du répertoire distant…";
 "正在读取项目记忆…" = "Lecture de la mémoire du projet…";
 "正在运行" = "En cours d'exécution";
+"正在采集系统信息…" = "Collecte des informations système…";
+"正在采集这台主机的系统信息" = "Les informations système de cet hôte sont déjà en cours de collecte";
 "此 Agent 不支持 Branch。" = "Cet Agent ne prend pas en charge le Branch.";
 "此 Pane 正在画中画小窗中" = "Ce Pane se trouve dans une fenêtre Picture in Picture";
 "此 Pane 没有 Outline。" = "Ce panneau n’a pas d’Outline.";
@@ -1473,6 +1498,7 @@
 "没有可注册的项目，请先在工作区打开一个目录" = "Aucun projet à enregistrer ; veuillez d'abord ouvrir un dossier dans l'espace de travail";
 "没有可集成的 Agent" = "Aucun Agent disponible à intégrer";
 "没有活动 Pane" = "Aucun panneau actif";
+"没有读到系统信息，远端可能没有 /bin/sh" = "Aucune information système reçue ; l’hôte distant n’a peut-être pas /bin/sh";
 "没能全部清除——把网页窗格关掉再试一次。" = "Impossible de tout effacer — fermez le panneau web et réessayez.";
 "注册后，在该项目里运行的 Claude Code 就能查到这个项目的历史记忆。" = "Une fois enregistré, Claude Code exécuté dans ce projet pourra consulter la mémoire historique de ce projet.";
 "活动 Pane 已关闭或没有可镜像的终端画面" = "Le panneau actif a été fermé ou n’a pas de surface de terminal à reproduire";
@@ -1624,10 +1650,13 @@
 "系统等宽字体" = "Police système à chasse fixe";
 "系统集成" = "Intégration système";
 "系统默认" = "Par défaut du système";
+"系统：%@" = "Système : %@";
 "紧凑 (1.0)" = "Compact (1.0)";
 "紫" = "Violet";
 "红" = "Rouge";
 "约 %@ token" = "~%@ tokens";
+"组里的 %@ 台主机会保留，变成未分组。" = "Les %@ hôtes du groupe sont conservés et deviennent sans groupe.";
+"组里的主机会一起改到新分组名下。" = "Les hôtes du groupe passent ensemble sous le nouveau nom.";
 "终止信号 %@%@。最后画面已保留。" = "Signal de terminaison %@%@. Le dernier écran a été conservé.";
 "终端" = "Terminal";
 "终端不可用" = "Terminal indisponible";
@@ -1811,8 +1840,11 @@
 "还没有 Agent 取用过上下文。" = "Aucun Agent n'a encore consommé de contexte.";
 "还没有 token 用量数据。" = "Pas encore de données d’utilisation de tokens.";
 "还没有配额数据。启动一次 Claude Code 或 Codex 后这里会显示。" = "Pas encore de données de quota. Elles apparaîtront après un premier lancement de Claude Code ou Codex.";
+"这个分组是空的，删除后不再显示。" = "Ce groupe est vide ; il ne sera plus affiché.";
+"这个分组还没有主机。点「新建主机」会直接加到这一组；也可以在编辑主机时填这个分组名。" = "Ce groupe n’a pas encore d’hôte. « Nouvel hôte » en ajoute un dans ce groupe ; vous pouvez aussi saisir ce nom de groupe en modifiant un hôte.";
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "Cet espace de travail est encore ouvert. Fermez sa fenêtre avant de le supprimer.";
 "这台主机已被删除，无法连接。" = "Cet hôte a été supprimé ; connexion impossible.";
+"这台主机是远程机器“%@”的连接目标，删除后这些机器无法再连接。" = "Cet hôte est la cible de connexion de la machine distante « %@ » ; après suppression, ces machines ne pourront plus se connecter.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "C'est la première connexion à cet hôte. Vérifiez l'empreinte ci-dessous auprès de l'administrateur du serveur et ne vous connectez que si elle correspond.\n\nAlgorithme : %@\nEmpreinte : %@";
 "这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "Cette commande utilise des options comme %@ ; enregistrer seulement l'adresse mènerait à une configuration différente. Créez un nouvel hôte dans la page « Hôtes » de la barre latérale et renseignez ces options.";
 "进入" = "Ouvrir";
@@ -1826,6 +1858,8 @@
 "进程（按 CPU）" = "Processus (par processeur)";
 "进程（按内存）" = "Processus (par mémoire)";
 "进行中" = "En cours";
+"远程机器" = "Machine distante";
+"远程机器：%@" = "Machines distantes : %@";
 "远端" = "Distant";
 "远端 %@ 的协议主版本 %@ 与客户端 %@ 不兼容，需要显式替换；后台不会停止它。" = "La version majeure du protocole du distant %@ (%@) est incompatible avec le client %@ ; un remplacement explicite est nécessaire. Il ne sera pas arrêté en arrière-plan.";
 "远端 %@/%@ 上没有可用的 aster-session，需要显式安装。" = "Aucun aster-session utilisable sur le distant %@/%@ ; une installation explicite est nécessaire.";
@@ -2193,6 +2227,10 @@
 "还没有分组" = "Aucun groupe pour l’instant";
 "还没有转发规则。" = "Aucune règle de redirection pour l'instant.";
 "选择已有分组" = "Choisir un groupe existant";
+"采集“%@”的系统信息失败：%@" = "Impossible de collecter les informations système de « %@ » : %@";
+"采集系统信息失败（退出码 %@）" = "Échec de la collecte des informations système (code de sortie %@)";
+"重命名分组“%@”" = "Renommer le groupe « %@ »";
+"重命名分组…" = "Renommer le groupe…";
 "键盘交互" = "Clavier interactif";
 "默认设置" = "Réglages par défaut";
 "默认设置…" = "Réglages par défaut…";

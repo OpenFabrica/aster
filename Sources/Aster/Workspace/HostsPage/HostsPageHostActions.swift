@@ -2,6 +2,7 @@
 // 规则都在 `SSHHostEditing` / `SSHHostRemoval`；这里只负责确认框、依赖注入与结果提示。
 import AppKit
 import AsterCore
+import Combine
 
 /// 主机页动作的外部依赖。生产用 `.live()`；测试注入假钥匙串、空机器列表与桩编辑器。
 struct HostsPageEditorServices {
@@ -9,8 +10,10 @@ struct HostsPageEditorServices {
   var vaultKeys: @MainActor () -> [SSHVaultKey]
   /// 口令钥匙串；查询在后台执行，删除在用户确认后执行。
   var credentials: any SSHCredentialStoring
-  /// 当前机器配置，删除确认里列出引用它的机器。
+  /// 当前机器配置：卡片据此标注「远程机器」，删除确认里列出引用它的机器。
   var machines: @MainActor () -> [MachineProfile]
+  /// 机器列表将要变化的通知，主机页据此重画标注；默认不通知（测试）。
+  var machinesChanged: @MainActor () -> AnyPublisher<Void, Never> = { Empty().eraseToAnyPublisher() }
   /// 弹出「添加机器」流程。
   var addMachine: @MainActor (MachineSetupFlow.Prefill, NSWindow?) -> Void
   var sshConfigURL: URL
@@ -23,6 +26,7 @@ struct HostsPageEditorServices {
       vaultKeys: { SSHVaultKeyDirectory.shared.keys },
       credentials: SSHCredentialStore(),
       machines: { MachineFleetModel.shared.profiles },
+      machinesChanged: { MachineFleetModel.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher() },
       addMachine: { prefill, window in
         Task { @MainActor in _ = await MachineSetupFlow.presentAddMachine(prefill: prefill, in: window) }
       },
@@ -69,13 +73,18 @@ extension HostsPageViewController {
       let hasPassword = await self.lookupPassword(hostID: id)
       let alert = NSAlert()
       alert.messageText = L("删除主机“\(HostBrowserCatalog.title(for: profile))”？")
+      // 远程开发机器连的就是这台主机：删除前把后果说在最前面，而不是只在列表里带一笔。
+      let machineNote: String? =
+        impact.machines.isEmpty
+        ? nil
+        : L("这台主机是远程机器“\(impact.machines.joined(separator: "、"))”的连接目标，删除后这些机器无法再连接。")
       let passwordNote: String? =
         hasPassword
         ? (impact.credentialSharedWith.isEmpty
           ? L("已保存的口令会一起从钥匙串删除。") : L("已保存的口令还被其它主机使用，会保留在钥匙串里。"))
         : nil
       alert.informativeText = Self.confirmationText(
-        body: [L("删除后不能撤销。"), passwordNote].compactMap { $0 }.joined(separator: " "),
+        body: [machineNote, L("删除后不能撤销。"), passwordNote].compactMap { $0 }.joined(separator: " "),
         lists: [
           (L("引用它的机器（\(String(impact.machines.count))）："), impact.machines),
           (L("用它作跳板的主机（\(String(impact.jumpDependents.count))），删除后不再经过跳板："), impact.jumpDependents),

@@ -39,7 +39,11 @@ final class SSHBrokerSupervisor {
     routing: .shared,
     hostDirectory: { SSHHostDirectory.shared },
     vaultKeyDirectory: { SSHVaultKeyDirectory.shared },
-    linkStateHandler: { MachineFleetModel.shared.handleLinkState($0) })
+    linkStateHandler: { event in
+      MachineFleetModel.shared.handleLinkState(event)
+      // 连接建立后顺带采一次主机系统信息（缺失或过期时），主机页卡片据此显示图标与配置。
+      SSHHostFactsDirectory.shared.handleLinkState(event)
+    })
 
   /// 当前生效引擎：native 表示 broker 已拉起、传输走 aster-ssh；openssh 是改造前的路径。
   /// `start` 之前恒为 openssh，保证未经 App 启动流程的调用方（测试、CLI）行为不变。

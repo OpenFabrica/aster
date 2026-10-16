@@ -14,10 +14,28 @@ public enum SSHHostStoreError: Error, Equatable, Sendable {
 }
 
 /// hosts.json 的根对象。带版本号，便于以后迁移。
+///
+/// `groups` 是用户在主机页里明确「新建」或「重命名」过的分组名：分组本身没有实体，平时由
+/// 主机的 `group` 字段推出，但空分组也要能显示，所以在这里单独记一份。旧文件没有这个键，
+/// 解码成空数组；旧版本读到新文件会忽略它，不需要升版本号。
 struct SSHHostDocument: Codable, Equatable {
   static let currentVersion = 1
   var version: Int
   var hosts: [SSHHostProfile]
+  var groups: [String]?
+}
+
+/// 一份完整的 hosts.json 内容：主机列表与明确声明的分组。
+public struct SSHHostSnapshot: Equatable, Sendable {
+  /// 主机列表，默认项在第一位。
+  public var hosts: [SSHHostProfile]
+  /// 明确声明的分组名（已规范化、去重，不含导入组）。
+  public var groups: [String]
+
+  public init(hosts: [SSHHostProfile], groups: [String] = []) {
+    self.hosts = hosts
+    self.groups = groups
+  }
 }
 
 /// 主机配置存储。线程安全：锁保护最后有效快照。
@@ -42,15 +60,21 @@ public final class SSHHostStore: @unchecked Sendable {
   public let fileURL: URL
   private let fileManager: FileManager
   private let lock = NSLock()
-  private var lastValid: [SSHHostProfile] = [.emptyDefaults()]
+  private var lastValid = SSHHostSnapshot(hosts: [.emptyDefaults()])
 
   public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
     self.fileManager = fileManager
     self.fileURL = fileURL ?? Self.defaultFileURL(fileManager: fileManager)
   }
 
-  /// 最后一份有效快照，默认项总在第一位。
-  public var effectiveHosts: [SSHHostProfile] {
+  /// 最后一份有效快照里的主机，默认项总在第一位。
+  public var effectiveHosts: [SSHHostProfile] { effectiveSnapshot.hosts }
+
+  /// 最后一份有效快照里明确声明的分组。
+  public var effectiveGroups: [String] { effectiveSnapshot.groups }
+
+  /// 最后一份有效快照。
+  public var effectiveSnapshot: SSHHostSnapshot {
     lock.lock()
     defer { lock.unlock() }
     return lastValid
@@ -60,25 +84,30 @@ public final class SSHHostStore: @unchecked Sendable {
   @discardableResult
   public func load() throws -> [SSHHostProfile] {
     guard fileManager.fileExists(atPath: fileURL.path) else {
-      return replaceSnapshot([.emptyDefaults()])
+      return replaceSnapshot(SSHHostSnapshot(hosts: [.emptyDefaults()])).hosts
     }
     let data: Data
     do { data = try Data(contentsOf: fileURL) } catch {
       throw SSHHostStoreError.ioFailure(detail: String(describing: error))
     }
-    return replaceSnapshot(try Self.decode(data))
+    return replaceSnapshot(try Self.decodeSnapshot(data)).hosts
   }
 
   /// 外部变更入口（文件监听读出内容后交给它）；nil 表示文件被删除。
   @discardableResult
   public func applyExternalChange(data: Data?) throws -> [SSHHostProfile] {
-    guard let data else { return replaceSnapshot([.emptyDefaults()]) }
-    return replaceSnapshot(try Self.decode(data))
+    guard let data else { return replaceSnapshot(SSHHostSnapshot(hosts: [.emptyDefaults()])).hosts }
+    return replaceSnapshot(try Self.decodeSnapshot(data)).hosts
+  }
+
+  /// 只改主机，声明的分组沿用当前快照。
+  public func save(_ hosts: [SSHHostProfile]) throws {
+    try save(SSHHostSnapshot(hosts: hosts, groups: effectiveGroups))
   }
 
   /// 原子写入并替换有效快照。写入前整份校验，非法内容不会落盘。
-  public func save(_ hosts: [SSHHostProfile]) throws {
-    let normalized = Self.normalized(hosts)
+  public func save(_ snapshot: SSHHostSnapshot) throws {
+    let normalized = Self.normalized(snapshot)
     let reasons = Self.validate(normalized)
     guard reasons.isEmpty else { throw SSHHostStoreError.invalidHosts(reasons: reasons) }
     let data = try Self.encode(normalized)
@@ -91,17 +120,22 @@ public final class SSHHostStore: @unchecked Sendable {
   }
 
   @discardableResult
-  private func replaceSnapshot(_ hosts: [SSHHostProfile]) -> [SSHHostProfile] {
+  private func replaceSnapshot(_ snapshot: SSHHostSnapshot) -> SSHHostSnapshot {
     lock.lock()
-    lastValid = hosts
+    lastValid = snapshot
     lock.unlock()
-    return hosts
+    return snapshot
   }
 
   // MARK: - 编解码与校验
 
-  /// 解码并整份校验。解析失败与内容非法分成两种错误。
+  /// 解码并整份校验，只取主机。解析失败与内容非法分成两种错误。
   public static func decode(_ data: Data) throws -> [SSHHostProfile] {
+    try decodeSnapshot(data).hosts
+  }
+
+  /// 解码并整份校验主机与声明的分组。
+  public static func decodeSnapshot(_ data: Data) throws -> SSHHostSnapshot {
     guard !data.isEmpty else { throw SSHHostStoreError.corrupted(detail: "empty file") }
     let document: SSHHostDocument
     do { document = try JSONDecoder().decode(SSHHostDocument.self, from: data) } catch {
@@ -110,22 +144,52 @@ public final class SSHHostStore: @unchecked Sendable {
     guard document.version <= SSHHostDocument.currentVersion else {
       throw SSHHostStoreError.corrupted(detail: "unsupported version \(document.version)")
     }
-    let hosts = normalized(document.hosts)
-    let reasons = validate(hosts)
+    let snapshot = normalized(SSHHostSnapshot(hosts: document.hosts, groups: document.groups ?? []))
+    let reasons = validate(snapshot)
     guard reasons.isEmpty else { throw SSHHostStoreError.invalidHosts(reasons: reasons) }
-    return hosts
+    return snapshot
   }
 
   /// 编码成带版本号的稳定 JSON（键排序，便于人工查看与比较）。
   public static func encode(_ hosts: [SSHHostProfile]) throws -> Data {
+    try encode(SSHHostSnapshot(hosts: hosts))
+  }
+
+  /// 编码主机与声明的分组；分组为空时不写 `groups` 键，文件与旧版本完全一样。
+  public static func encode(_ snapshot: SSHHostSnapshot) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     do {
       return try encoder.encode(
-        SSHHostDocument(version: SSHHostDocument.currentVersion, hosts: hosts))
+        SSHHostDocument(
+          version: SSHHostDocument.currentVersion, hosts: snapshot.hosts,
+          groups: snapshot.groups.isEmpty ? nil : snapshot.groups))
     } catch {
       throw SSHHostStoreError.ioFailure(detail: String(describing: error))
     }
+  }
+
+  /// 规范化整份快照：主机按 `normalized(_:)`，分组按 `normalizedGroups`。
+  public static func normalized(_ snapshot: SSHHostSnapshot) -> SSHHostSnapshot {
+    SSHHostSnapshot(hosts: normalized(snapshot.hosts), groups: normalizedGroups(snapshot.groups))
+  }
+
+  /// 整理声明的分组：去首尾空白、丢弃空串与导入组（它由导入流程管，不能手工声明）、按原顺序去重。
+  public static func normalizedGroups(_ groups: [String]) -> [String] {
+    var seen: Set<String> = []
+    return groups.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && $0 != SSHHostProfile.importedGroup && seen.insert($0).inserted }
+  }
+
+  /// 分组名是否合法：不超过 `maximumGroupBytes`，不含换行。主机字段与声明的分组共用。
+  public static func groupNameIsValid(_ group: String) -> Bool {
+    group.utf8.count <= maximumGroupBytes && !group.contains(where: \.isNewline)
+  }
+
+  /// 校验整份快照：主机原因照旧带 `[index]` 前缀，非法分组名报 `groups: invalid group`。
+  public static func validate(_ snapshot: SSHHostSnapshot) -> [String] {
+    validate(snapshot.hosts)
+      + snapshot.groups.filter { !groupNameIsValid($0) }.map { _ in "groups: invalid group" }
   }
 
   /// 规范化：默认项放到第一位（缺失就补上），分组名去空白、空串变 nil，标签按 `normalizedTags` 整理；
@@ -184,11 +248,7 @@ public final class SSHHostStore: @unchecked Sendable {
       if host.host.contains(where: \.isNewline) || host.user.contains(where: \.isNewline) {
         reasons.append("\(tag) newline in host/user")
       }
-      if let group = host.group {
-        if group.utf8.count > maximumGroupBytes || group.contains(where: \.isNewline) {
-          reasons.append("\(tag) invalid group")
-        }
-      }
+      if let group = host.group, !groupNameIsValid(group) { reasons.append("\(tag) invalid group") }
       if !tagsAreValid(host.tags) { reasons.append("\(tag) invalid tags") }
       if let port = host.port, !(1...65535).contains(port) { reasons.append("\(tag) invalid port") }
       for proxy in [host.socksProxy, host.httpProxy].compactMap({ $0 })

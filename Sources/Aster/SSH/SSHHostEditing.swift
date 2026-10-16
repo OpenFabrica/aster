@@ -242,10 +242,12 @@ enum SSHHostEditing {
     switch error {
     case let error as SSHHostEditingError: return error.message
     case let error as SSHHostDraftError: return error.message
+    case let error as SSHHostGroupingError: return error.message
     case SSHHostStoreError.invalidHosts(let reasons):
       return L("主机配置无效：\(reasons.map(friendlyReason).joined(separator: "；"))")
     case SSHHostStoreError.corrupted(let detail): return L("hosts.json 已损坏：\(detail)")
     case SSHHostStoreError.ioFailure(let detail): return L("读写 hosts.json 失败：\(detail)")
+    case let error as RemoteSSHError: return L("SSH 失败：\(error.detail)")
     case SSHBrokerError.executableMissing:
       return L("找不到 aster-ssh，请重新构建 Aster.app")
     case SSHBrokerError.startFailed(let detail): return L("aster-ssh 启动失败：\(detail)")

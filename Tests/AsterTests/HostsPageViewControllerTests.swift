@@ -10,12 +10,30 @@ import Testing
 private struct HostsPageFixture {
   let root: URL
   let directory: SSHHostDirectory
+  /// 临时 host-facts.json 与假采集器：输出由 `probeOutput` 决定，不连任何主机。
+  let facts: SSHHostFactsDirectory
   let hosts: [SSHHostProfile]
+  /// 假采集器返回的脚本输出。
+  nonisolated static let probeOutput = """
+    ASTER_HOST_FACTS_V1
+    uname_s=Linux
+    uname_r=6.8.0
+    uname_m=x86_64
+    hostname=app
+    os_PRETTY_NAME="Ubuntu 24.04 LTS"
+    os_ID=ubuntu
+    cpu_count=2
+    mem_kb=2097152
+    end
+    """
 
   init() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "AsterHostsPage-\(UUID().uuidString)", isDirectory: true)
     let store = SSHHostStore(fileURL: root.appendingPathComponent("hosts.json"))
+    facts = SSHHostFactsDirectory(
+      store: SSHHostFactsStore(fileURL: root.appendingPathComponent("host-facts.json")),
+      collector: { _ in Self.probeOutput })
     hosts = [
       SSHHostProfile(name: "app-server", group: "dx-test", host: "172.16.10.146", user: "dx"),
       SSHHostProfile(name: "db-server", group: "dx-test", host: "172.16.10.198", user: "duoxieyun"),
@@ -91,7 +109,7 @@ func hostsPageRendersFiltersAndDrillsIntoGroups() throws {
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
   let page = HostsPageViewController(
-    model: AppModel(defaults: defaults), directory: fixture.directory,
+    model: AppModel(defaults: defaults), directory: fixture.directory, factsDirectory: fixture.facts,
     usageLedger: { HostUsageLedger() }, localUser: "tester")
   let window = NSWindow(
     contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 700), styleMask: [.titled],
@@ -139,7 +157,7 @@ func hostsPageRendersFiltersAndDrillsIntoGroups() throws {
   #expect(card.content.subtitle.hasPrefix("ssh, "))
   let menu = page.makeHostMenu(try fixture.host("monite").id)
   #expect(menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-    == [L("连接"), L("编辑主机…"), L("创建副本"), L("复制 SSH 命令"), L("添加为远程机器…"), L("删除主机…")])
+    == [L("连接"), L("编辑主机…"), L("创建副本"), L("复制 SSH 命令"), L("添加为远程机器…"), L("刷新系统信息"), L("删除主机…")])
 }
 
 @Test("侧栏「主机」在「工作区」上方；点开后内容区换成主机页，选中标签即回到终端",
@@ -216,4 +234,152 @@ func hostsPageSidebarEntryPresentsAndDismisses(appearance: NSAppearance.Name) as
   try await Task.sleep(for: .milliseconds(150))
   #expect(!model.isHostsPagePresented)
   #expect(hostsPageView("hosts-page", in: root) == nil)
+}
+
+@Test("主机页分组动作：新建空分组出卡片、重命名带着主机走、删除后主机变未分组；导入组不能改名")
+@MainActor
+func hostsPageGroupActions() throws {
+  let fixture = try HostsPageFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.root) }
+  let suite = "HostsPage.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let model = AppModel(defaults: defaults)
+  let page = HostsPageViewController(
+    model: model, directory: fixture.directory, factsDirectory: fixture.facts,
+    usageLedger: { HostUsageLedger() }, localUser: "tester")
+  page.loadViewIfNeeded()
+
+  // 新建空分组：卡片出现、数量 0，可以钻进去，空状态说明怎么加主机。
+  #expect(page.createGroup(" staging "))
+  page.reload()
+  #expect(page.listing.groups.contains(HostBrowserGroup(name: "staging", hostCount: 0)))
+  page.enterGroup("staging")
+  #expect(page.query.group == "staging")
+  #expect(page.listing.hosts.isEmpty)
+  #expect(page.emptyStateText() == L("这个分组还没有主机。点「新建主机」会直接加到这一组；也可以在编辑主机时填这个分组名。"))
+  // 重名被拒绝并提示。
+  #expect(!page.createGroup("dx-test"))
+  #expect(model.notice == L("已经有叫“\("dx-test")”的分组"))
+
+  // 钻在 dx-test 里重命名：主机跟着改，页面留在新名下。
+  page.enterGroup("dx-test")
+  #expect(page.renameGroup("dx-test", to: "dx"))
+  #expect(page.query.group == "dx")
+  #expect(page.listing.hosts.map(\.name) == ["app-server", "db-server"])
+  #expect(fixture.directory.savedHosts.filter { $0.group == "dx" }.count == 2)
+  #expect(!fixture.directory.savedHosts.contains { $0.group == "dx-test" })
+
+  // 删除分组：主机保留并变成未分组，页面回到顶层。
+  #expect(page.deleteGroup("dx"))
+  page.reload()
+  #expect(page.query.group == nil)
+  #expect(fixture.directory.savedHosts.filter { $0.group == nil }.count == 7)
+  #expect(!page.listing.groups.contains { $0.name == "dx" })
+
+  // 分组菜单：普通分组有重命名与删除，导入组没有。
+  #expect(page.makeGroupMenu("客户").items.filter { !$0.isSeparatorItem }.map(\.title)
+    == [L("打开"), L("重命名分组…"), L("在此分组新建主机…"), L("删除分组…")])
+  #expect(page.makeGroupMenu(SSHHostProfile.importedGroup).items.filter { !$0.isSeparatorItem }.map(\.title)
+    == [L("打开"), L("在此分组新建主机…")])
+  #expect(page.makeNewHostMenu().items.filter { !$0.isSeparatorItem }.map(\.title).contains(L("新建分组…")))
+}
+
+@Test("主机页卡片：主机卡片要双击才连接，分组卡片单击就进")
+@MainActor
+func hostsPageHostCardsOpenOnDoubleClickOnly() throws {
+  let fixture = try HostsPageFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.root) }
+  let suite = "HostsPage.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let page = HostsPageViewController(
+    model: AppModel(defaults: defaults), directory: fixture.directory, factsDirectory: fixture.facts,
+    usageLedger: { HostUsageLedger() }, localUser: "tester")
+  page.loadViewIfNeeded()
+
+  let hostCard = try #require(page.hostsGrid.items.first as? HostsPageCardView)
+  let groupCard = try #require(page.groupsGrid.items.first as? HostsPageCardView)
+  #expect(hostCard.opensOnDoubleClick)
+  #expect(!groupCard.opensOnDoubleClick)
+  #expect(!HostsPageCardView.shouldOpen(clickCount: 1, doubleClick: true))
+  #expect(HostsPageCardView.shouldOpen(clickCount: 2, doubleClick: true))
+  #expect(HostsPageCardView.shouldOpen(clickCount: 1, doubleClick: false))
+}
+
+@Test("主机页系统信息：采集后卡片按系统换图标、副标题带配置摘要；连接事件只在缺失或过期时采集；删主机后清理")
+@MainActor
+func hostsPageShowsCollectedSystemFacts() async throws {
+  let fixture = try HostsPageFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.root) }
+  let suite = "HostsPage.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let model = AppModel(defaults: defaults)
+  let page = HostsPageViewController(
+    model: model, directory: fixture.directory, factsDirectory: fixture.facts,
+    usageLedger: { HostUsageLedger() }, localUser: "tester")
+  page.loadViewIfNeeded()
+  let host = try fixture.host("monite")
+
+  func card() throws -> HostsPageCardView {
+    try #require(
+      page.hostsGrid.items.compactMap { $0 as? HostsPageCardView }
+        .first { $0.content.identifier == "hosts-page-host-\(host.id.uuidString)" })
+  }
+  // 还没采集：通用服务器图标，副标题只有 ssh, 用户名；不是远程机器的连接目标，没有标注。
+  #expect(try card().content.symbol == "server.rack")
+  #expect(try card().content.subtitle == "ssh, root")
+  #expect(try card().content.badge == nil)
+
+  // 手动刷新：图标按 Linux，副标题追加摘要，工具提示带详情，提示写到 notice，文件落盘。
+  let facts = try await fixture.facts.refresh(hostID: host.id)
+  page.reload()
+  #expect(facts.family == .linux)
+  #expect(try card().content.symbol == "terminal")
+  #expect(try card().content.subtitle == "ssh, root · Ubuntu 24.04 LTS · \(L("\("2") 核")) · 2 GB")
+  #expect(try card().content.toolTip?.contains("x86_64") == true)
+  #expect(SSHHostFactsStore(fileURL: fixture.root.appendingPathComponent("host-facts.json")).load()[host.id] == facts)
+
+  // 连接事件：刚采过（未过期）不再采；换一台没采过的主机会采。
+  let other = try fixture.host("deploy-server")
+  fixture.facts.handleLinkState(SSHLinkStateEvent(endpoint: "x", hostID: host.id, state: .connected))
+  fixture.facts.handleLinkState(SSHLinkStateEvent(endpoint: "y", hostID: other.id, state: .connected))
+  fixture.facts.handleLinkState(SSHLinkStateEvent(endpoint: "z", hostID: nil, target: "a@b", state: .connected))
+  for _ in 0..<50 where fixture.facts.facts[other.id] == nil {
+    try await Task.sleep(for: .milliseconds(10))
+  }
+  #expect(fixture.facts.facts[other.id]?.osName == "Ubuntu 24.04 LTS")
+  #expect(fixture.facts.facts.count == 2)
+
+  // 删掉主机后它的信息被清理。
+  try fixture.directory.remove(other.id)
+  for _ in 0..<50 where fixture.facts.facts[other.id] != nil {
+    try await Task.sleep(for: .milliseconds(10))
+  }
+  #expect(fixture.facts.facts[other.id] == nil)
+  #expect(fixture.facts.facts[host.id] == facts)
+}
+
+@Test("主机页：被远程开发机器引用的主机带「远程机器」标注，工具提示列出机器名")
+@MainActor
+func hostsPageMarksRemoteMachineHosts() throws {
+  let fixture = try HostsPageFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.root) }
+  let suite = "HostsPage.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let host = try fixture.host("deploy-server")
+  var services = HostsPageEditorServices.live()
+  services.machines = { [MachineProfile(label: "构建机", hostID: host.id)] }
+  let page = HostsPageViewController(
+    model: AppModel(defaults: defaults), directory: fixture.directory, factsDirectory: fixture.facts,
+    usageLedger: { HostUsageLedger() }, localUser: "tester", editorServices: services)
+  page.loadViewIfNeeded()
+  let cards = page.hostsGrid.items.compactMap { $0 as? HostsPageCardView }
+  let marked = try #require(cards.first { $0.content.identifier == "hosts-page-host-\(host.id.uuidString)" })
+  #expect(marked.content.badge == L("远程机器"))
+  #expect(marked.content.toolTip?.contains("构建机") == true)
+  #expect(hostsPageView("hosts-page-host-\(host.id.uuidString)-badge", in: marked) != nil)
+  #expect(cards.filter { $0.content.badge != nil }.count == 1)
 }

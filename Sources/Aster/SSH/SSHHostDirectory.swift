@@ -12,6 +12,8 @@ final class SSHHostDirectory: ObservableObject {
 
   /// 当前有效主机列表，默认项在第一位。
   @Published private(set) var hosts: [SSHHostProfile]
+  /// 用户明确新建或改名过的分组（可能没有主机）；主机页把它们和主机推出的分组合并显示。
+  @Published private(set) var groups: [String]
   /// 最近一次加载失败的原因；nil 表示正常。失败时 `hosts` 保持最后有效值。
   @Published private(set) var loadError: String?
 
@@ -21,6 +23,7 @@ final class SSHHostDirectory: ObservableObject {
   init(store: SSHHostStore = SSHHostStore()) {
     self.store = store
     hosts = store.effectiveHosts
+    groups = store.effectiveGroups
     reload()
   }
 
@@ -29,10 +32,14 @@ final class SSHHostDirectory: ObservableObject {
 
   func host(_ id: UUID) -> SSHHostProfile? { hosts.first { $0.id == id } }
 
+  /// 主机与声明的分组的当前快照，分组编辑以它为输入。
+  var snapshot: SSHHostSnapshot { SSHHostSnapshot(hosts: hosts, groups: groups) }
+
   /// 从磁盘重新加载；失败保留最后有效列表并记录原因。
   func reload() {
     do {
       hosts = try store.load()
+      groups = store.effectiveGroups
       loadError = nil
     } catch {
       loadError = String(describing: error)
@@ -97,14 +104,37 @@ final class SSHHostDirectory: ObservableObject {
     try upsert(profile)
   }
 
+  // MARK: - 分组
+
+  /// 新建一个空分组。规则见 `SSHHostGrouping.create`。
+  func createGroup(_ name: String) throws {
+    try commit(SSHHostGrouping.create(name, in: snapshot))
+  }
+
+  /// 重命名分组，组内主机一起改。规则见 `SSHHostGrouping.rename`。
+  func renameGroup(_ old: String, to new: String) throws {
+    try commit(SSHHostGrouping.rename(old, to: new, in: snapshot))
+  }
+
+  /// 删除分组，组内主机变成未分组。规则见 `SSHHostGrouping.delete`。
+  func deleteGroup(_ name: String) throws {
+    try commit(SSHHostGrouping.delete(name, in: snapshot))
+  }
+
   /// 全部可解析主机的 broker 规格。
   func resolvedSpecs() -> [UUID: SSHResolvedSpec] {
     SSHHostResolver.resolveAll(hosts).specs
   }
 
   private func commit(_ next: [SSHHostProfile]) throws {
+    try commit(SSHHostSnapshot(hosts: next, groups: groups))
+  }
+
+  /// 整份落盘后用存储规范化过的快照更新发布值。
+  private func commit(_ next: SSHHostSnapshot) throws {
     try store.save(next)
     hosts = store.effectiveHosts
+    groups = store.effectiveGroups
     loadError = nil
   }
 }

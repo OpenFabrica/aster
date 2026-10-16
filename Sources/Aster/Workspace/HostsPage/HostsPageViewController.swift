@@ -18,6 +18,8 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
 
   let model: AppModel
   let directory: SSHHostDirectory
+  /// 主机系统信息（图标与配置摘要的来源）。
+  let factsDirectory: SSHHostFactsDirectory
   /// 读使用账本；测试注入固定账本，避免读写用户真实偏好。
   private let usageLedger: () -> HostUsageLedger
   /// 主机没写用户名时显示的用户名：默认项的用户名，再缺省为本机用户。编辑面板的占位符也用它。
@@ -51,13 +53,14 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
 
   /// 生产用共享主机目录、真实使用账本与真实编辑依赖；测试注入临时目录、固定账本与替身。
   init(
-    model: AppModel, directory: SSHHostDirectory = .shared,
+    model: AppModel, directory: SSHHostDirectory = .shared, factsDirectory: SSHHostFactsDirectory = .shared,
     usageLedger: @escaping () -> HostUsageLedger = { HostUsageTracking.ledger() },
     localUser: String = NSUserName(),
     editorServices: HostsPageEditorServices = .live()
   ) {
     self.model = model
     self.directory = directory
+    self.factsDirectory = factsDirectory
     self.usageLedger = usageLedger
     self.localUser = localUser
     self.editorServices = editorServices
@@ -74,7 +77,26 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
     // @Published 在 willSet 时发出，此刻 `hosts` 还是旧值；切到下一轮主队列再读。
     directory.$hosts
       .map { _ in () }
-      .merge(with: directory.$loadError.map { _ in () })
+      .merge(with: directory.$groups.map { _ in () }, directory.$loadError.map { _ in () })
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self else { return }
+        // 主机删掉后它的系统信息也没用了；目录只保留现存主机的。hosts.json 读失败时列表不可信，不清理。
+        if self.directory.loadError == nil {
+          self.factsDirectory.prune(keepingIDs: Set(self.directory.savedHosts.map(\.id)))
+        }
+        self.reload()
+      }
+      .store(in: &cancellables)
+    // 机器列表变化（添加 / 删除远程机器）后重画「远程机器」标注；objectWillChange 在变化前发出，延到下一轮。
+    editorServices.machinesChanged()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in self?.reload() }
+      .store(in: &cancellables)
+    // 系统信息采集完成或开始/结束采集时重画卡片（图标、摘要与采集中提示）。
+    factsDirectory.$facts
+      .map { _ in () }
+      .merge(with: factsDirectory.$inFlight.map { _ in () })
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in self?.reload() }
       .store(in: &cancellables)
@@ -343,12 +365,12 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
   /// 按当前条件重算卡片并更新面包屑、连接按钮与空状态。
   func reload() {
     guard isViewLoaded else { return }
-    // 钻进的分组被删空或改名后自动回到顶层，不留一个永远空白的分组页。
-    if let group = query.group, !directory.savedHosts.contains(where: { $0.group == group }) {
+    // 钻进的分组被删除或改名后自动回到顶层，不留一个不存在的分组页；明确声明过的空分组仍可停留。
+    if let group = query.group, !SSHHostGrouping.existingGroups(in: directory.snapshot).contains(group) {
       query.group = nil
     }
     listing = HostBrowserCatalog.listing(
-      hosts: directory.hosts, query: query, lastUsed: usageLedger().lastUsedByID)
+      hosts: directory.hosts, groups: directory.groups, query: query, lastUsed: usageLedger().lastUsedByID)
     renderCards()
     breadcrumb.isHidden = query.group == nil
     breadcrumbTitle.stringValue = query.group ?? ""
@@ -375,8 +397,12 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
   func emptyStateText() -> String? {
     guard listing.groups.isEmpty, listing.hosts.isEmpty else { return nil }
     if let error = directory.loadError { return L("无法读取主机列表：\(error)") }
-    if directory.savedHosts.isEmpty {
+    if directory.savedHosts.isEmpty, query.group == nil {
       return L("还没有保存的主机。点「新建主机」添加，或从 ~/.ssh/config 导入；也可以直接在上方输入 user@host 连接。")
+    }
+    // 钻在一个空分组里（没在过滤）：告诉用户怎么往这组里加主机，而不是说「没有匹配」。
+    if query.group != nil, !query.isFiltering {
+      return L("这个分组还没有主机。点「新建主机」会直接加到这一组；也可以在编辑主机时填这个分组名。")
     }
     // 输入的是可连接地址时，告诉用户回车就能临时连接，而不是只说「没有匹配」。
     if case .target(let target)? = HostBrowserCatalog.connectIntent(

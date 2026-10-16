@@ -10,19 +10,23 @@ struct HostsPageCardContent {
   var subtitle: String
   /// 图标块里的 SF Symbol。
   var symbol: String
+  /// 标题右侧的小标签（例如「远程机器」）；nil 不显示。
+  var badge: String?
   /// 列表模式下卡片右侧的补充文字（连接串）；网格模式不显示。
   var trailingDetail: String?
   var toolTip: String?
 }
 
-/// 主机页卡片。单击（松开时仍在卡片内）触发 `onOpen`；右键弹出 `menuProvider` 的菜单；
-/// 有 `onEdit` 时悬停显示右侧铅笔按钮。
+/// 主机页卡片。松开时仍在卡片内触发 `onOpen`（`opensOnDoubleClick` 为 true 时要双击，
+/// 单击只给悬停/按下反馈）；右键弹出 `menuProvider` 的菜单；有 `onEdit` 时悬停显示右侧铅笔按钮。
 @MainActor
 final class HostsPageCardView: NSView {
   /// 卡片高度（默认字号档）。
   static let height: CGFloat = 64
 
   let content: HostsPageCardContent
+  /// 为 true 时只有双击才触发 `onOpen`。主机卡片用它：单击误触就开一个 SSH 标签太重。
+  let opensOnDoubleClick: Bool
   private let onOpen: () -> Void
   private let menuProvider: (() -> NSMenu)?
   private let editButton: IconHoverButton?
@@ -36,15 +40,18 @@ final class HostsPageCardView: NSView {
   }
 
   /// 构建卡片；`showsTrailingDetail` 为 true（列表模式）时显示连接串。
+  /// `editTitle` 是铅笔按钮的辅助功能名称与提示（主机卡片「编辑主机…」，分组卡片「重命名分组…」）。
   init(
-    content: HostsPageCardContent, showsTrailingDetail: Bool,
-    onOpen: @escaping () -> Void, onEdit: (() -> Void)? = nil, menuProvider: (() -> NSMenu)? = nil
+    content: HostsPageCardContent, showsTrailingDetail: Bool, opensOnDoubleClick: Bool = false,
+    onOpen: @escaping () -> Void, onEdit: (() -> Void)? = nil, editTitle: String = L("编辑主机…"),
+    menuProvider: (() -> NSMenu)? = nil
   ) {
     self.content = content
+    self.opensOnDoubleClick = opensOnDoubleClick
     self.onOpen = onOpen
     self.menuProvider = menuProvider
     editButton = onEdit.map { edit in
-      IconHoverButton(symbol: "pencil", accessibilityDescription: L("编辑主机…"), handler: edit)
+      IconHoverButton(symbol: "pencil", accessibilityDescription: editTitle, handler: edit)
     }
     detailLabel = showsTrailingDetail
       ? content.trailingDetail.map { makeLabel($0, size: 11.5, color: AsterTheme.tertiaryInk, monospaced: true) }
@@ -83,7 +90,17 @@ final class HostsPageCardView: NSView {
     title.identifier = NSUserInterfaceItemIdentifier("\(content.identifier)-title")
     let subtitle = makeLabel(content.subtitle, size: 11.5, color: AsterTheme.secondaryInk)
     subtitle.identifier = NSUserInterfaceItemIdentifier("\(content.identifier)-subtitle")
-    let column = NSStackView(views: [title, subtitle])
+    // 标题行：标题 + 可选小标签；标签不参与压缩，标题自己截断。
+    let titleRow = NSStackView(views: [title])
+    titleRow.orientation = .horizontal
+    titleRow.spacing = 6
+    titleRow.alignment = .centerY
+    if let badge = content.badge {
+      let pill = makeBadge(badge)
+      pill.identifier = NSUserInterfaceItemIdentifier("\(content.identifier)-badge")
+      titleRow.addArrangedSubview(pill)
+    }
+    let column = NSStackView(views: [titleRow, subtitle])
     column.orientation = .vertical
     column.alignment = .leading
     column.spacing = 2
@@ -92,6 +109,7 @@ final class HostsPageCardView: NSView {
     for label in [title, subtitle] {
       label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
+    titleRow.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     addSubview(column)
 
     let tileSize = InterfaceScale.length(38)
@@ -111,7 +129,7 @@ final class HostsPageCardView: NSView {
     if let editButton {
       editButton.translatesAutoresizingMaskIntoConstraints = false
       editButton.isHidden = true
-      editButton.toolTip = L("编辑主机…")
+      editButton.toolTip = editButton.accessibilityLabel()
       addSubview(editButton)
       constraints += [
         editButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
@@ -138,6 +156,25 @@ final class HostsPageCardView: NSView {
     NSLayoutConstraint.activate(constraints)
   }
 
+  /// 强调色淡底的小圆角标签。
+  private func makeBadge(_ text: String) -> NSView {
+    let pill = HostsPageFilledView(fillColor: AsterTheme.accent.withAlphaComponent(0.14), cornerRadius: 5)
+    let label = makeLabel(text, size: 10, weight: .semibold, color: AsterTheme.accent)
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.setContentCompressionResistancePriority(.required, for: .horizontal)
+    pill.addSubview(label)
+    pill.translatesAutoresizingMaskIntoConstraints = false
+    pill.setContentCompressionResistancePriority(.required, for: .horizontal)
+    pill.setContentHuggingPriority(.required, for: .horizontal)
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 5),
+      label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -5),
+      label.topAnchor.constraint(equalTo: pill.topAnchor, constant: 1.5),
+      label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -1.5),
+    ])
+    return pill
+  }
+
   // MARK: - 交互
 
   /// 记下按下位置；真正的打开动作等松开时再判断，拖出卡片再松开等于取消。
@@ -146,18 +183,25 @@ final class HostsPageCardView: NSView {
     applyStyle()
   }
 
-  /// 松开时仍在卡片内才打开。
+  /// 松开时仍在卡片内才打开；要求双击的卡片按 `clickCount` 过滤掉单击。
   override func mouseUp(with event: NSEvent) {
     guard pressedInside else { return }
     pressedInside = false
     applyStyle()
     let point = convert(event.locationInWindow, from: nil)
-    if bounds.contains(point) { onOpen() }
+    guard bounds.contains(point), Self.shouldOpen(clickCount: event.clickCount, doubleClick: opensOnDoubleClick)
+    else { return }
+    onOpen()
+  }
+
+  /// 这次松开是否算「打开」：单击卡片任意次数都行，双击卡片只认第二次（以及后续连击）。
+  static func shouldOpen(clickCount: Int, doubleClick: Bool) -> Bool {
+    doubleClick ? clickCount >= 2 : true
   }
 
   override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 
-  /// 辅助功能「按下」等同于单击。
+  /// 辅助功能「按下」直接打开，不区分单击与双击。
   override func accessibilityPerformPress() -> Bool {
     onOpen()
     return true

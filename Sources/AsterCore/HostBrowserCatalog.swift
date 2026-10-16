@@ -74,9 +74,10 @@ public enum HostBrowserCatalog {
   ///
   /// - Parameters:
   ///   - hosts: 全部主机（可含默认项，会被排除）。
+  ///   - groups: 明确声明的分组（可能还没有主机），与主机推出的分组合并后成卡片。
   ///   - lastUsed: 每台主机最后一次使用时间，供「最近使用」排序。
   public static func listing(
-    hosts: [SSHHostProfile], query: HostBrowserQuery, lastUsed: [UUID: Date] = [:]
+    hosts: [SSHHostProfile], groups: [String] = [], query: HostBrowserQuery, lastUsed: [UUID: Date] = [:]
   ) -> HostBrowserListing {
     let saved = hosts.filter { !$0.isDefaults }
     let tagged = saved.filter { host in
@@ -91,13 +92,13 @@ public enum HostBrowserCatalog {
     }
     if query.isFiltering {
       let terms = searchTerms(query.search)
-      let groups = groupCards(tagged).filter { group in
+      let groups = groupCards(tagged, declared: groups).filter { group in
         !terms.isEmpty && terms.allSatisfy { contains(group.name, $0) }
       }
       return HostBrowserListing(groups: groups, hosts: sorted(matched, by: query.sort, lastUsed: lastUsed))
     }
     return HostBrowserListing(
-      groups: groupCards(saved),
+      groups: groupCards(saved, declared: groups),
       hosts: sorted(saved.filter { $0.group == nil }, by: query.sort, lastUsed: lastUsed))
   }
 
@@ -164,8 +165,10 @@ public enum HostBrowserCatalog {
   // MARK: - 内部
 
   /// 分组卡片：`~/.ssh/config` 导入组在前，其余按名称；只统计已保存主机。
-  private static func groupCards(_ hosts: [SSHHostProfile]) -> [HostBrowserGroup] {
+  /// 声明过但没有主机的分组也出一张卡片，数量为 0。
+  private static func groupCards(_ hosts: [SSHHostProfile], declared: [String]) -> [HostBrowserGroup] {
     var counts: [String: Int] = [:]
+    for group in declared { counts[group] = 0 }
     for host in hosts { if let group = host.group { counts[group, default: 0] += 1 } }
     return counts.keys.sorted { lhs, rhs in
       let left = lhs == SSHHostProfile.importedGroup

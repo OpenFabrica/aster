@@ -16,14 +16,19 @@ struct HostEditorContext {
   var tags: [String]
   var vaultKeys: [SSHVaultKey]
 
-  /// 从主机列表推出上下文。`localUser` 是用户名的内置缺省值。
-  @MainActor init(draft: SSHHostDraft, hosts: [SSHHostProfile], vaultKeys: [SSHVaultKey], localUser: String) {
+  /// 从主机列表推出上下文。`localUser` 是用户名的内置缺省值；`declaredGroups` 是主机页里
+  /// 新建但可能还没有主机的分组，追加到下拉末尾，这样新建的空分组也能直接选。
+  @MainActor init(
+    draft: SSHHostDraft, hosts: [SSHHostProfile], declaredGroups: [String] = [], vaultKeys: [SSHVaultKey],
+    localUser: String
+  ) {
     self.draft = draft
     self.hosts = hosts
     let defaults = hosts.first(where: \.isDefaults) ?? .emptyDefaults()
     inherited = SSHHostInheritedValues(defaults: defaults, editingDefaults: draft.isDefaults, localUser: localUser)
     let saved = SSHHostEditing.sorted(hosts.filter { !$0.isDefaults })
-    groups = SSHHostEditing.orderedGroups(saved)
+    let derived = SSHHostEditing.orderedGroups(saved)
+    groups = derived + declaredGroups.filter { !derived.contains($0) }
     tags = SSHHostEditing.orderedTags(saved)
     self.vaultKeys = vaultKeys
   }
