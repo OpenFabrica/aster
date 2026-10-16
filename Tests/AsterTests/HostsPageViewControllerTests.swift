@@ -192,7 +192,8 @@ func hostsPageSidebarEntryPresentsAndDismisses(appearance: NSAppearance.Name) as
   #expect(window.firstResponder === (hostsPageView("hosts-page-search-field", in: root) as? NSTextField)?
     .currentEditor())
   try await captureHostsPageWindow(window, name: "hosts-page")
-  let page = try #require(controller.children.compactMap { $0 as? HostsPageViewController }.first)
+  let hub = try #require(controller.children.compactMap { $0 as? HostsHubViewController }.first)
+  let page = hub.hostsPage
   if ProcessInfo.processInfo.environment["ASTER_HOSTS_PAGE_EVIDENCE_DIR"] != nil {
     // 取证：钻进分组、列表模式、输入快连地址、窄窗口。
     page.enterGroup("dx-test")

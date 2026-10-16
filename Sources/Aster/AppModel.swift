@@ -1572,6 +1572,8 @@ final class AppModel: ObservableObject {
   }
   /// 内容区是否显示侧栏「主机」页。只属于本窗口、不持久化；见 `AppModel+HostsPage`。
   @Published var isHostsPagePresented = false
+  /// 主机页当前子页（主机 / 密钥 / 已知主机）。只属于本窗口、不持久化。
+  @Published var hostsPageSection: HostsHubSection = .hosts
   /// 活动徽章的窗口级局部事件。视图只更新对应 Tab 的附件，Dock 只重新聚合状态；
   /// 该事件不承担布局、持久化或终端内容刷新。
   let tabActivityChanged = PassthroughSubject<UUID, Never>()

@@ -86,32 +86,19 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
 
   // MARK: - 布局
 
-  /// 搭建固定的页面骨架；卡片内容由 `reload()` 填充。
+  /// 搭建固定的页面骨架；卡片内容由 `reload()` 填充。标题带由外壳 `HostsHubViewController` 提供。
   private func buildLayout(in root: NSView) {
-    let titleBand = WorkspaceTitleBarBackgroundView()
-    titleBand.translatesAutoresizingMaskIntoConstraints = false
-    let pageTitle = makeLabel(L("主机"), size: 12, weight: .medium, color: AsterTheme.secondaryInk)
-    pageTitle.translatesAutoresizingMaskIntoConstraints = false
-    titleBand.addSubview(pageTitle)
-
     let searchBar = makeSearchBar()
     let toolbar = makeToolbar()
     configureBreadcrumb()
     configureScrollView()
-    for subview in [titleBand, searchBar, toolbar, scrollView] as [NSView] {
+    for subview in [searchBar, toolbar, scrollView] as [NSView] {
       subview.translatesAutoresizingMaskIntoConstraints = false
       root.addSubview(subview)
     }
     let inset: CGFloat = 24
     NSLayoutConstraint.activate([
-      titleBand.topAnchor.constraint(equalTo: root.topAnchor),
-      titleBand.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-      titleBand.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-      titleBand.heightAnchor.constraint(equalToConstant: 28),
-      pageTitle.centerXAnchor.constraint(equalTo: titleBand.centerXAnchor),
-      pageTitle.centerYAnchor.constraint(equalTo: titleBand.centerYAnchor),
-
-      searchBar.topAnchor.constraint(equalTo: titleBand.bottomAnchor, constant: 8),
+      searchBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
       searchBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
       searchBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -inset),
 

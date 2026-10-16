@@ -157,7 +157,7 @@ final class WorkspaceViewController: NSViewController {
   private var openQuicklyBackdrop: OpenQuicklyBackdropView?
   /// 侧栏「主机」页。懒建且跨整树刷新复用，搜索词、钻取的分组与滚动位置因此保留；
   /// 显隐只看 `model.isHostsPagePresented`。
-  private var hostsPageController: HostsPageViewController?
+  private var hostsHubController: HostsHubViewController?
   /// 主机页与侧栏「主机」行读取的主机目录。生产是共享目录；测试注入临时 hosts.json。
   let hostsDirectory: SSHHostDirectory
 
@@ -1441,10 +1441,12 @@ final class WorkspaceViewController: NSViewController {
     let host = NSView()
     let workspace: NSView
     if model.isHostsPagePresented {
-      let page = hostsPageController ?? HostsPageViewController(model: model, directory: hostsDirectory)
-      hostsPageController = page
-      workspace = makeHostsPageArea(page)
-      page.pageDidAppear()
+      let hub = hostsHubController
+        ?? HostsHubViewController(
+          model: model, hostsPage: HostsPageViewController(model: model, directory: hostsDirectory))
+      hostsHubController = hub
+      workspace = makeHostsPageArea(hub)
+      hub.pageDidAppear()
     } else if let tab = model.selectedTab {
       workspace = makeTerminalWorkspace(tab)
     } else {

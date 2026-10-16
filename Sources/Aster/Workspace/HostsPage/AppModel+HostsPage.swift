@@ -14,6 +14,12 @@ extension AppModel {
     if !isHostsPagePresented { isHostsPagePresented = true }
   }
 
+  /// 打开主机页并切到指定子页（例如从其它入口直达「密钥」或「已知主机」）。
+  func presentHostsPage(section: HostsHubSection) {
+    if hostsPageSection != section { hostsPageSection = section }
+    presentHostsPage()
+  }
+
   /// 关闭主机页、回到当前标签的终端。
   func dismissHostsPage() {
     if isHostsPagePresented { isHostsPagePresented = false }

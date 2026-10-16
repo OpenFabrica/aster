@@ -142,7 +142,7 @@ extension WorkspaceViewController {
   }
 
   /// 内容区里的主机页：沿用终端工作区的容器卡片（外边距、底色、圆角），页面实例跨刷新复用。
-  func makeHostsPageArea(_ page: HostsPageViewController) -> NSView {
+  func makeHostsPageArea(_ page: NSViewController) -> NSView {
     let style = preferences.activeTheme.style.container
     let margin = preferences.tabBarLayout == .vertical
       ? style.margin : (style.horizontalLayoutMargin ?? style.margin)
