@@ -2002,6 +2002,8 @@
 "这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ demandes identiques attendent pour cette commande ; « Autoriser une fois » n’en laisse passer qu’une.";
 "命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "La commande s’exécute dans un terminal flottant. Vous pouvez à tout moment prendre la main, l’interrompre ou mettre l’agent en pause.";
 "已把 Aster 主机访问注册到 %@。" = "L’accès aux hôtes d’Aster a été enregistré auprès de %@.";
+"已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Enregistré auprès de %@ avec %@. Cette commande pointe vers un autre Aster, qui doit prendre en charge aster mcp ; sinon, réinstallez la commande aster.";
+"安装 aster 命令失败。" = "Impossible d’installer la commande aster.";
 "已撤销 %@ 条授权" = "%@ autorisations révoquées";
 "恢复 agent" = "Reprendre l’agent";
 "打开 SSH 终端" = "Ouvrir un terminal SSH";

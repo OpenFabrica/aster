@@ -264,7 +264,7 @@
       path.title = info.cliPath;
       copy.appendChild(path);
     } else {
-      copy.appendChild(element("span", "setting-warning", t("未找到 aster 命令，请先在「Agent」设置里安装命令行工具")));
+      copy.appendChild(element("span", "setting-warning", t("尚未安装 aster 命令；点「安装」时会一并安装，MCP 配置只写这个稳定路径")));
     }
     card.appendChild(row);
     return section;

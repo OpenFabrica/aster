@@ -2002,6 +2002,8 @@
 "这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ identical requests are waiting for this command; Allow Once lets only one of them run.";
 "命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "The command runs in a floating terminal. You can take over, interrupt, or pause the agent at any time.";
 "已把 Aster 主机访问注册到 %@。" = "Aster host access was registered with %@.";
+"已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Registered with %@ using %@. That command currently points to another Aster, which must support aster mcp; otherwise reinstall the aster command.";
+"安装 aster 命令失败。" = "Could not install the aster command.";
 "已撤销 %@ 条授权" = "Revoked %@ grants";
 "恢复 agent" = "Resume Agent";
 "打开 SSH 终端" = "Open SSH terminal";

@@ -45,7 +45,7 @@ final class SettingsAgentAccessBridge {
     let grants = service.grants.grants.sorted {
       (order[$0.scope] ?? 3, $0.grantedAt) < (order[$1.scope] ?? 3, $1.grantedAt)
     }
-    let cli = AgentHostMCPInstallService.cliPath()
+    let cli = AgentHostMCPInstallService.stableCommandPath()
     var object: [String: Any] = [
       "available": true,
       "enabled": runtime.isEnabled,
