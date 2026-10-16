@@ -2,7 +2,8 @@ import AppKit
 import AsterCore
 import Foundation
 
-// 「密钥」子页的动作：导入、生成、改名、复制公钥、删除、迁移主机引用、删除原私钥文件。
+// 「密钥」子页的动作：导入、生成、改名、复制公钥、删除、迁移主机引用；删除原私钥文件在
+// SettingsSSHKeysBridge+Original.swift。
 // 每个动作都以 `complete(succeeded)` 结束，SettingsViewController 据此给网页发回执。
 
 /// 密钥动作失败的原因。文案直接给用户看。
@@ -15,6 +16,9 @@ enum SettingsSSHKeysError: Error, Equatable {
   case notImported
   case originalMissing
   case verificationFailed
+  case originalChanged
+  case originalUnverifiable
+  case originalOutsideSSHDirectory
 
   var message: String {
     switch self {
@@ -26,6 +30,9 @@ enum SettingsSSHKeysError: Error, Equatable {
     case .notImported: L("这把密钥不是从文件导入的")
     case .originalMissing: L("原私钥文件已不存在")
     case .verificationFailed: L("钥匙串里的私钥与记录的指纹不一致，已取消删除原文件")
+    case .originalChanged: L("原私钥文件已被改动，与保险库里的密钥不是同一把，已取消删除")
+    case .originalUnverifiable: L("原私钥文件已加密，且旁边没有能对上指纹的 .pub 文件，无法确认是同一把密钥，已取消删除")
+    case .originalOutsideSSHDirectory: L("原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除")
     }
   }
 }
@@ -206,82 +213,6 @@ extension SettingsSSHKeysBridge {
     } catch {
       toast(Self.describe(error), true)
       complete(false)
-    }
-  }
-
-  /// 删除原私钥文件。先回读钥匙串并核对指纹，再列出仍引用它的主机与 `~/.ssh/config`，
-  /// 用户在原生确认框里同意后才删除；直接删除，不进废纸篓（废纸篓里的明文私钥等于没删）。
-  func deleteOriginal(_ payload: [String: Any], complete: @escaping (Bool) -> Void) {
-    let key: SSHVaultKey
-    do {
-      key = try vaultKey(payload)
-      guard let path = key.importedFrom else { throw SettingsSSHKeysError.notImported }
-      guard dependencies.fileManager.fileExists(atPath: path) else {
-        throw SettingsSSHKeysError.originalMissing
-      }
-    } catch {
-      toast(Self.describe(error), true)
-      complete(false)
-      return
-    }
-    runExclusive(complete: complete) { [weak self] in
-      guard let self, let path = key.importedFrom else { return false }
-      do {
-        try await self.verifyKeychainCopy(of: key)
-        let prompt = SSHVaultDeleteOriginalPrompt(
-          path: SSHVaultMigration.canonicalPath(path),
-          hostNames: self.migratableHosts(for: key, in: self.hosts.hosts).compactMap {
-            self.hosts.host($0).map { $0.isDefaults ? L("默认") : $0.name }
-          },
-          sshConfigAliases: await self.sshConfigAliases(referencing: path))
-        guard await self.dependencies.confirmDeleteOriginal(prompt, self.window()) else { return false }
-        try self.removeOriginal(at: path)
-        self.pushSnapshot()
-        self.toast(L("已删除原私钥文件"), false)
-        return true
-      } catch {
-        self.toast(L("没有删除原私钥文件：\(Self.describe(error))"), true)
-        return false
-      }
-    }
-  }
-
-  /// 回读钥匙串里的私钥并重新计算指纹，确认删除原文件后私钥仍然可用。
-  private func verifyKeychainCopy(of key: SSHVaultKey) async throws {
-    guard let tool = dependencies.tool() else { throw SettingsSSHKeysError.runtimeMissing }
-    let credentials = directory.credentials
-    let id = key.id
-    let stored = try await Task.detached { try credentials.vaultPrivateKey(id: id) }.value
-    guard let stored else { throw SettingsSSHKeysError.verificationFailed }
-    let material = try await tool.inspect(privateKey: stored, passphrase: nil, comment: nil)
-    guard material.fingerprint == key.fingerprint else { throw SettingsSSHKeysError.verificationFailed }
-  }
-
-  /// `~/.ssh/config` 里 IdentityFile 指向该文件的 Host 别名；读取失败返回 nil。
-  private func sshConfigAliases(referencing path: String) async -> [String]? {
-    let listing: SSHConfigListing
-    do { listing = try await dependencies.configListing() } catch { return nil }
-    let target = SSHVaultMigration.canonicalPath(path)
-    let home = dependencies.homeDirectory
-    return listing.hosts.filter { entry in
-      entry.identityFiles.contains { template in
-        let expanded = SSHHostResolver.expandIdentity(
-          template, host: entry.hostName ?? entry.alias, user: entry.user ?? dependencies.localUser,
-          homeDirectory: home)
-        return SSHVaultMigration.canonicalPath(expanded) == target
-      }
-    }.map(\.alias)
-  }
-
-  /// 删除原文件。路径是软链时删除真正的文件，再删掉留下的悬空链接。
-  private func removeOriginal(at path: String) throws {
-    let fileManager = dependencies.fileManager
-    let resolved = SSHVaultMigration.canonicalPath(path)
-    try fileManager.removeItem(atPath: resolved)
-    if resolved != URL(fileURLWithPath: path).standardizedFileURL.path,
-      (try? fileManager.destinationOfSymbolicLink(atPath: path)) != nil
-    {
-      try fileManager.removeItem(atPath: path)
     }
   }
 

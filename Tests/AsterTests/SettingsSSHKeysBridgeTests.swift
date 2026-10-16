@@ -17,6 +17,8 @@ final class KeysBridgeRecorder {
   var pasteboard: [String] = []
   var deletePrompts: [SSHVaultDeleteOriginalPrompt] = []
   var confirmsDelete = true
+  /// 确认框弹出时执行（模拟用户犹豫期间文件被替换）。
+  var onConfirmDelete: (() throws -> Void)?
   var chosenFile: URL?
 }
 
@@ -56,6 +58,7 @@ struct KeysBridgeFixture {
       copyToPasteboard: { recorder.pasteboard.append($0) },
       confirmDeleteOriginal: { prompt, _ in
         recorder.deletePrompts.append(prompt)
+        try? recorder.onConfirmDelete?()
         return recorder.confirmsDelete
       },
       configListing: { listing },
@@ -78,9 +81,11 @@ struct KeysBridgeFixture {
     }
   }
 
-  /// 在临时目录写一个私钥文件。
+  /// 在临时目录写一个私钥文件；`name` 可以带子目录（如 `.ssh/id_ed25519`），缺的目录自动创建。
   func writeKeyFile(_ name: String, _ text: String) throws -> URL {
     let url = root.appendingPathComponent(name)
+    try FileManager.default.createDirectory(
+      at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data(text.utf8).write(to: url)
     return url
   }

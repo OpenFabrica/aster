@@ -378,6 +378,9 @@
 "删除后，OpenSSH 回退引擎、手动输入的 ssh 命令和其它工具都无法再使用这把密钥；备份里可能仍有副本。" = "After deletion, the OpenSSH fallback engine, ssh commands you type, and other tools can no longer use this key. Backups may still contain copies.";
 "删除文件" = "Delete File";
 "原私钥文件已不存在" = "The original private key file no longer exists";
+"原私钥文件已被改动，与保险库里的密钥不是同一把，已取消删除" = "The original private key file has changed and no longer matches the vault key. Deletion was canceled";
+"原私钥文件已加密，且旁边没有能对上指纹的 .pub 文件，无法确认是同一把密钥，已取消删除" = "The original private key file is encrypted and no matching .pub file is next to it, so Aster cannot confirm it is the same key. Deletion was canceled";
+"原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除" = "The original private key file is not in ~/.ssh. Aster will not delete it; delete it manually";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "The name must not be empty, longer than 64 bytes, or contain line breaks";
 "密钥不存在，可能已被删除" = "The key does not exist. It may have been deleted";
 "密钥信息无效：%@" = "Invalid key information: %@";

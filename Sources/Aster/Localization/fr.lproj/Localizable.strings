@@ -378,6 +378,9 @@
 "删除后，OpenSSH 回退引擎、手动输入的 ssh 命令和其它工具都无法再使用这把密钥；备份里可能仍有副本。" = "Après la suppression, le moteur de secours OpenSSH, les commandes ssh saisies à la main et les autres outils ne pourront plus utiliser cette clé. Des sauvegardes peuvent encore en contenir des copies.";
 "删除文件" = "Supprimer le fichier";
 "原私钥文件已不存在" = "Le fichier de clé privée d’origine n’existe plus";
+"原私钥文件已被改动，与保险库里的密钥不是同一把，已取消删除" = "Le fichier de clé privée d’origine a été modifié et ne correspond plus à la clé du coffre. Suppression annulée";
+"原私钥文件已加密，且旁边没有能对上指纹的 .pub 文件，无法确认是同一把密钥，已取消删除" = "Le fichier de clé privée d’origine est chiffré et aucun fichier .pub correspondant ne se trouve à côté. Aster ne peut pas confirmer qu’il s’agit de la même clé. Suppression annulée";
+"原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除" = "Le fichier de clé privée d’origine n’est pas dans ~/.ssh. Aster ne le supprimera pas ; supprimez-le manuellement";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Le nom ne peut pas être vide, dépasser 64 octets ni contenir de saut de ligne";
 "密钥不存在，可能已被删除" = "La clé n’existe pas. Elle a peut-être été supprimée";
 "密钥信息无效：%@" = "Informations de clé non valides : %@";

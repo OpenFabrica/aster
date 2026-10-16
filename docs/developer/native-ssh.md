@@ -124,7 +124,7 @@ broker socket 位于 0700 目录，但同一用户的任何进程都能连上它
 - **Swift 侧的限制**：`String` 无法清零。私钥只经函数返回值短暂存在，不存进任何属性，也不写日志。
 - **解析与生成**：都在 Rust（`aster-ssh keys`，见 `PROTOCOL.md` §6），经 `SSHRuntimeTool` 的 stdin/stdout 调用。生成只支持 ed25519，种子来自 `getentropy`，不加新依赖。导入支持 OpenSSH（含加密）、PKCS#1 RSA PEM、PKCS#8、SEC1 EC、PuTTY PPK；DSA、`sk-*` 安全密钥和 DES / AES-256 加密的旧式 PEM 返回 `unsupported`。
 - **导入与迁移**：设置页「主机 › 密钥」导入时用 NSOpenPanel 选文件，原生读取，私钥与 passphrase 从不进 WKWebView；加密私钥最多问三次 passphrase。导入后可以把 `identityFiles` 指向原文件（展开 `~`、`%h`、`%r` 并解析软链后比较）的主机改用保险库密钥，原来继承的默认项保险库密钥会一起抄过来，实际尝试的密钥不变。
-- **删除原文件**：先回读钥匙串并重新计算指纹，一致才弹原生确认框。确认框列出文件路径、仍引用它的主机和 `~/.ssh/config` 里 IdentityFile 指向它的 Host，并写明 OpenSSH 回退引擎、手敲的 `ssh` 会失效、备份里可能还有副本。直接 `removeItem`，不进废纸篓；路径是软链时删除真正的文件和留下的链接。同名 `.pub` 保留。
+- **删除原文件**：先回读钥匙串并重新计算指纹，再核对磁盘上的文件仍是这把密钥，都一致才弹原生确认框。核对文件时先解析软链，解析后的真实路径不在 `~/.ssh` 下就拒绝（提示用户手动删除）；未加密的用 `keys inspect` 重算指纹，加密的不问 passphrase，改用旁边 `.pub` 文件的 SHA256 指纹（`SSHPublicKeyFingerprint`，先看解析后路径旁的，再看原路径旁的），对不上或没有 `.pub` 就拒绝。用户点确认后、`removeItem` 前再核对一次，删的就是刚核对过的解析路径，缩小「确认期间文件被替换」的窗口。确认框列出文件路径、仍引用它的主机和 `~/.ssh/config` 里 IdentityFile 指向它的 Host，并写明 OpenSSH 回退引擎、手敲的 `ssh` 会失效、备份里可能还有副本。直接 `removeItem`，不进废纸篓；路径是软链时删除真正的文件和留下的链接。同名 `.pub` 保留。
 - **不提供**：私钥导出；Aster 自己的 ssh-agent（需要 agent 时用 `identityAgent` 指向 1Password、Secretive 等）。
 - **限制**：OpenSSH 回退引擎和手敲的 `ssh` 用不到保险库密钥，设置页在 openssh 引擎下显示提示。同用户的恶意进程仍可能通过钥匙串授权框或模拟点击拿到私钥，见威胁模型。
 

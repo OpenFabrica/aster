@@ -8,9 +8,9 @@ import Testing
 // 「密钥」子页里与原私钥文件相关的动作：把主机引用迁到保险库、删除原文件前的钥匙串核对与确认；
 // 以及主机桥在保存、复制时保留 vaultKeyIDs（字段丢失陷阱）。
 
-/// 导入一把未加密的私钥文件，返回保险库条目。
+/// 导入一把未加密的私钥文件（默认放在夹具家目录的 `~/.ssh` 下），返回保险库条目。
 @MainActor
-private func importPlainKey(_ fixture: KeysBridgeFixture, name: String = "id_ed25519") async throws
+func importPlainKey(_ fixture: KeysBridgeFixture, name: String = ".ssh/id_ed25519") async throws
   -> SSHVaultKey
 {
   fixture.recorder.chosenFile = try fixture.writeKeyFile(name, "PLAIN")
@@ -22,8 +22,8 @@ private func importPlainKey(_ fixture: KeysBridgeFixture, name: String = "id_ed2
 @MainActor
 func settingsKeysMigratesReferences() async throws {
   let tool = FakeVaultKeyTool(entries: ["PLAIN": .init(material: fakeVaultMaterial("p"))])
-  let user = SSHHostProfile(name: "uses", host: "a", identityFiles: ["~/id_ed25519"])
-  let other = SSHHostProfile(name: "other", host: "b", identityFiles: ["~/id_rsa"])
+  let user = SSHHostProfile(name: "uses", host: "a", identityFiles: ["~/.ssh/id_ed25519"])
+  let other = SSHHostProfile(name: "other", host: "b", identityFiles: ["~/.ssh/id_rsa"])
   let fixture = try KeysBridgeFixture(hosts: [user, other], tool: tool)
   defer { fixture.cleanUp() }
   let key = try await importPlainKey(fixture)
@@ -48,10 +48,10 @@ func settingsKeysDeletesOriginalAfterVerification() async throws {
     "PLAIN": .init(material: fakeVaultMaterial("p")),
     fakeVaultMaterial("p").privateKey: .init(material: fakeVaultMaterial("p")),
   ])
-  let user = SSHHostProfile(name: "uses", host: "a", identityFiles: ["~/id_ed25519"])
+  let user = SSHHostProfile(name: "uses", host: "a", identityFiles: ["~/.ssh/id_ed25519"])
   let listing = SSHConfigListing(hosts: [
-    SSHConfigHostEntry(alias: "prod", identityFiles: ["~/id_ed25519"]),
-    SSHConfigHostEntry(alias: "dev", identityFiles: ["~/id_rsa"]),
+    SSHConfigHostEntry(alias: "prod", identityFiles: ["~/.ssh/id_ed25519"]),
+    SSHConfigHostEntry(alias: "dev", identityFiles: ["~/.ssh/id_rsa"]),
   ])
   let fixture = try KeysBridgeFixture(hosts: [user], tool: tool, listing: listing)
   defer { fixture.cleanUp() }

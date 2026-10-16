@@ -378,6 +378,9 @@
 "删除后，OpenSSH 回退引擎、手动输入的 ssh 命令和其它工具都无法再使用这把密钥；备份里可能仍有副本。" = "Nach dem Löschen können die OpenSSH-Ersatz-Engine, manuell eingegebene ssh-Befehle und andere Werkzeuge diesen Schlüssel nicht mehr verwenden. Backups können noch Kopien enthalten.";
 "删除文件" = "Datei löschen";
 "原私钥文件已不存在" = "Die ursprüngliche private Schlüsseldatei existiert nicht mehr";
+"原私钥文件已被改动，与保险库里的密钥不是同一把，已取消删除" = "Die ursprüngliche private Schlüsseldatei wurde geändert und passt nicht mehr zum Tresorschlüssel. Das Löschen wurde abgebrochen";
+"原私钥文件已加密，且旁边没有能对上指纹的 .pub 文件，无法确认是同一把密钥，已取消删除" = "Die ursprüngliche private Schlüsseldatei ist verschlüsselt und daneben liegt keine passende .pub-Datei. Aster kann nicht bestätigen, dass es derselbe Schlüssel ist. Das Löschen wurde abgebrochen";
+"原私钥文件不在 ~/.ssh 目录下，Aster 不会删除它，请手动删除" = "Die ursprüngliche private Schlüsseldatei liegt nicht in ~/.ssh. Aster löscht sie nicht; bitte manuell löschen";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Der Name darf nicht leer sein, höchstens 64 Byte lang sein und keine Zeilenumbrüche enthalten";
 "密钥不存在，可能已被删除" = "Der Schlüssel existiert nicht. Er wurde möglicherweise gelöscht";
 "密钥信息无效：%@" = "Ungültige Schlüsselinformationen: %@";
