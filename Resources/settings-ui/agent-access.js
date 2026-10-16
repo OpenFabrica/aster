@@ -437,17 +437,17 @@
 
   // MARK: - 入口
 
-  /// 渲染整个「Agent 访问」页到 container；ui.t 缺省时自建翻译函数。
-  /// 契约见 settings-web.md「子标签与扩展契约」：第 4 个参数是 `ui` 对象（兼容直接传入翻译函数）。
+  /// 渲染整个「Agent 访问」页到 container；ui 是宿主子标签给的 { t, … }（兼容直接传 t），缺省时自建翻译函数。
   function render(container, hostsSnapshot, rawSend, ui) {
     const translate = (typeof ui === "function" ? ui : ui?.t) || fallbackTranslator();
-    // send 返回 Promise，失败时 reject；原生侧已用 toast 报错，这里吞掉以免未处理的 rejection。
-    const send = (action, payload) => {
+    const info = hostsSnapshot?.agentAccess || { available: false, enabled: false, grants: [], terminals: [] };
+    // 宿主的 send 返回 Promise（原生失败或 5 s 超时会 reject）；这里不用结果，吞掉以免未处理的 rejection。
+    // 失败后的状态以下一次快照为准。
+    const send = (action, payload = {}) => {
       const result = rawSend(action, payload);
-      result?.catch?.(() => {});
+      if (result && typeof result.catch === "function") result.catch(() => {});
       return result;
     };
-    const info = hostsSnapshot?.agentAccess || { available: false, enabled: false, grants: [], terminals: [] };
     state.send = send;
     state.t = translate;
     container.replaceChildren(
