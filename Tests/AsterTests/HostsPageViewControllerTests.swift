@@ -134,12 +134,12 @@ func hostsPageRendersFiltersAndDrillsIntoGroups() throws {
   #expect(page.query.group == nil)
   #expect(Set(page.listing.groups.map(\.name)) == ["公司阿里云", "客户"])
 
-  // 卡片副标题沿用 ssh, 用户名；右键菜单给出连接/编辑/复制/删除。
+  // 卡片副标题沿用 ssh, 用户名；右键菜单给出连接/编辑/复制/添加为机器/删除。
   let card = try #require(page.hostsGrid.items.first as? HostsPageCardView)
   #expect(card.content.subtitle.hasPrefix("ssh, "))
   let menu = page.makeHostMenu(try fixture.host("monite").id)
   #expect(menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-    == [L("连接"), L("编辑主机…"), L("创建副本"), L("复制 SSH 命令"), L("删除主机…")])
+    == [L("连接"), L("编辑主机…"), L("创建副本"), L("复制 SSH 命令"), L("添加为远程机器…"), L("删除主机…")])
 }
 
 @Test("侧栏「主机」在「工作区」上方；点开后内容区换成主机页，选中标签即回到终端",

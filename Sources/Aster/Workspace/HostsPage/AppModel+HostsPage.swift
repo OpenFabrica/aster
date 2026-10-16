@@ -4,6 +4,7 @@ import Foundation
 
 // 侧栏「主机」页的显隐与主机动作。页面状态只是本窗口内容区显示什么，不持久化；
 // 主机数据的唯一权威仍是 `SSHHostDirectory`，这里只调用它与已有的 SSH 打开入口。
+// 单台主机的复制、删除与编辑动作在 `HostsPageViewController`（使用页面注入的目录与依赖）。
 
 extension AppModel {
   /// 在内容区显示主机页。命令面板与侧栏「主机」行共用。
@@ -38,54 +39,6 @@ extension AppModel {
     }
   }
 
-  /// 主机页「复制」：复制出一台「<名称> 副本」，规则与设置页相同。
-  func duplicateHost(hostID: UUID) {
-    let directory = SSHHostDirectory.shared
-    guard let source = directory.host(hostID), !source.isDefaults else {
-      notice = L("主机不存在。")
-      return
-    }
-    do {
-      try directory.upsert(source.duplicated(name: L("\(source.name) 副本")))
-    } catch {
-      notice = SettingsHostsBridge.describe(error)
-    }
-  }
-
-  /// 主机页「删除…」：确认后删除，并按设置页同一规则清理钥匙串口令。
-  func confirmAndDeleteHost(hostID: UUID, in window: NSWindow?) {
-    let directory = SSHHostDirectory.shared
-    guard let profile = directory.host(hostID), !profile.isDefaults else { return }
-    let alert = NSAlert()
-    alert.messageText = L("删除主机“\(HostBrowserCatalog.title(for: profile))”？")
-    alert.informativeText = L("删除后无法恢复。引用它作跳板的主机会改为直连。")
-    alert.alertStyle = .warning
-    alert.addButton(withTitle: L("删除"))
-    alert.addButton(withTitle: L("取消"))
-    let perform: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-      guard response == .alertFirstButtonReturn else { return }
-      self?.deleteHost(hostID: hostID)
-    }
-    if let window {
-      alert.beginSheetModal(for: window, completionHandler: perform)
-    } else {
-      perform(alert.runModal())
-    }
-  }
-
-  /// 执行删除；失败只给提示，主机列表由目录发布的变化自动刷新。
-  private func deleteHost(hostID: UUID) {
-    do {
-      if let passwordError = try SSHHostRemoval.remove(
-        hostID, from: .shared, passwords: SSHCredentialStore())
-      {
-        notice = L("主机已删除，但没能从钥匙串删除口令：\(SettingsHostsBridge.describe(passwordError))")
-      }
-    } catch {
-      notice = SettingsHostsBridge.describe(error)
-    }
-  }
-
   /// 主机页「从 ~/.ssh/config 导入」：后台解析，合并进导入组，结果用提示告知。
   func importHostsFromSSHConfig() {
     Task { @MainActor [weak self] in
@@ -95,7 +48,7 @@ extension AppModel {
         self?.notice = L(
           "已从 ~/.ssh/config 导入：新增 \(String(result.added)) 台，更新 \(String(result.updated)) 台")
       } catch {
-        self?.notice = L("无法导入 ~/.ssh/config：\(SettingsHostsBridge.describe(error))")
+        self?.notice = L("无法导入 ~/.ssh/config：\(SSHHostEditing.describe(error))")
       }
     }
   }

@@ -30,8 +30,9 @@ enum HostsPagePalette {
 
 /// 只画一块圆角底色的视图。颜色在 `updateLayer` 里解析，切换明暗外观或主题后
 /// 标记 `needsDisplay` 即可按新外观重画，不会冻结成创建时的 CGColor。
+/// 不是 final：编辑面板的输入框与面板根视图在它上面加控件或键盘处理。
 @MainActor
-final class HostsPageFilledView: NSView {
+class HostsPageFilledView: NSView {
   var fillColor: NSColor {
     didSet { needsDisplay = true }
   }

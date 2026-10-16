@@ -20,8 +20,14 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
   let directory: SSHHostDirectory
   /// 读使用账本；测试注入固定账本，避免读写用户真实偏好。
   private let usageLedger: () -> HostUsageLedger
-  /// 主机没写用户名时显示的用户名：默认项的用户名，再缺省为本机用户。
-  private let localUser: String
+  /// 主机没写用户名时显示的用户名：默认项的用户名，再缺省为本机用户。编辑面板的占位符也用它。
+  let localUser: String
+  /// 编辑面板与单台主机动作的外部依赖（保险库、钥匙串、机器列表、文本编辑器）。
+  let editorServices: HostsPageEditorServices
+  /// 当前打开的编辑面板；nil 表示没有打开。
+  var editorPanel: HostEditorPanelController?
+  /// 面板右边缘约束，开合动画改它的常量。
+  var editorTrailingConstraint: NSLayoutConstraint?
 
   private(set) var query = HostBrowserQuery()
   private(set) var layoutMode: LayoutMode = .grid
@@ -43,16 +49,18 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
   private var tagButton: HostsPagePillButton!
   private var cancellables: Set<AnyCancellable> = []
 
-  /// 生产用共享主机目录与真实使用账本；测试注入临时目录与固定账本。
+  /// 生产用共享主机目录、真实使用账本与真实编辑依赖；测试注入临时目录、固定账本与替身。
   init(
     model: AppModel, directory: SSHHostDirectory = .shared,
     usageLedger: @escaping () -> HostUsageLedger = { HostUsageTracking.ledger() },
-    localUser: String = NSUserName()
+    localUser: String = NSUserName(),
+    editorServices: HostsPageEditorServices = .live()
   ) {
     self.model = model
     self.directory = directory
     self.usageLedger = usageLedger
     self.localUser = localUser
+    self.editorServices = editorServices
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -73,14 +81,19 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
     reload()
   }
 
-  /// 每次挂到内容区时调用：刷新「最近使用」依据，并把键盘焦点交给搜索框。
+  /// 每次挂到内容区时调用：刷新「最近使用」依据，并把键盘焦点交给搜索框（编辑面板打开时交给面板）。
   func pageDidAppear() {
     // 主题可能在页面隐藏期间换过：底色视图重画，卡片在 reload 里按新主题重建。
     searchBar.needsDisplay = true
+    editorPanel?.view.needsDisplay = true
     reload()
     DispatchQueue.main.async { [weak self] in
       guard let self, let window = self.view.window else { return }
-      window.makeFirstResponder(self.searchField)
+      if let editorPanel = self.editorPanel {
+        editorPanel.focusFirstField()
+      } else {
+        window.makeFirstResponder(self.searchField)
+      }
     }
   }
 
