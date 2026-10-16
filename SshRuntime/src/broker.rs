@@ -76,7 +76,8 @@ impl Broker {
         &self.env.control
     }
 
-    /// 启动票据校验器。
+    /// 启动票据校验器。发行版只有关票开关用它，那段代码不编译，所以放过 dead_code。
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     pub fn tickets(&self) -> &LaunchTickets {
         &self.tickets
     }
@@ -486,6 +487,9 @@ async fn run(socket: PathBuf) -> i32 {
         )
     });
     let (broker, mut out_rx) = Broker::new(paths, lookup);
+    // 关票开关只在 debug 构建生效：发行版 broker 继承 App 的环境，`launchctl setenv` 就能
+    // 改到它，若照样认这个开关，同一用户的任何进程都能关掉票据校验。
+    #[cfg(debug_assertions)]
     if std::env::var(crate::tickets::SWITCH_ENV).as_deref() == Ok("off") {
         broker.tickets().disable();
         log_warn!("launch tickets disabled by ASTER_SSH_TICKETS=off (debug only)");

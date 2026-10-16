@@ -21,7 +21,8 @@ use zeroize::Zeroizing;
 
 /// client 读取票据的环境变量。
 pub const TICKET_ENV: &str = "ASTER_SSH_TICKET";
-/// 调试开关：broker 环境里 `ASTER_SSH_TICKETS=off` 时不校验票据。
+/// 调试开关：debug 构建的 broker 环境里 `ASTER_SSH_TICKETS=off` 时不校验票据；发行版（`--release`）忽略它。
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub const SWITCH_ENV: &str = "ASTER_SSH_TICKETS";
 /// 票据版本前缀。
 const VERSION: &str = "v1";
@@ -94,7 +95,8 @@ impl LaunchTickets {
         }
     }
 
-    /// 关闭校验（仅调试：`ASTER_SSH_TICKETS=off`）。
+    /// 关闭校验（仅 debug 构建的 `ASTER_SSH_TICKETS=off` 与测试使用；发行版不编译调用方）。
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     pub fn disable(&self) {
         self.enforced.store(false, Ordering::SeqCst);
     }

@@ -44,7 +44,9 @@
 - openssh 路径与改造前逐字节一致：私有临时配置、ControlMaster、`BatchMode=yes`。
 - 用户在 Shell 里手敲的 `ssh` 永远是 OpenSSH，不受引擎影响。详情面板借用它的 ControlMaster（场景 A）也不受影响。
 
-二进制定位顺序：`ASTER_SSH_BINARY` → `Contents/MacOS/aster-ssh` → 主程序同目录 → 开发构建的 `SshRuntime/target/{release,debug}/aster-ssh`。开发时运行 `scripts/build-ssh-runtime.sh .build/debug` 就能让 `swift build` 出来的 App 找到它。
+二进制定位顺序（DEBUG 构建）：`ASTER_SSH_BINARY` → `Contents/MacOS/aster-ssh` → 主程序同目录 → 开发构建的 `SshRuntime/target/{release,debug}/aster-ssh`。开发时运行 `scripts/build-ssh-runtime.sh .build/debug` 就能让 `swift build` 出来的 App 找到它。
+
+发行版（非 DEBUG）只认 App 包内的 `Contents/MacOS/aster-ssh`，忽略 `ASTER_SSH_BINARY` 与开发产物。原因：App 的环境可以被同一用户的任何进程用 `launchctl setenv` 改写；若发行版照样认这个变量，伪造的 broker 就能收到保险库私钥（`auth.request` 的回答）和 `keys inspect` 的输入。设置面板的 `aster-ssh keys` / `known-hosts` 子命令（`SSHRuntimeTool.located()`）走同一个定位规则。
 
 ## broker 生命周期
 
@@ -79,7 +81,7 @@ broker socket 位于 0700 目录，但同一用户的任何进程都能连上它
 
 **威胁模型：只约束配合的 agent，不防恶意软件。** 票据防的是「好好按规矩办事的 agent 走了捷径」：它不知道票据密钥，拿不到有效票据，直连 socket 会被拒；它从 `ps` 看到的 argv 里也没有票据。同一用户下的恶意进程仍然可以：读 App 进程内存（拿到密钥）、在 client 抹掉环境变量之前读到它的环境（票据一次性，client 启动即用掉，窗口很短）、用 ssh-agent、读 `~/.ssh` 下的私钥文件、模拟键盘鼠标操作 App。这些不在本机制的范围内，需要系统层面的隔离（沙箱、独立用户）。
 
-调试时可以用 `ASTER_SSH_TICKETS=off` 启动 App（broker 继承这个环境变量）关闭校验，产品构建不要设置。
+调试时可以用 `ASTER_SSH_TICKETS=off` 启动 DEBUG 构建的 App（broker 继承这个环境变量）关闭校验。这个开关只在 debug 构建的 broker（`debug_assertions`）里生效；发行版 broker 由 `build-ssh-runtime.sh` 用 `cargo build --release` 构建，忽略它，非 DEBUG 的 App 也会在拉起 broker 前把它从环境里删掉（`SSHBrokerSupervisor.brokerEnvironment(from:)`）。
 
 ## 调用形状
 

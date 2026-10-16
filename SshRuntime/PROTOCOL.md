@@ -82,7 +82,7 @@ unix socket，每帧 `type:u8 | len:u32 BE | payload`。
 - client 每个进程只 OPEN 一次，所以「一次启动一张票」就够：Pane 重新连接是新进程，App 会在创建 surface 时再签一张。
 - 还没收到 `tickets.key` 时，OPEN 最多等 2 秒（broker 先 bind socket 再读 stdin）。
 - 拒绝原因（缺失、伪造、过期、重放）只写 broker 日志，不回给 client。
-- 仅调试：broker 环境里有 `ASTER_SSH_TICKETS=off` 时不校验。产品构建不设置它。
+- 仅调试：debug 构建（`debug_assertions`）的 broker 环境里有 `ASTER_SSH_TICKETS=off` 时不校验。发行版（`cargo build --release`）忽略这个变量，非 DEBUG 的 App 也会在拉起 broker 前把它从环境里删掉。
 
 ## 4. App ↔ broker 控制协议
 

@@ -87,7 +87,8 @@ final class SSHBrokerSupervisor {
   ///   - hostDirectory: 主机目录（profiles.sync 的来源），首次需要时才取。
   ///   - vaultKeyDirectory: 保险库目录，把主机引用的密钥换成公钥随 profiles.sync 下发；nil 表示没有。
   ///   - linkStateHandler: `link.state` 的接收者。
-  ///   - environment: 读取 `ASTER_SSH_ENGINE`、`ASTER_SSH_BINARY`，并作为 broker 的环境。
+  ///   - environment: 读取 `ASTER_SSH_ENGINE`、`ASTER_SSH_BINARY`（仅 DEBUG），按
+  ///     `brokerEnvironment(from:)` 过滤后作为 broker 的环境。
   ///   - locateExecutable: 定位 aster-ssh；缺省按 `executableURL(environment:bundle:)`。
   init(
     routing: SSHEngineRouting?,
@@ -102,71 +103,9 @@ final class SSHBrokerSupervisor {
     self.hostDirectory = hostDirectory
     self.vaultKeyDirectory = vaultKeyDirectory
     self.linkStateHandler = linkStateHandler
-    self.environment = environment
+    self.environment = Self.brokerEnvironment(from: environment)
     self.tuning = tuning
     self.locateExecutable = locateExecutable ?? { Self.executableURL(environment: environment) }
-  }
-
-  // MARK: - 定位与引擎选择
-
-  /// 可执行文件名。
-  nonisolated static let executableName = "aster-ssh"
-
-  /// 定位 aster-ssh：`ASTER_SSH_BINARY` → App 包 `Contents/MacOS/aster-ssh` →
-  /// 与主程序同目录 → 开发构建 `SshRuntime/target/{release,debug}/aster-ssh`。
-  nonisolated static func executableURL(
-    environment: [String: String] = ProcessInfo.processInfo.environment,
-    bundle: Bundle = .main
-  ) -> URL? {
-    locate(
-      environment: environment, bundleURL: bundle.bundleURL, mainExecutableURL: bundle.executableURL,
-      fileManager: .default)
-  }
-
-  /// `executableURL` 的可注入版本。
-  ///
-  /// aster-session 在开发构建里只能靠环境变量指定；aster-ssh 多给两个开发候选：
-  /// SwiftPM 调试产物在 `<仓库>/.build/<配置>/Aster`，与之同目录的 aster-ssh 覆盖手工复制的情况；
-  /// 由 `.build` 反推出仓库根后再找 cargo 产物，覆盖「只跑了 cargo build」的常见情况。
-  nonisolated static func locate(
-    environment: [String: String],
-    bundleURL: URL,
-    mainExecutableURL: URL?,
-    fileManager: FileManager
-  ) -> URL? {
-    var candidates: [URL] = []
-    if let override = environment["ASTER_SSH_BINARY"], !override.isEmpty {
-      candidates.append(URL(fileURLWithPath: override))
-    }
-    candidates.append(bundleURL.appendingPathComponent("Contents/MacOS/\(executableName)"))
-    if let mainExecutableURL {
-      let directory = mainExecutableURL.deletingLastPathComponent()
-      candidates.append(directory.appendingPathComponent(executableName))
-      let components = directory.standardizedFileURL.pathComponents
-      if let buildIndex = components.lastIndex(of: ".build"), buildIndex > 0 {
-        let root = NSString.path(withComponents: Array(components[..<buildIndex]))
-        for configuration in ["release", "debug"] {
-          candidates.append(
-            URL(fileURLWithPath: root)
-              .appendingPathComponent("SshRuntime/target/\(configuration)/\(executableName)"))
-        }
-      }
-    }
-    return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }?.standardizedFileURL
-  }
-
-  /// 用户要求的引擎：环境变量 `ASTER_SSH_ENGINE` 优先，其次设置项。
-  /// 环境变量取值非法时忽略它并返回说明，由调用方记诊断。
-  nonisolated static func requestedEngine(
-    environment: [String: String], preferred: SSHEngine
-  ) -> (engine: SSHEngine, problem: String?) {
-    guard let raw = environment[SSHEngine.environmentKey]?.trimmingCharacters(in: .whitespaces),
-      !raw.isEmpty
-    else { return (preferred, nil) }
-    guard let engine = SSHEngine(rawValue: raw.lowercased()) else {
-      return (preferred, "invalid \(SSHEngine.environmentKey)=\(raw)")
-    }
-    return (engine, nil)
   }
 
   // MARK: - 生命周期

@@ -98,6 +98,53 @@ func sshBrokerSupervisorLocatesExecutable() throws {
       mainExecutableURL: devMain, fileManager: fileManager) == bundled)
 }
 
+@Test("发行版定位 aster-ssh：忽略 ASTER_SSH_BINARY 与开发产物，只认 App 包内的")
+func sshBrokerSupervisorReleaseLocatesOnlyBundledExecutable() throws {
+  let fileManager = FileManager.default
+  let root = URL(fileURLWithPath: NSTemporaryDirectory())
+    .appendingPathComponent("AsterLocateSSHRelease.\(UUID().uuidString)")
+  defer { try? fileManager.removeItem(at: root) }
+  func makeExecutable(_ relative: String) throws -> URL {
+    let url = root.appendingPathComponent(relative)
+    try fileManager.createDirectory(
+      at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("#!/bin/sh\n".utf8).write(to: url)
+    try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    return url.standardizedFileURL
+  }
+  let devMain = root.appendingPathComponent(".build/release/Aster")
+  let appBundle = root.appendingPathComponent("Aster.app")
+  let override = try makeExecutable("custom/aster-ssh")
+  _ = try makeExecutable(".build/release/aster-ssh")
+  _ = try makeExecutable("SshRuntime/target/release/aster-ssh")
+  let environment = ["ASTER_SSH_BINARY": override.path]
+
+  // 包内没有：即使环境变量与开发产物都在，也找不到。
+  #expect(
+    SSHBrokerSupervisor.locate(
+      environment: environment, bundleURL: appBundle, mainExecutableURL: devMain,
+      fileManager: fileManager, allowsDevelopmentOverrides: false) == nil)
+  // 包内有：用包内的，不看环境变量。
+  let bundled = try makeExecutable("Aster.app/Contents/MacOS/aster-ssh")
+  #expect(
+    SSHBrokerSupervisor.locate(
+      environment: environment, bundleURL: appBundle, mainExecutableURL: devMain,
+      fileManager: fileManager, allowsDevelopmentOverrides: false) == bundled)
+}
+
+@Test("broker 环境：发行版去掉 ASTER_SSH_TICKETS，DEBUG 保留，其它变量不动")
+func sshBrokerEnvironmentStripsTicketSwitchInRelease() {
+  let environment = ["ASTER_SSH_TICKETS": "off", "HOME": "/Users/x", "ASTER_SSH_DEBUG": "1"]
+  let release = SSHBrokerSupervisor.brokerEnvironment(
+    from: environment, allowsDevelopmentOverrides: false)
+  #expect(release["ASTER_SSH_TICKETS"] == nil)
+  #expect(release["HOME"] == "/Users/x")
+  #expect(release["ASTER_SSH_DEBUG"] == "1")
+  #expect(
+    SSHBrokerSupervisor.brokerEnvironment(from: environment, allowsDevelopmentOverrides: true)
+      == environment)
+}
+
 @MainActor
 @Test("传输工厂：有原生端点时走 aster-ssh 并带 hostID，不建私有 OpenSSH 配置；否则与原来一致")
 func machineHostBindingTransportFollowsRouting() throws {
