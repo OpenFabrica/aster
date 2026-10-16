@@ -40,7 +40,7 @@ final class HostsHubViewController: NSViewController {
   let segmentedControl = NSSegmentedControl()
   private let contentView = NSView()
 
-  /// `factories` 缺某个子页时显示占位文字；测试可注入替身。
+  /// `factories` 提供除「主机」外的子页；测试可注入替身。
   init(
     model: AppModel, hostsPage: HostsPageViewController,
     factories: [HostsHubSection: () -> NSViewController] = HostsHubViewController.defaultFactories()
@@ -54,7 +54,7 @@ final class HostsHubViewController: NSViewController {
 
   required init?(coder: NSCoder) { nil }
 
-  /// 生产环境的子页工厂。各子页实现落地后在这里登记。
+  /// 生产环境的子页工厂。
   static func defaultFactories() -> [HostsHubSection: () -> NSViewController] {
     [
       .keys: { HostsKeysViewController() },
@@ -148,41 +148,18 @@ final class HostsHubViewController: NSViewController {
     if notify { (page as? HostsHubPage)?.pageDidAppear() }
   }
 
-  /// 取（必要时创建）子页；没有工厂时用占位页。
+  /// 取（必要时创建）子页；测试没注入某个子页时退回空白视图。
   private func page(for section: HostsHubSection) -> NSViewController {
     if let existing = pages[section] { return existing }
-    let created = factories[section]?() ?? HostsHubPlaceholderViewController(section: section)
+    let created = factories[section]?() ?? {
+      // 没有 nib 的 NSViewController 必须先给 view，否则加载视图时会崩溃。
+      let blank = NSViewController(nibName: nil, bundle: nil)
+      blank.view = NSView()
+      return blank
+    }()
     pages[section] = created
     return created
   }
 }
 
 extension HostsPageViewController: HostsHubPage {}
-
-/// 尚未实现的子页占位。
-@MainActor
-final class HostsHubPlaceholderViewController: NSViewController {
-  private let section: HostsHubSection
-
-  /// 记住子页，用于显示标题。
-  init(section: HostsHubSection) {
-    self.section = section
-    super.init(nibName: nil, bundle: nil)
-  }
-
-  required init?(coder: NSCoder) { nil }
-
-  /// 居中显示一行说明。
-  override func loadView() {
-    let root = NSView()
-    let label = NSTextField(labelWithString: L("「\(section.title)」页正在建设中。"))
-    label.textColor = .secondaryLabelColor
-    label.translatesAutoresizingMaskIntoConstraints = false
-    root.addSubview(label)
-    NSLayoutConstraint.activate([
-      label.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-      label.centerYAnchor.constraint(equalTo: root.centerYAnchor),
-    ])
-    view = root
-  }
-}
