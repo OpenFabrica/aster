@@ -42,6 +42,22 @@ final class AgentHostService {
 
   private var commandContexts: [String: CommandContext] = [:]
 
+  /// 一次授权的结论：审计依据，以及命令没敲进去时要退还的 once 授权。
+  private struct Authorization {
+    var approver: AgentHostAuditRecord.Approver
+    /// 退还用：从授权簿消耗的 once 授权，或用户当场「允许一次」对应的授权（尚未入簿）。
+    var refundableOnce: AgentHostGrant?
+    /// `refundableOnce` 已在簿里存在过（被消耗），退还时原样放回、不写新建审计。
+    var onceWasStored = false
+    /// 等过用户批准：后续连接改用新的期限。
+    var waitedForUser = false
+  }
+
+  /// 批准之后，连接与执行至少还有这么久（批准常常吃掉大半期限）。
+  static let postApprovalMinimum: Duration = .seconds(30)
+  /// 但最多比原期限多出这么久：CLI 与 MCP 客户端只比 `timeout_ms` 多等 15 秒，超出就会先断开。
+  static let postApprovalGrace: Duration = .seconds(10)
+
   init(dependencies: Dependencies) {
     self.dependencies = dependencies
     dependencies.registry.onCommandFinished = { [weak self] terminal, result in
@@ -50,48 +66,69 @@ final class AgentHostService {
     dependencies.approvals.onAnswer = { [weak self] request, answer, hadLiveWaiters in
       self?.applyAnswer(request, answer: answer, hadLiveWaiters: hadLiveWaiters)
     }
+    dependencies.grants.onRevoked = { [weak self] revoked in self?.closeTerminals(revoked: revoked) }
   }
 
   // MARK: - 方法
 
-  /// `host.exec`。
+  /// `host.exec`。命令没能敲进终端（连接失败、排队超时、暂停）时退还 once 授权，重试不用再问。
   func exec(_ params: HostExecParams) async throws -> HostExecResult {
-    let deadline = ContinuousClock.now + .milliseconds(AgentHostValidation.clampedTimeout(params.timeoutMs))
+    let timeout = Duration.milliseconds(AgentHostValidation.clampedTimeout(params.timeoutMs))
+    var deadline = ContinuousClock.now + timeout
     let caller = resolveCaller(params.agent)
     let (profile, resolved) = try resolveHost(params.host)
-    let approver = try await authorize(
+    let authorization = try await authorize(
       caller: caller, profile: profile, resolved: resolved, command: params.command, reason: params.reason,
       deadline: deadline)
-    let terminal = try obtainTerminal(caller: caller, profile: profile, resolved: resolved)
-    try await terminal.waitUntilReady(deadline: deadline)
-    let commandID = Self.makeIdentifier(prefix: "c")
+    if authorization.waitedForUser { deadline = Self.postApprovalDeadline(original: deadline, timeout: timeout) }
+    let approver = authorization.approver
     let host = hostReference(profile, resolved)
-    let result = try await terminal.execute(
-      command: params.command, commandID: commandID, deadline: deadline,
-      maximumOutputBytes: params.maxOutputBytes ?? AgentHostLimits.defaultMaximumOutputBytes
-    ) {
-      commandContexts[commandID] = CommandContext(
-        caller: caller, host: host, approver: approver, command: params.command, reason: params.reason)
-      dependencies.audit.append(
-        AgentHostAuditRecord(
-          time: dependencies.now(), action: .execStarted, actor: caller.auditActor, approver: approver,
-          host: host, commandID: commandID, terminalID: terminal.terminalID, command: params.command,
-          reason: params.reason))
+    let commandID = Self.makeIdentifier(prefix: "c")
+    var started = false
+    do {
+      let terminal = try obtainTerminal(caller: caller, profile: profile, resolved: resolved)
+      try await terminal.waitUntilReady(deadline: deadline)
+      let result = try await terminal.execute(
+        command: params.command, commandID: commandID, deadline: deadline,
+        maximumOutputBytes: params.maxOutputBytes ?? AgentHostLimits.defaultMaximumOutputBytes
+      ) {
+        started = true
+        commandContexts[commandID] = CommandContext(
+          caller: caller, host: host, approver: approver, command: params.command, reason: params.reason)
+        dependencies.audit.append(
+          AgentHostAuditRecord(
+            time: dependencies.now(), action: .execStarted, actor: caller.auditActor, approver: approver,
+            host: host, commandID: commandID, terminalID: terminal.terminalID, command: params.command,
+            reason: params.reason))
+      }
+      recordPendingIfNeeded(result)
+      return result
+    } catch {
+      if !started { refund(authorization) }
+      throw error
     }
-    recordPendingIfNeeded(result)
-    return result
   }
 
   /// `host.open`：批准后建立（或复用）终端并等就绪。
   func open(_ params: HostOpenParams) async throws -> HostTerminalInfo {
-    let deadline = ContinuousClock.now + .milliseconds(AgentHostValidation.clampedTimeout(params.timeoutMs))
+    let timeout = Duration.milliseconds(AgentHostValidation.clampedTimeout(params.timeoutMs))
+    var deadline = ContinuousClock.now + timeout
     let caller = resolveCaller(params.agent)
     let (profile, resolved) = try resolveHost(params.host)
-    _ = try await authorize(
+    let authorization = try await authorize(
       caller: caller, profile: profile, resolved: resolved, command: nil, reason: nil, deadline: deadline)
+    if authorization.waitedForUser { deadline = Self.postApprovalDeadline(original: deadline, timeout: timeout) }
     let terminal = try obtainTerminal(caller: caller, profile: profile, resolved: resolved)
     try await terminal.waitUntilReady(deadline: deadline)
     return terminal.info
+  }
+
+  /// 批准之后的新期限：剩余时间不足 `postApprovalMinimum` 时补足，但不超过原期限加
+  /// `postApprovalGrace`，也不超过从现在起的请求超时。
+  static func postApprovalDeadline(
+    original: ContinuousClock.Instant, timeout: Duration, now: ContinuousClock.Instant = .now
+  ) -> ContinuousClock.Instant {
+    min(max(original, now + postApprovalMinimum), original + postApprovalGrace, now + timeout)
   }
 
   /// `host.wait`：只有发起会话能等自己的命令；别人的 command_id 一律 not_found。
@@ -109,8 +146,9 @@ final class AgentHostService {
     return result
   }
 
-  /// `host.read`：本会话终端的活动屏幕。
+  /// `host.read`：本会话终端的活动屏幕。读屏也要求总开关开着：关掉开关就不该再能看远端屏幕。
   func read(_ params: HostReadParams) throws -> HostReadResult {
+    try ensureEnabled()
     let terminal = try ownedTerminal(host: params.host, terminalID: params.terminalID, caller: resolveCaller(params.agent))
     return HostReadResult(
       terminalID: terminal.terminalID, text: terminal.read(lines: params.lines ?? AgentHostLimits.defaultReadLines))
@@ -137,30 +175,77 @@ final class AgentHostService {
     registry.close(terminal)
   }
 
-  /// `host.terminals`：带 agent 时只列本会话的。
+  /// `host.terminals`：只列调用方本会话的终端，不提供跨会话列表（见 HostTerminalsParams）。
   func terminals(_ params: HostTerminalsParams) -> HostTerminalsResult {
-    let key = params.agent.map { resolveCaller($0).key }
-    return HostTerminalsResult(
-      terminals: registry.terminals.filter { key == nil || $0.sessionKey == key }.map(\.info))
+    let key = resolveCaller(params.agent).key
+    return HostTerminalsResult(terminals: registry.terminals.filter { $0.sessionKey == key }.map(\.info))
+  }
+
+  // MARK: - 生命周期
+
+  /// 总开关被关掉：撤掉所有挂起的批准，关掉所有 agent 终端（之后连读屏也不行）。
+  func handleAccessDisabled() {
+    dependencies.approvals.dismissAll(hostID: nil)
+    registry.closeAll()
+  }
+
+  /// 主机列表变化：主机被删或连接目标（地址、用户、端口、跳板）变了，撤掉针对旧目标的批准面板；
+  /// 用户此时点批准，批准的已不是面板上那个目标。
+  func handleHostsChanged() {
+    let current = currentFingerprints()
+    dependencies.approvals.dismiss { current[$0.hostID] != $0.targetFingerprint }
+  }
+
+  /// 每台已保存主机当前的目标指纹；解析失败的主机不在结果里。
+  func currentFingerprints() -> [UUID: String] {
+    let all = dependencies.hosts()
+    var result: [UUID: String] = [:]
+    for profile in all where !profile.isDefaults {
+      do {
+        result[profile.id] = Self.fingerprint(try SSHHostResolver.resolve(profile.id, in: all))
+      } catch {
+        continue
+      }
+    }
+    return result
+  }
+
+  /// `host.list` 的 `agentAccess`：只算指纹仍与当前目标一致的 always 授权。
+  func alwaysGrantedHostIDs() -> Set<UUID> {
+    grants.alwaysGrantedHostIDs(currentFingerprints: currentFingerprints())
+  }
+
+  /// 用户撤销授权后关掉失去依据的终端：撤销 always 关这台主机的全部终端，
+  /// 撤销 session / once 只关该会话在这台主机上的终端。
+  private func closeTerminals(revoked: [AgentHostGrant]) {
+    for grant in revoked {
+      for terminal in registry.terminals
+      where terminal.hostID == grant.hostID && (grant.scope == .always || terminal.sessionKey == grant.sessionKey) {
+        registry.close(terminal)
+      }
+    }
   }
 
   // MARK: - 授权
 
-  /// 开关 → 授权簿 → 必要时弹批准面板（有期限地等）→ 暂停检查。返回审计用的批准依据。
+  /// 开关 → 暂停 → 授权簿 → 必要时弹批准面板（有期限地等）→ 复核目标 → 暂停。
+  ///
+  /// 暂停检查放在授权簿之前：被暂停时不能白白消耗一次性授权。批准之后再查一遍暂停，
+  /// 用户可能在等批准时按了暂停；此时把已消耗的 once 授权退回去。
   private func authorize(
     caller: AgentHostResolvedCaller, profile: SSHHostProfile, resolved: SSHResolvedSpec, command: String?,
     reason: String?, deadline: ContinuousClock.Instant
-  ) async throws -> AgentHostAuditRecord.Approver {
-    guard dependencies.isEnabled() else {
-      throw AsterControlError(
-        code: .agentAccessDisabled, message: "设置里没有允许编程 agent 申请主机访问（设置 → 主机 → Agent 访问）")
-    }
-    let approver: AgentHostAuditRecord.Approver
-    switch await grants.evaluate(hostID: profile.id, sessionKey: caller.key, fingerprint: Self.fingerprint(resolved)) {
+  ) async throws -> Authorization {
+    try ensureEnabled()
+    try ensureNotPaused(caller: caller, hostID: profile.id)
+    let fingerprint = Self.fingerprint(resolved)
+    var authorization: Authorization
+    switch await grants.evaluate(hostID: profile.id, sessionKey: caller.key, fingerprint: fingerprint, command: command) {
     case .allowed(let grant):
-      approver = .grant(grant)
+      authorization = Authorization(
+        approver: .grant(grant), refundableOnce: grant.scope == .once ? grant : nil, onceWasStored: true)
     case .deniedRecently:
-      throw AsterControlError(code: .approvalDenied, message: "用户拒绝了这个 agent 会话访问 \(profile.name)")
+      throw AsterControlError(code: .approvalDenied, message: "用户拒绝了 agent 访问 \(profile.name)，冷却期内不再询问")
     case .needsApproval:
       let remaining = deadline - ContinuousClock.now
       guard remaining > .zero else {
@@ -168,47 +253,93 @@ final class AgentHostService {
       }
       let request = AgentHostApprovalRequest(
         caller: caller, hostID: profile.id, hostName: profile.name, target: resolved.credentialEndpoint,
-        reason: reason, command: command)
+        reason: reason, command: command, targetFingerprint: fingerprint)
       guard
-        let answer = await dependencies.approvals.requestApproval(
+        let answer = try await dependencies.approvals.requestApproval(
           request, timeout: min(remaining, dependencies.approvalTimeout))
       else {
         throw AsterControlError(code: .approvalPending, message: "用户还没有在 Aster 里回答批准请求，稍后重试")
       }
+      let scope: AgentHostGrantScope
       switch answer {
       case .deny:
-        throw AsterControlError(code: .approvalDenied, message: "用户拒绝了这个 agent 会话访问 \(profile.name)")
-      case .allowOnce: approver = .user(account: dependencies.user.account, scope: .once)
-      case .allowSession: approver = .user(account: dependencies.user.account, scope: .session)
-      case .allowAlways: approver = .user(account: dependencies.user.account, scope: .always)
+        throw AsterControlError(code: .approvalDenied, message: "用户拒绝了 agent 访问 \(profile.name)")
+      case .allowOnce: scope = .once
+      case .allowSession: scope = .session
+      case .allowAlways: scope = .always
       }
+      let approval = approvalGrant(request, scope: scope)
+      try verifyTargetUnchanged(request, approval: approval)
+      authorization = Authorization(
+        approver: .user(account: dependencies.user.account, scope: scope),
+        refundableOnce: scope == .once ? approval : nil, waitedForUser: true)
     }
-    if registry.terminal(sessionKey: caller.key, hostID: profile.id)?.isPaused == true {
+    do {
+      try ensureNotPaused(caller: caller, hostID: profile.id)
+    } catch {
+      refund(authorization)
+      throw error
+    }
+    return authorization
+  }
+
+  /// 总开关。
+  private func ensureEnabled() throws {
+    guard dependencies.isEnabled() else {
+      throw AsterControlError(
+        code: .agentAccessDisabled, message: "设置里没有允许编程 agent 申请主机访问（设置 → 主机 → Agent 访问）")
+    }
+  }
+
+  /// 用户在面板里暂停了这个会话在这台主机上的 agent。
+  private func ensureNotPaused(caller: AgentHostResolvedCaller, hostID: UUID) throws {
+    if registry.terminal(sessionKey: caller.key, hostID: hostID)?.isPaused == true {
       throw AsterControlError(code: .agentPaused, message: "用户已在 Aster 窗口里暂停 agent")
     }
-    return approver
+  }
+
+  /// 批准后复核：等待期间主机被删或连接目标变了，这次批准作废（写 `grant.invalidated`）。
+  private func verifyTargetUnchanged(_ request: AgentHostApprovalRequest, approval: AgentHostGrant) throws {
+    let current = currentFingerprints()[request.hostID]
+    guard current != request.targetFingerprint else { return }
+    grants.invalidateApproval(approval, currentFingerprint: current)
+    throw AsterControlError(
+      code: .hostNotReady,
+      message: "等待批准期间主机 \(request.hostName) 的连接目标变了（或主机已删除），这次批准作废，请重新申请")
+  }
+
+  /// 命令没敲进终端：退还 once 授权。簿里取出的原样放回；当场「允许一次」的落成一条
+  /// 一次性授权（写新建审计），5 分钟内同一会话重试同一条命令不用再问。
+  private func refund(_ authorization: Authorization) {
+    guard let grant = authorization.refundableOnce else { return }
+    if authorization.onceWasStored {
+      grants.restore(grant)
+    } else {
+      grants.add(grant, by: dependencies.user)
+    }
+  }
+
+  /// 批准对应的授权条目：绑定发起时的目标指纹；once 还绑定命令。
+  private func approvalGrant(_ request: AgentHostApprovalRequest, scope: AgentHostGrantScope) -> AgentHostGrant {
+    let time = dependencies.now()
+    return AgentHostGrant(
+      hostID: request.hostID, scope: scope, sessionKey: request.caller.key, targetFingerprint: request.targetFingerprint,
+      grantedAt: time, grantedBy: dependencies.user.account, lastUsedAt: time, command: request.command)
   }
 
   /// 用户回答批准面板：先让回答生效（授权或冷却），等待方随后被唤醒。
   ///
-  /// 「允许一次」只有在所有等待方都已超时时才落成一次性授权（5 分钟内被该会话下一次执行消耗）；
-  /// 有等待方时它们直接放行，不留授权。
+  /// 授权绑定请求发起时的目标指纹，不在回答时重新解析：用户批准的是面板上显示的目标。
+  /// 「允许一次」只有在所有等待方都已超时时才落成一次性授权（5 分钟内被该会话同一条命令消耗）；
+  /// 有等待方时它直接放行，不留授权。主机已被删除时不落任何授权。
   private func applyAnswer(_ request: AgentHostApprovalRequest, answer: AgentHostApprovalAnswer, hadLiveWaiters: Bool) {
     let user = dependencies.user
-    guard let profile = dependencies.hosts().first(where: { $0.id == request.hostID }),
-      let resolved = try? SSHHostResolver.resolve(profile.id, in: dependencies.hosts())
-    else { return }
-    let time = dependencies.now()
-    func grant(_ scope: AgentHostGrantScope) -> AgentHostGrant {
-      AgentHostGrant(
-        hostID: profile.id, scope: scope, sessionKey: request.caller.key,
-        targetFingerprint: Self.fingerprint(resolved), grantedAt: time, grantedBy: user.account, lastUsedAt: time)
-    }
+    guard dependencies.hosts().contains(where: { $0.id == request.hostID }) else { return }
     switch answer {
-    case .deny: grants.recordDenial(sessionKey: request.caller.key, hostID: profile.id, by: user)
-    case .allowOnce: if !hadLiveWaiters { grants.add(grant(.once), by: user) }
-    case .allowSession: grants.add(grant(.session), by: user)
-    case .allowAlways: grants.add(grant(.always), by: user)
+    case .deny: grants.recordDenial(sessionKey: request.caller.key, hostID: request.hostID, by: user)
+    case .allowOnce: if !hadLiveWaiters { grants.add(approvalGrant(request, scope: .once), by: user) }
+    case .allowSession: grants.add(approvalGrant(request, scope: .session), by: user)
+    case .allowAlways: grants.add(approvalGrant(request, scope: .always), by: user)
     }
   }
 

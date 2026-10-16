@@ -1,11 +1,16 @@
 // 批准面板：非模态浮动 NSPanel，显示哪个 agent、要连哪台主机、为什么、要执行什么。
 // 默认按钮是「拒绝」：回车只会拒绝，绝不会批准；关闭面板也按拒绝处理。
+// 面板出现或内容变化后，批准按钮先禁用一小段时间：避免用户正要点别处时面板恰好弹出 / 换了内容，
+// 一次误点就批准了没看过的命令。「拒绝」始终可点。
 import AppKit
 import AsterCore
 
 /// 一个批准请求的面板。
 @MainActor
 final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NSWindowDelegate {
+  /// 面板出现或内容变化后，批准按钮禁用的时长。
+  static let approvalArmDelay: Duration = .seconds(1)
+
   private let panel: NSPanel
   private let onAnswer: @MainActor (AgentHostApprovalAnswer) -> Void
   private let agentLabel = NSTextField(wrappingLabelWithString: "")
@@ -14,6 +19,10 @@ final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NS
   private let pendingLabel = NSTextField(labelWithString: "")
   private let commandView = NSTextView()
   private var answered = false
+  /// 三个批准按钮（不含拒绝）。
+  private var approveButtons: [NSButton] = []
+  /// 每次重新禁用都加一；旧的启用任务发现代数变了就作废。
+  private var armGeneration = 0
 
   /// 建面板并立即显示（不抢键盘焦点之外的东西：用户正在别处打字时不会被打断）。
   init(request: AgentHostApprovalRequest, onAnswer: @escaping @MainActor (AgentHostApprovalAnswer) -> Void) {
@@ -35,7 +44,10 @@ final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NS
     panel.orderFrontRegardless()
   }
 
-  /// 刷新显示内容（合并的新请求到达时）。
+  /// 批准按钮是否可点（测试用）。
+  var approveButtonsEnabled: Bool { approveButtons.allSatisfy(\.isEnabled) }
+
+  /// 刷新显示内容（相同请求合并到达时），并重新延迟启用批准按钮。
   func update(_ request: AgentHostApprovalRequest, pendingCount: Int) {
     var agent = L("Agent：\(request.caller.displayName)")
     if let pane = request.caller.pane { agent += L("（Pane \(pane)）") }
@@ -45,8 +57,21 @@ final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NS
     let reason = request.reason.flatMap { $0.isEmpty ? nil : $0 } ?? L("（未说明）")
     reasonLabel.stringValue = L("理由：\(reason)")
     commandView.string = request.command ?? L("（只打开 SSH 终端，不执行命令）")
-    pendingLabel.stringValue = pendingCount > 1 ? L("同一会话共有 \(pendingCount) 条请求在等待；批准对这台主机生效。") : ""
+    pendingLabel.stringValue = pendingCount > 1 ? L("这条命令有 \(pendingCount) 个相同的请求在等待；「允许一次」只放行其中一个。") : ""
     pendingLabel.isHidden = pendingCount <= 1
+    armApproveButtons()
+  }
+
+  /// 先禁用批准按钮，到时再启用；期间再次调用会重新计时。
+  private func armApproveButtons() {
+    armGeneration += 1
+    let generation = armGeneration
+    for button in approveButtons { button.isEnabled = false }
+    Task { @MainActor [weak self] in
+      do { try await Task.sleep(for: Self.approvalArmDelay) } catch { return }
+      guard let self, self.armGeneration == generation, !self.answered else { return }
+      for button in self.approveButtons { button.isEnabled = true }
+    }
   }
 
   func close() {
@@ -92,10 +117,11 @@ final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NS
     let deny = button(L("拒绝"), .deny)
     // 回车 = 拒绝：误按回车绝不能变成批准。
     deny.keyEquivalent = "\r"
-    let buttons = NSStackView(views: [
-      deny, NSView(), button(L("允许一次"), .allowOnce), button(L("本会话允许"), .allowSession),
+    approveButtons = [
+      button(L("允许一次"), .allowOnce), button(L("本会话允许"), .allowSession),
       button(L("一直允许此主机"), .allowAlways),
-    ])
+    ]
+    let buttons = NSStackView(views: [deny, NSView()] + approveButtons)
     buttons.orientation = .horizontal
     buttons.spacing = 8
 
@@ -118,8 +144,9 @@ final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NS
     return button
   }
 
+  /// 按钮回调；禁用期内的批准点击（理论上不会送达）再挡一次。
   @objc private func answerClicked(_ sender: NSButton) {
-    guard !answered, let answer = (sender as? AgentHostAnswerButton)?.answer else { return }
+    guard !answered, sender.isEnabled, let answer = (sender as? AgentHostAnswerButton)?.answer else { return }
     answered = true
     onAnswer(answer)
   }

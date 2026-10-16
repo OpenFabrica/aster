@@ -61,24 +61,47 @@ public enum AgentHostCommandFraming {
     return "\u{15}\(setup) true $?; printf '\\074aster:%s:ready\\076\\n' \(nonce)\r"
   }
 
-  /// 把命令放进单引号：`'` 写成 `'\''`；Tab 不能原样敲进行编辑器（会触发补全），
-  /// 改成在引号外用 `$(printf '\011')` 拼回去。换行留在引号里，Shell 会进 PS2 继续读。
+  /// 把命令放进单引号，并保证敲进 PTY 的只有可打印 ASCII 与换行。
+  ///
+  /// - `'` 写成 `'\''`。
+  /// - 其余非可打印 ASCII 字节（Tab、0x80 以上的 UTF-8 字节等）一律移到引号外，用
+  ///   `'"$(printf '\ooo…')"'` 拼回去，连续的字节合成一组。原因：Tab 原样敲进行编辑器会触发补全；
+  ///   远端在 C / POSIX locale 下，bash readline 把 0x80 以上的字节当 Meta 键（如 0xAE 是 M-.，
+  ///   插入上一条命令的最后一个参数），中文、emoji 会变成一串编辑命令而不是文本。
+  /// - `$(…)` 只会去掉结尾换行，而换行从不走这条路径：它留在引号里，Shell 会进 PS2 继续读。
+  ///   eval 因此收到与原命令逐字节相同的文本。
+  /// - 代价：非 ASCII 字节在注入行里膨胀约 4 倍，`validate` 按转义后的长度限制单行。
   static func quoted(_ command: String) -> String {
     var result = "'"
-    for character in command {
-      switch character {
-      case "'": result += "'\\''"
-      case "\t": result += "'\"$(printf '\\011')\"'"
-      default: result.append(character)
+    var pending: [UInt8] = []
+    /// 把攒下的一组特殊字节写成一次 printf 八进制转义。
+    func flush() {
+      guard !pending.isEmpty else { return }
+      let octal = pending.map { "\\" + String(format: "%03o", $0) }.joined()
+      result += "'\"$(printf '\(octal)')\"'"
+      pending.removeAll()
+    }
+    for byte in command.utf8 {
+      if byte == UInt8(ascii: "\n") || (0x20...0x7E).contains(byte) {
+        flush()
+        if byte == UInt8(ascii: "'") {
+          result += "'\\''"
+        } else {
+          result.unicodeScalars.append(Unicode.Scalar(byte))
+        }
+      } else {
+        pending.append(byte)
       }
     }
+    flush()
     return result + "'"
   }
 
   /// 命令的边界校验：非空、总长与单行长度有上限，拒绝 NUL、ESC、CR 等控制字符。
   ///
   /// 控制字符一旦敲进行编辑器就是按键（Ctrl-C、Ctrl-D、Esc 进 vi 模式），不是文本；
-  /// 只放行换行（引号内续行）与 Tab（`quoted` 已转义）。
+  /// 只放行换行（引号内续行）与 Tab（`quoted` 已转义）。单行长度按 `quoted` 转义后真正敲入的
+  /// 字节计算：无行编辑的 sh 受规范模式行缓冲限制，非 ASCII 字符转义后约为原来的 4 倍。
   public static func validate(command: String) throws {
     guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw AsterControlError.invalidParams("command 不能为空")
@@ -86,13 +109,15 @@ public enum AgentHostCommandFraming {
     guard command.utf8.count <= AgentHostLimits.maximumCommandBytes else {
       throw AsterControlError.invalidParams("command 最多 \(AgentHostLimits.maximumCommandBytes) 字节")
     }
-    for line in command.split(separator: "\n", omittingEmptySubsequences: false)
-    where line.utf8.count > AgentHostLimits.maximumCommandLineBytes {
-      throw AsterControlError.invalidParams("command 单行最多 \(AgentHostLimits.maximumCommandLineBytes) 字节")
-    }
     for scalar in command.unicodeScalars where scalar.value < 0x20 || scalar.value == 0x7F {
       if scalar == "\n" || scalar == "\t" { continue }
       throw AsterControlError.invalidParams("command 含控制字符（NUL、ESC、CR 等不可敲入）")
+    }
+    // 按每行转义后的长度计（不含整条命令首尾那一对单引号）：纯 ASCII 行与原来的字节数一致。
+    for line in command.split(separator: "\n", omittingEmptySubsequences: false)
+    where quoted(String(line)).utf8.count - 2 > AgentHostLimits.maximumCommandLineBytes {
+      throw AsterControlError.invalidParams(
+        "command 单行转义后最多 \(AgentHostLimits.maximumCommandLineBytes) 字节（非 ASCII 字符按约 4 倍计）")
     }
   }
 

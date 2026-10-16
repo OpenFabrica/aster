@@ -1,11 +1,12 @@
 // agent 主机访问的批准流程：非模态面板 + 有期限的异步等待。
 // 绝不 runModal / sheet：控制连接上的请求各自挂起等待，主线程照常处理输入与其它请求。
-// 同一（会话、主机）的并发请求合并成一个面板；等待方超时后面板仍保留，迟到的回答照样生效。
+// 只合并内容完全相同的请求（同一会话、主机、目标与命令）；不同请求排队，一次只显示一个面板，
+// 用户看到的永远就是要批准的那一条。等待方超时后面板仍保留，迟到的回答照样生效。
 import AppKit
 import AsterCore
 
 /// 调用方身份（已并入 provider 与 agent session ID 的有效会话键）。
-struct AgentHostResolvedCaller: Equatable, Sendable {
+struct AgentHostResolvedCaller: Hashable, Sendable {
   /// 授权与终端复用的键。
   var key: String
   var session: String
@@ -28,7 +29,8 @@ struct AgentHostResolvedCaller: Equatable, Sendable {
 }
 
 /// 一次批准请求的展示内容。命令原样显示（不脱敏）：用户要看清楚到底会执行什么。
-struct AgentHostApprovalRequest: Equatable, Sendable {
+/// 整个值就是合并键：只有各字段完全相同的请求才共用一个面板。
+struct AgentHostApprovalRequest: Hashable, Sendable {
   var caller: AgentHostResolvedCaller
   var hostID: UUID
   var hostName: String
@@ -36,6 +38,9 @@ struct AgentHostApprovalRequest: Equatable, Sendable {
   var reason: String?
   /// nil 表示 `host.open`（只连接，不执行命令）。
   var command: String?
+  /// 发起时的连接目标指纹。批准落成的授权绑定它，而不是回答时重新解析的目标：
+  /// 面板挂着期间主机地址被改，用户批准的仍是面板上显示的那个目标。
+  var targetFingerprint: String
 }
 
 /// 用户的回答。
@@ -50,11 +55,19 @@ enum AgentHostApprovalAnswer: Equatable, Sendable {
 @MainActor
 protocol AgentHostApprovalPresenting: AnyObject {
   /// 等用户回答；`timeout` 到达返回 nil，面板继续保留。
-  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async -> AgentHostApprovalAnswer?
+  /// 挂起的不同请求已达上限时抛 `limit_exceeded`。
+  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async throws -> AgentHostApprovalAnswer?
   /// 每次用户回答时调用一次：`hadLiveWaiters == false` 表示所有等待方都已超时返回。
   var onAnswer: ((AgentHostApprovalRequest, AgentHostApprovalAnswer, _ hadLiveWaiters: Bool) -> Void)? { get set }
-  /// 关掉某会话 / 主机上所有挂起的面板（主机被删除、App 退出）。
-  func dismissAll(hostID: UUID?)
+  /// 撤掉满足条件的挂起请求（主机被删除或目标变化、开关关闭、App 退出），等待方拿到 nil。
+  func dismiss(where shouldDismiss: (AgentHostApprovalRequest) -> Bool)
+}
+
+extension AgentHostApprovalPresenting {
+  /// 撤掉某台主机（nil 为全部）的挂起请求。
+  func dismissAll(hostID: UUID?) {
+    dismiss { hostID == nil || $0.hostID == hostID }
+  }
 }
 
 /// 面板句柄：协调者只需要更新与关闭。
@@ -72,16 +85,27 @@ final class AgentHostApprovalCoordinator: AgentHostApprovalPresenting {
     AgentHostApprovalRequest, @escaping @MainActor (AgentHostApprovalAnswer) -> Void
   ) -> any AgentHostApprovalPanelHandling
 
+  /// 全局最多挂起的不同请求数：防止 agent 换着命令或会话名刷出一排面板。
+  static let maximumPendingRequests = 4
+
+  private struct Waiter {
+    var id: UUID
+    var continuation: CheckedContinuation<AgentHostApprovalAnswer?, Never>
+  }
+
   private struct Prompt {
-    var request: AgentHostApprovalRequest
+    /// 面板还在排队时为 nil。
     var panel: (any AgentHostApprovalPanelHandling)?
-    var waiters: [UUID: CheckedContinuation<AgentHostApprovalAnswer?, Never>] = [:]
+    /// 按到达顺序排列：「允许一次」只放行最早的一个。
+    var waiters: [Waiter] = []
     var requestCount = 1
   }
 
-  private var prompts: [String: Prompt] = [:]
+  private var prompts: [AgentHostApprovalRequest: Prompt] = [:]
+  /// 排队顺序；只有队首显示面板。
+  private var order: [AgentHostApprovalRequest] = []
   private let makePanel: PanelFactory
-  /// 新面板出现时的提醒（通知 + 请求注意）；测试置空。
+  /// 面板出现时的提醒（通知 + 请求注意）；测试置空。
   var alert: @MainActor (AgentHostApprovalRequest) -> Void
   var onAnswer: ((AgentHostApprovalRequest, AgentHostApprovalAnswer, Bool) -> Void)?
 
@@ -93,62 +117,96 @@ final class AgentHostApprovalCoordinator: AgentHostApprovalPresenting {
     self.alert = alert
   }
 
-  /// 合并键：同一会话对同一主机只弹一个面板。
-  private static func key(_ request: AgentHostApprovalRequest) -> String {
-    "\(request.caller.key)|\(request.hostID.uuidString)"
-  }
-
-  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async -> AgentHostApprovalAnswer? {
-    let key = Self.key(request)
-    if var prompt = prompts[key] {
-      // 合并：面板显示最新一条命令，并注明还有几条在等。
-      prompt.request = request
+  /// 登记请求（相同请求合并，不同请求排队）并有期限地等回答。
+  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async throws -> AgentHostApprovalAnswer? {
+    if var prompt = prompts[request] {
       prompt.requestCount += 1
+      prompts[request] = prompt
       prompt.panel?.update(request, pendingCount: prompt.requestCount)
-      prompts[key] = prompt
     } else {
-      var prompt = Prompt(request: request)
-      prompt.panel = makePanel(request) { [weak self] answer in self?.answer(key: key, with: answer) }
-      prompts[key] = prompt
-      alert(request)
+      guard prompts.count < Self.maximumPendingRequests else {
+        throw AsterControlError(
+          code: .limitExceeded, message: "已有 \(Self.maximumPendingRequests) 个批准请求在等用户回答，先等这些处理完")
+      }
+      prompts[request] = Prompt()
+      order.append(request)
+      presentNextIfIdle()
     }
     let waiterID = UUID()
     return await withTaskCancellationHandler {
       await withCheckedContinuation { (continuation: CheckedContinuation<AgentHostApprovalAnswer?, Never>) in
-        guard prompts[key] != nil else {
+        guard prompts[request] != nil else {
           continuation.resume(returning: nil)
           return
         }
-        prompts[key]?.waiters[waiterID] = continuation
+        prompts[request]?.waiters.append(Waiter(id: waiterID, continuation: continuation))
         Task { @MainActor [weak self] in
           do { try await Task.sleep(for: timeout) } catch {}
-          self?.expire(key: key, waiterID: waiterID)
+          self?.expire(request, waiterID: waiterID)
         }
       }
     } onCancel: {
-      Task { @MainActor [weak self] in self?.expire(key: key, waiterID: waiterID) }
+      Task { @MainActor [weak self] in self?.expire(request, waiterID: waiterID) }
     }
+  }
+
+  /// 挂起的不同请求数（含排队未显示的）。
+  var pendingRequestCount: Int { prompts.count }
+
+  /// 没有面板在显示时，把队首请求的面板弹出来。
+  private func presentNextIfIdle() {
+    guard !order.contains(where: { prompts[$0]?.panel != nil }), let next = order.first,
+      let prompt = prompts[next]
+    else { return }
+    let panel = makePanel(next) { [weak self] answer in self?.answer(next, with: answer) }
+    if prompt.requestCount > 1 { panel.update(next, pendingCount: prompt.requestCount) }
+    prompts[next]?.panel = panel
+    alert(next)
   }
 
   /// 等待方超时或被取消：只撤掉它自己，面板保留。
-  private func expire(key: String, waiterID: UUID) {
-    prompts[key]?.waiters.removeValue(forKey: waiterID)?.resume(returning: nil)
+  private func expire(_ request: AgentHostApprovalRequest, waiterID: UUID) {
+    guard let index = prompts[request]?.waiters.firstIndex(where: { $0.id == waiterID }),
+      let waiter = prompts[request]?.waiters.remove(at: index)
+    else { return }
+    waiter.continuation.resume(returning: nil)
   }
 
-  /// 用户回答：关面板，先让回答生效（授权 / 冷却），再唤醒所有仍在等的请求。
-  private func answer(key: String, with answer: AgentHostApprovalAnswer) {
-    guard let prompt = prompts.removeValue(forKey: key) else { return }
+  /// 用户回答：关面板，先让回答生效（授权 / 冷却），再唤醒等待方，然后显示下一个排队的请求。
+  ///
+  /// 「允许一次」只放行最早的一个等待方：其余相同请求留在队首重新出现，按钮重新延迟启用，
+  /// 用户要为每一次执行单独点头。
+  private func answer(_ request: AgentHostApprovalRequest, with answer: AgentHostApprovalAnswer) {
+    guard var prompt = prompts[request] else { return }
     prompt.panel?.close()
-    onAnswer?(prompt.request, answer, !prompt.waiters.isEmpty)
-    for continuation in prompt.waiters.values { continuation.resume(returning: answer) }
+    prompt.panel = nil
+    if answer == .allowOnce, prompt.waiters.count > 1 {
+      let first = prompt.waiters.removeFirst()
+      prompt.requestCount = prompt.waiters.count
+      prompts[request] = prompt
+      onAnswer?(request, answer, true)
+      first.continuation.resume(returning: answer)
+      presentNextIfIdle()
+      return
+    }
+    prompts.removeValue(forKey: request)
+    order.removeAll { $0 == request }
+    onAnswer?(request, answer, !prompt.waiters.isEmpty)
+    for waiter in prompt.waiters { waiter.continuation.resume(returning: answer) }
+    presentNextIfIdle()
   }
 
-  func dismissAll(hostID: UUID?) {
-    for (key, prompt) in prompts where hostID == nil || prompt.request.hostID == hostID {
-      prompts.removeValue(forKey: key)
+  /// 撤掉满足条件的请求：关面板、唤醒等待方（nil），再显示剩下队列的队首。
+  func dismiss(where shouldDismiss: (AgentHostApprovalRequest) -> Bool) {
+    let matching = order.filter(shouldDismiss)
+    guard !matching.isEmpty else { return }
+    for request in matching {
+      guard let prompt = prompts.removeValue(forKey: request) else { continue }
       prompt.panel?.close()
-      for continuation in prompt.waiters.values { continuation.resume(returning: nil) }
+      for waiter in prompt.waiters { waiter.continuation.resume(returning: nil) }
     }
+    order.removeAll { prompts[$0] == nil }
+    presentNextIfIdle()
   }
 
   /// 默认提醒：系统通知 + Dock 请求注意。通知里的命令先脱敏：通知中心会长期留存历史。

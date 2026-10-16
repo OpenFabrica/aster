@@ -40,9 +40,9 @@ final class FakeShellSurface: AgentHostTerminalSurface {
       return true
     }
     if let nonce = Self.capture(text, #"printf '\\074aster:%s\\076\\n' ([0-9a-f]{12})b; eval"#),
-      let quoted = Self.capture(text, #"eval '((?:[^']|'\\''|'"\$\(printf '\\011'\)"')*)'; printf"#)
+      let quoted = Self.capture(text, #"eval '((?:[^']|'\\''|'"\$\(printf '(?:\\[0-7]{3})+'\)"')*)'; printf"#)
     {
-      let command = quoted.replacingOccurrences(of: "'\\''", with: "'")
+      let command = Self.unquote(quoted)
       commands.append(command)
       screen += "\n<aster:\(nonce)b>\n"
       switch behavior(command) {
@@ -71,6 +71,27 @@ final class FakeShellSurface: AgentHostTerminalSurface {
   func terminate() {
     terminated = true
     isProcessRunning = false
+  }
+
+  /// 还原 `AgentHostCommandFraming.quoted` 的引号内文本：`'\''` 回到 `'`，
+  /// `'"$(printf '\ooo…')"'` 组按八进制解回原始字节。
+  private static func unquote(_ quoted: String) -> String {
+    let pattern = #"'\\''|'"\$\(printf '((?:\\[0-7]{3})+)'\)"'"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return quoted }
+    var bytes: [UInt8] = []
+    var cursor = quoted.startIndex
+    for match in regex.matches(in: quoted, range: NSRange(quoted.startIndex..., in: quoted)) {
+      guard let range = Range(match.range, in: quoted) else { continue }
+      bytes += Array(quoted[cursor..<range.lowerBound].utf8)
+      if let octal = Range(match.range(at: 1), in: quoted) {
+        bytes += quoted[octal].split(separator: "\\").compactMap { UInt8($0, radix: 8) }
+      } else {
+        bytes.append(UInt8(ascii: "'"))
+      }
+      cursor = range.upperBound
+    }
+    bytes += Array(quoted[cursor...].utf8)
+    return String(decoding: bytes, as: UTF8.self)
   }
 
   /// 正则第一个捕获组。
@@ -103,10 +124,15 @@ final class FakeApprovals: AgentHostApprovalPresenting {
   var onAnswer: ((AgentHostApprovalRequest, AgentHostApprovalAnswer, Bool) -> Void)?
   /// 预设回答；nil 表示不回答（等超时）。
   var nextAnswer: AgentHostApprovalAnswer?
+  /// 回答前执行（模拟用户在面板挂着时改了主机等）。
+  var beforeAnswer: () -> Void = {}
   private(set) var requests: [AgentHostApprovalRequest] = []
+  /// 被 `dismiss` 撤掉的请求。
+  private(set) var dismissed: [AgentHostApprovalRequest] = []
 
-  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async -> AgentHostApprovalAnswer? {
+  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async throws -> AgentHostApprovalAnswer? {
     requests.append(request)
+    beforeAnswer()
     guard let answer = nextAnswer else {
       do { try await Task.sleep(for: timeout) } catch {}
       return nil
@@ -120,7 +146,10 @@ final class FakeApprovals: AgentHostApprovalPresenting {
     onAnswer?(request, answer, false)
   }
 
-  func dismissAll(hostID: UUID?) {}
+  /// 记录被撤掉的请求（只看已登记过的）。
+  func dismiss(where shouldDismiss: (AgentHostApprovalRequest) -> Bool) {
+    dismissed += requests.filter(shouldDismiss)
+  }
 }
 
 /// 内存审计。
@@ -150,6 +179,8 @@ struct AgentHostFixture {
     var presenters: [UUID: FakeTerminalPresenter] = [:]
     var configure: (FakeShellSurface) -> Void = { _ in }
     var enabled = true
+    /// 当前主机列表；测试可改地址或删主机。
+    var hosts: [SSHHostProfile] = []
   }
 
   init(hostNames: [String] = ["prod-db"], configure: @escaping (FakeShellSurface) -> Void = { _ in }) {
@@ -171,13 +202,13 @@ struct AgentHostFixture {
         sessionKey: spec.caller.key, caller: spec.caller, surface: surface, timing: timing)
       return (terminal, presenter)
     }
-    let allHosts = hosts
+    box.hosts = hosts
     let grants = AgentHostGrantStore(
       persistence: InMemoryAgentHostGrantPersistence(), audit: audit,
-      hostLookup: { id in allHosts.first { $0.id == id }.map { .init(id: id.uuidString, name: $0.name, target: $0.host) } })
+      hostLookup: { id in box.hosts.first { $0.id == id }.map { .init(id: id.uuidString, name: $0.name, target: $0.host) } })
     service = AgentHostService(
       dependencies: .init(
-        hosts: { allHosts }, isEnabled: { box.enabled }, grants: grants, approvals: approvals, registry: registry,
+        hosts: { box.hosts }, isEnabled: { box.enabled }, grants: grants, approvals: approvals, registry: registry,
         audit: audit, user: AgentHostLocalUser(account: "tester", name: "Tester"), approvalTimeout: .milliseconds(200)))
     let bridge = AsterControlBridge(socketPath: "/tmp/test.sock", binaryPath: "/tmp/aster-cli")
     dispatcher = AsterControlDispatcher(bridge: bridge, version: "9.9.9") {
@@ -197,5 +228,14 @@ struct AgentHostFixture {
   ) -> JSONValue {
     ["host": .string(host), "command": .string(command), "agent": ["session": .string(session), "client": "test"],
      "timeout_ms": .number(Double(timeoutMs))]
+  }
+}
+
+/// 轮询等条件成立（最多 `timeout`）。测试并行时主线程可能很忙，固定时长的睡眠不可靠。
+@MainActor
+func pollUntil(timeout: Duration = .seconds(3), _ condition: () -> Bool) async {
+  let deadline = ContinuousClock.now + timeout
+  while !condition(), ContinuousClock.now < deadline {
+    do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
   }
 }

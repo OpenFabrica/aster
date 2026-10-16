@@ -43,7 +43,10 @@ func agentHostFramingAgainstRealGhosttyShell(shell: String) async throws {
   // zsh 指向空的 ZDOTDIR，不读用户 rc，也就没有 HISTFILE。环境只在启动 Shell 时读取一次。
   let zdotdir = FileManager.default.temporaryDirectory.appendingPathComponent("aster-e2e-zdotdir-\(UUID().uuidString)")
   try FileManager.default.createDirectory(at: zdotdir, withIntermediateDirectories: true)
-  let previous = ["HISTCONTROL", "HISTFILE", "ZDOTDIR"].map { ($0, ProcessInfo.processInfo.environment[$0]) }
+  // LC_ALL=C 复现远端 C locale：bash readline 此时把 0x80 以上的字节当 Meta 键，
+  // 非 ASCII 命令必须以转义形式注入才能原样到达 Shell。
+  let previous = ["HISTCONTROL", "HISTFILE", "ZDOTDIR", "LC_ALL"].map { ($0, ProcessInfo.processInfo.environment[$0]) }
+  setenv("LC_ALL", "C", 1)
   setenv("HISTCONTROL", "ignorespace", 1)
   setenv("HISTFILE", "/dev/null", 1)
   setenv("ZDOTDIR", zdotdir.path, 1)
@@ -98,6 +101,11 @@ func agentHostFramingAgainstRealGhosttyShell(shell: String) async throws {
 
   let multiline = try await run("echo first\necho second")
   #expect(multiline.output == "first\nsecond")
+
+  // 中文、®（含 0xAE，C locale 下的 M-.）、ˈ（含 0x88）与 emoji 原样到达并原样输出。
+  let utf8 = try await run("printf '%s\\n' '中文 ® ˈ é 🚀'")
+  #expect(utf8.status == .completed)
+  #expect(utf8.output == "中文 ® ˈ é 🚀", "\(shell): \(utf8.output.debugDescription)")
 
   _ = try await run("cd /tmp && export ASTER_E2E=kept")
   let state = try await run("printf '%s %s' \"$(pwd -P)\" \"$ASTER_E2E\"")

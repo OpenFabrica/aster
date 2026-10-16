@@ -87,7 +87,7 @@ struct AgentHostControlCommandsTests {
     #expect(await fixture.call("host.exec", AgentHostFixture.exec("true")).error == nil)
     fixture.approvals.nextAnswer = nil
     #expect(await fixture.call("host.exec", AgentHostFixture.exec("true", session: "other")).error == nil)
-    #expect(fixture.service.grants.alwaysGrantedHostIDs.count == 1)
+    #expect(fixture.service.alwaysGrantedHostIDs().count == 1)
     let grant = try #require(fixture.service.grants.grants.first)
     #expect(fixture.service.grants.revoke(grantID: grant.grantID, by: AgentHostLocalUser(account: "tester", name: "T")))
     let revoked = try #require(fixture.audit.records.last)

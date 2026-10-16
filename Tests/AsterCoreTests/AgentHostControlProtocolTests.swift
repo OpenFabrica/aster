@@ -54,7 +54,8 @@ struct AgentHostControlProtocolTests {
         == #"{\#(agent),"command_id":"c-0123456789ab"}"#)
     #expect(try json(HostCloseParams(host: "web", agent: caller)) == #"{\#(agent),"host":"web"}"#)
     #expect(try json(HostOpenParams(host: "web", agent: caller, timeoutMs: 9)) == #"{\#(agent),"host":"web","timeout_ms":9}"#)
-    #expect(try json(HostTerminalsParams()) == "{}")
+    #expect(try json(HostTerminalsParams(agent: caller)) == #"{\#(agent)}"#)
+    #expect(throws: (any Error).self) { try decode(HostTerminalsParams.self, "{}") }
     #expect(try decode(HostReadParams.self, #"{"host":"web","agent":{"session":"s"},"lines":3}"#).lines == 3)
   }
 
@@ -78,11 +79,11 @@ struct AgentHostControlProtocolTests {
   @Test("终端列表与读屏结果键名")
   func terminalAndReadResultKeys() throws {
     let info = HostTerminalInfo(
-      terminalID: "t-1", hostID: "h", hostName: "web", target: "u@web:22", session: "mcp:x", state: .needsInput,
+      terminalID: "t-1", hostID: "h", hostName: "web", target: "u@web:22", state: .needsInput,
       runningCommandID: "c-1")
     #expect(
       try json(HostTerminalsResult(terminals: [info]))
-        == #"{"terminals":[{"host_id":"h","host_name":"web","running_command_id":"c-1","session":"mcp:x","#
+        == #"{"terminals":[{"host_id":"h","host_name":"web","running_command_id":"c-1","#
         + #""state":"needs_input","target":"u@web:22","terminal_id":"t-1"}]}"#)
     #expect(try json(HostReadResult(terminalID: "t-1", text: "$ ")) == #"{"terminal_id":"t-1","text":"$ "}"#)
   }

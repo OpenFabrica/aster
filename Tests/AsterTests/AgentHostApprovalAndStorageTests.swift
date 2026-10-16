@@ -1,4 +1,5 @@
-// 批准协调（合并、超时保留面板、迟到回答、取消）、审计日志落盘与授权持久化。
+// 批准协调（相同请求合并、超时保留面板、迟到回答、取消）、审计日志落盘与授权持久化。
+// 不同请求排队、「允许一次」与全局上限见 AgentHostApprovalQueueTests。
 import AsterCore
 import Foundation
 import Testing
@@ -7,7 +8,7 @@ import Testing
 
 /// 不建窗口的批准面板：记录更新，测试直接调回答回调。
 @MainActor
-private final class FakeApprovalPanel: AgentHostApprovalPanelHandling {
+final class FakeApprovalPanel: AgentHostApprovalPanelHandling {
   let answer: @MainActor (AgentHostApprovalAnswer) -> Void
   private(set) var pendingCount = 1
   private(set) var closed = false
@@ -22,11 +23,11 @@ struct AgentHostApprovalAndStorageTests {
   private func request(session: String = "s1", command: String = "ls") -> AgentHostApprovalRequest {
     AgentHostApprovalRequest(
       caller: AgentHostResolvedCaller(key: session, session: session), hostID: hostID, hostName: "prod",
-      target: "u@h:22", reason: nil, command: command)
+      target: "u@h:22", reason: nil, command: command, targetFingerprint: "f")
   }
   private let hostID = UUID()
 
-  @Test("同一会话同一主机的并发请求合并成一个面板；回答唤醒全部等待方")
+  @Test("同一会话、主机与命令的并发请求合并成一个面板；回答唤醒全部等待方")
   func coalesces() async throws {
     var panels: [FakeApprovalPanel] = []
     let coordinator = AgentHostApprovalCoordinator(makePanel: { _, answer in
@@ -37,13 +38,13 @@ struct AgentHostApprovalAndStorageTests {
     var answers: [(AgentHostApprovalAnswer, Bool)] = []
     coordinator.onAnswer = { _, answer, live in answers.append((answer, live)) }
     async let first = coordinator.requestApproval(request(command: "a"), timeout: .seconds(5))
-    async let second = coordinator.requestApproval(request(command: "b"), timeout: .seconds(5))
-    try await Task.sleep(for: .milliseconds(50))
+    async let second = coordinator.requestApproval(request(command: "a"), timeout: .seconds(5))
+    await pollUntil { panels.first?.pendingCount == 2 }
     #expect(panels.count == 1)
     #expect(panels[0].pendingCount == 2)
     panels[0].answer(.allowSession)
-    #expect(await first == .allowSession)
-    #expect(await second == .allowSession)
+    #expect(try await first == .allowSession)
+    #expect(try await second == .allowSession)
     #expect(panels[0].closed)
     #expect(answers.count == 1 && answers[0].1)
   }
@@ -58,26 +59,27 @@ struct AgentHostApprovalAndStorageTests {
     }, alert: { _ in })
     var late: Bool?
     coordinator.onAnswer = { _, _, live in late = !live }
-    #expect(await coordinator.requestApproval(request(), timeout: .milliseconds(30)) == nil)
+    #expect(try await coordinator.requestApproval(request(), timeout: .milliseconds(30)) == nil)
     #expect(panels.first?.closed == false)
     panels[0].answer(.allowOnce)
     #expect(late == true)
     // 新请求得到新面板。
-    _ = await coordinator.requestApproval(request(), timeout: .milliseconds(10))
+    _ = try await coordinator.requestApproval(request(), timeout: .milliseconds(10))
     #expect(panels.count == 2)
   }
 
   @Test("被取消的等待方立即返回；dismissAll 关闭面板并唤醒等待方")
   func cancellationAndDismiss() async throws {
     let coordinator = AgentHostApprovalCoordinator(makePanel: { _, answer in FakeApprovalPanel(answer: answer) }, alert: { _ in })
-    let task = Task { await coordinator.requestApproval(request(), timeout: .seconds(30)) }
-    try await Task.sleep(for: .milliseconds(30))
+    let task = Task { try await coordinator.requestApproval(request(), timeout: .seconds(30)) }
+    await pollUntil { coordinator.pendingRequestCount == 1 }
     task.cancel()
-    #expect(await task.value == nil)
-    let waiting = Task { await coordinator.requestApproval(request(session: "s2"), timeout: .seconds(30)) }
-    try await Task.sleep(for: .milliseconds(30))
+    #expect(try await task.value == nil)
+    let waiting = Task { try await coordinator.requestApproval(request(session: "s2"), timeout: .seconds(30)) }
+    await pollUntil { coordinator.pendingRequestCount == 2 }
     coordinator.dismissAll(hostID: hostID)
-    #expect(await waiting.value == nil)
+    #expect(try await waiting.value == nil)
+    #expect(coordinator.pendingRequestCount == 0)
   }
 
   @Test("审计日志：按月 JSONL，目录 0700、文件 0600，新到旧分页")
@@ -122,11 +124,30 @@ struct AgentHostApprovalAndStorageTests {
     #expect(try persistence.load().map(\.grantID) == [grant.grantID])
     let reloaded = AgentHostGrantStore(persistence: persistence, audit: audit, hostLookup: { _ in nil })
     await reloaded.loadIfNeeded()
-    #expect(reloaded.alwaysGrantedHostIDs == [hostID])
+    #expect(reloaded.alwaysGrantedHostIDs(currentFingerprints: [hostID: "f"]) == [hostID])
+    // 目标已变的主机不再报 always。
+    #expect(reloaded.alwaysGrantedHostIDs(currentFingerprints: [hostID: "moved"]).isEmpty)
     reloaded.removeGrants(forHost: hostID, hostName: "prod")
     try await Task.sleep(for: .milliseconds(100))
     #expect(try persistence.load().isEmpty)
     #expect(audit.actions == [.grantCreated, .grantCreated, .grantInvalidated])
     #expect(audit.records.last?.actor.kind == "system")
   }
+
+  @Test("钥匙串条目 ACL 不可信：当作没有 always 授权，写作废审计，不删条目")
+  func untrustedKeychainItemIgnored() async {
+    let audit = MemoryAuditLog()
+    let store = AgentHostGrantStore(persistence: UntrustedGrantPersistence(), audit: audit, hostLookup: { _ in nil })
+    await store.loadIfNeeded()
+    #expect(store.grants.isEmpty)
+    #expect(audit.actions == [.grantInvalidated])
+    #expect(audit.records.first?.actor.kind == "system")
+    #expect(audit.records.first?.changes?.first?.after == "ignored")
+  }
+}
+
+/// 模拟被预埋的钥匙串条目：读取总是报 ACL 不可信。
+private struct UntrustedGrantPersistence: AgentHostGrantPersisting {
+  func load() throws -> [AgentHostGrant] { throw AgentHostGrantKeychainError.untrustedAccess("decrypt 信任任何 App") }
+  func save(_ grants: [AgentHostGrant]) throws {}
 }

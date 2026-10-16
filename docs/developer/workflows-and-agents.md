@@ -210,7 +210,7 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
 | `host.wait` | 继续等未结束的命令；只有发起会话能等 |
 | `host.read` | 读该主机终端的活动屏幕（≤500 行） |
 | `host.interrupt` / `host.close` | 对运行中的命令发 Ctrl-C / 关闭终端 |
-| `host.terminals` | 列出 agent 终端；带 `agent` 时只列本会话的 |
+| `host.terminals` | 列出调用方本会话的 agent 终端（`agent` 必填，结果不含会话键） |
 
 - 结果状态 `status`：`completed`（带 `exit_code`）、`running`、`needs_input`、`interrupted`、`ended`。`running` 与
   `needs_input` 不是错误：命令仍在终端里，用 `host.wait` 继续；sudo 口令之类只能由用户在浮动终端里输入，

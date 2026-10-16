@@ -1999,7 +1999,7 @@
 "允许这个 agent 在下面的主机上执行命令吗？" = "Allow this agent to run commands on the host below?";
 "关闭终端" = "Close Terminal";
 "参数无效" = "Invalid parameters";
-"同一会话共有 %@ 条请求在等待；批准对这台主机生效。" = "%@ requests are waiting in this session; your approval applies to this host.";
+"这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ identical requests are waiting for this command; Allow Once lets only one of them run.";
 "命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "The command runs in a floating terminal. You can take over, interrupt, or pause the agent at any time.";
 "已把 Aster 主机访问注册到 %@。" = "Aster host access was registered with %@.";
 "已撤销 %@ 条授权" = "Revoked %@ grants";

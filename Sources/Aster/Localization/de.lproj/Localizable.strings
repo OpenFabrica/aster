@@ -1999,7 +1999,7 @@
 "允许这个 agent 在下面的主机上执行命令吗？" = "Soll dieser Agent Befehle auf dem folgenden Host ausführen dürfen?";
 "关闭终端" = "Terminal schließen";
 "参数无效" = "Ungültige Parameter";
-"同一会话共有 %@ 条请求在等待；批准对这台主机生效。" = "In dieser Sitzung warten %@ Anfragen; die Freigabe gilt für diesen Host.";
+"这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ identische Anfragen warten auf diesen Befehl; „Einmal erlauben“ lässt nur eine davon ausführen.";
 "命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "Der Befehl wird in einem schwebenden Terminal ausgeführt. Sie können jederzeit übernehmen, abbrechen oder den Agent pausieren.";
 "已把 Aster 主机访问注册到 %@。" = "Der Aster-Host-Zugriff wurde bei %@ registriert.";
 "已撤销 %@ 条授权" = "%@ Freigaben widerrufen";

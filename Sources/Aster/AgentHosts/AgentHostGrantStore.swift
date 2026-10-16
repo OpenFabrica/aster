@@ -27,6 +27,8 @@ final class AgentHostGrantStore {
   private let saveQueue = DispatchQueue(label: "io.aster.agent-hosts.grants", qos: .utility)
   /// 授权集合变化（设置页刷新）。
   var onChange: (() -> Void)?
+  /// 用户撤销了授权（单条或全部）；服务据此关掉失去授权的终端。
+  var onRevoked: (([AgentHostGrant]) -> Void)?
 
   init(
     persistence: any AgentHostGrantPersisting, audit: any AgentHostAuditWriting,
@@ -40,10 +42,16 @@ final class AgentHostGrantStore {
 
   var grants: [AgentHostGrant] { book.grants }
 
-  /// 有 always 授权的主机（`host.list` 的 `agentAccess` 字段）。
-  var alwaysGrantedHostIDs: Set<UUID> { Set(book.grants.filter { $0.scope == .always }.map(\.hostID)) }
+  /// 有 always 授权、且授权指纹与主机当前目标一致的主机（`host.list` 的 `agentAccess` 字段）。
+  /// 目标改过的主机，旧授权下次判断时就会作废，这里不能再报成 `always`。
+  func alwaysGrantedHostIDs(currentFingerprints: [UUID: String]) -> Set<UUID> {
+    Set(
+      book.grants.filter { $0.scope == .always && currentFingerprints[$0.hostID] == $0.targetFingerprint }
+        .map(\.hostID))
+  }
 
   /// 在后台读一次钥匙串；读失败按「没有 always 授权」处理（只会多问一次，不会多放行）。
+  /// 条目 ACL 不可信（疑似被预埋）时同样不加载，另记一条审计，条目保留给用户排查。
   func loadIfNeeded() async {
     if loadTask == nil {
       let persistence = persistence
@@ -56,6 +64,13 @@ final class AgentHostGrantStore {
         case .success(let grants):
           for grant in grants where grant.scope == .always { self.book.add(grant) }
           self.onChange?()
+        case .failure(AgentHostGrantKeychainError.untrustedAccess(let reason)):
+          DiagnosticsCenter.shared.record(
+            "agent_hosts.grants_untrusted", level: .error, category: .storage, attributes: ["reason": reason])
+          self.audit.append(
+            AgentHostAuditRecord(
+              time: self.now(), action: .grantInvalidated, actor: .system,
+              changes: [.init(field: "alwaysGrantsKeychainItem", before: "untrusted: \(reason)", after: "ignored")]))
         case .failure(let error):
           DiagnosticsCenter.shared.record(
             "agent_hosts.grants_load_failed", level: .error, category: .storage, error: error)
@@ -65,10 +80,13 @@ final class AgentHostGrantStore {
     await loadTask?.value
   }
 
-  /// 判断一次执行能否放行；作废与过期的授权顺带写审计并落盘。
-  func evaluate(hostID: UUID, sessionKey: String, fingerprint: String) async -> AgentHostGrantBook.Decision {
+  /// 判断一次执行能否放行（`command` 为 nil 表示 `host.open`）；作废与过期的授权顺带写审计并落盘。
+  func evaluate(
+    hostID: UUID, sessionKey: String, fingerprint: String, command: String?
+  ) async -> AgentHostGrantBook.Decision {
     await loadIfNeeded()
-    let evaluation = book.evaluate(hostID: hostID, sessionKey: sessionKey, fingerprint: fingerprint, now: now())
+    let evaluation = book.evaluate(
+      hostID: hostID, sessionKey: sessionKey, fingerprint: fingerprint, command: command, now: now())
     for grant in evaluation.invalidated {
       record(.grantInvalidated, grant: grant, actor: .system, changes: deletionChanges(grant))
     }
@@ -90,7 +108,28 @@ final class AgentHostGrantStore {
     changed(touchesAlways: grant.scope == .always)
   }
 
-  /// 用户拒绝：开始 10 分钟冷却，写审计。
+  /// 退还一条已消耗但命令没敲进终端的 once 授权。不写审计：它从未生效，只是撤销那次消耗。
+  func restore(_ grant: AgentHostGrant) {
+    book.restore(grant)
+    onChange?()
+  }
+
+  /// 批准等待期间主机的连接目标变了或主机被删（`currentFingerprint` 为 nil）：
+  /// 作废这台主机上与当前目标不符的授权；这次批准没有落成授权（当场「允许一次」）时，
+  /// 把 `approval` 本身记一条作废审计，保证每一次被作废的批准都有记录。
+  func invalidateApproval(_ approval: AgentHostGrant, currentFingerprint: String?) {
+    var removed = book.invalidate(hostID: approval.hostID, keeping: currentFingerprint)
+    let touchesStore = !removed.isEmpty
+    if !removed.contains(where: { $0.scope == approval.scope && $0.sessionKey == approval.sessionKey }) {
+      removed.append(approval)
+    }
+    for grant in removed {
+      record(.grantInvalidated, grant: grant, actor: .system, changes: deletionChanges(grant))
+    }
+    if touchesStore { changed(touchesAlways: true) }
+  }
+
+  /// 用户拒绝：这台主机开始 10 分钟冷却（对所有会话），写审计。
   func recordDenial(sessionKey: String, hostID: UUID, by user: AgentHostLocalUser) {
     let time = now()
     book.recordDenial(sessionKey: sessionKey, hostID: hostID, now: time)
@@ -113,6 +152,7 @@ final class AgentHostGrantStore {
     record(.grantRevoked, grant: grant, actor: .user(account: user.account, name: user.name),
       changes: deletionChanges(grant))
     changed(touchesAlways: grant.scope == .always)
+    onRevoked?([grant])
     return true
   }
 
@@ -124,7 +164,10 @@ final class AgentHostGrantStore {
       record(.grantRevoked, grant: grant, actor: .user(account: user.account, name: user.name),
         changes: deletionChanges(grant))
     }
-    if !removed.isEmpty { changed(touchesAlways: true) }
+    if !removed.isEmpty {
+      changed(touchesAlways: true)
+      onRevoked?(removed)
+    }
     return removed.count
   }
 

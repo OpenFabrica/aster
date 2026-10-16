@@ -244,13 +244,14 @@ public struct HostCloseParams: Codable, Equatable, Sendable, AsterControlValidat
   }
 }
 
-/// `host.terminals`：列出 agent 终端；带 `agent` 时只列本会话的。
+/// `host.terminals`：列出调用方本会话的 agent 终端。`agent` 必填：不提供跨会话的全量列表，
+/// 否则任何能连控制 socket 的进程都能枚举出别的会话及其终端。
 public struct HostTerminalsParams: Codable, Equatable, Sendable, AsterControlValidatable {
-  public var agent: AgentHostCaller?
+  public var agent: AgentHostCaller
 
-  public init(agent: AgentHostCaller? = nil) { self.agent = agent }
+  public init(agent: AgentHostCaller) { self.agent = agent }
 
-  public func validate() throws { try agent?.validate() }
+  public func validate() throws { try agent.validate() }
 }
 
 // MARK: - 结果
@@ -317,18 +318,18 @@ public enum HostTerminalState: String, Codable, CaseIterable, Sendable {
   case ended
 }
 
-/// 一个 agent 终端的投影。`session` 是有效会话键（已并入 provider 与 agent session ID）。
+/// 一个 agent 终端的投影。刻意不含会话键：会话键是调用方自报的授权凭据，
+/// 回显出去就能被别的进程拿来冒充该会话（复用它的「本会话允许」与终端）。
 public struct HostTerminalInfo: Codable, Equatable, Sendable {
   public var terminalID: String
   public var hostID: String
   public var hostName: String
   public var target: String
-  public var session: String
   public var state: HostTerminalState
   public var runningCommandID: String?
 
   private enum CodingKeys: String, CodingKey {
-    case target, session, state
+    case target, state
     case terminalID = "terminal_id"
     case hostID = "host_id"
     case hostName = "host_name"
@@ -336,14 +337,13 @@ public struct HostTerminalInfo: Codable, Equatable, Sendable {
   }
 
   public init(
-    terminalID: String, hostID: String, hostName: String, target: String, session: String,
+    terminalID: String, hostID: String, hostName: String, target: String,
     state: HostTerminalState, runningCommandID: String? = nil
   ) {
     self.terminalID = terminalID
     self.hostID = hostID
     self.hostName = hostName
     self.target = target
-    self.session = session
     self.state = state
     self.runningCommandID = runningCommandID
   }

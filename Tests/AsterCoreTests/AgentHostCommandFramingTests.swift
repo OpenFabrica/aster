@@ -22,6 +22,24 @@ private func runInShell(_ shell: String, _ line: String) throws -> String {
   return String(decoding: data, as: UTF8.self)
 }
 
+/// 用 C locale 的 Shell 执行 `printf %s <quoted 词>`，返回 stdout 原始字节：验证转义后逐字节还原。
+private func shellBytes(_ shell: String, quotedWord: String) throws -> Data {
+  let process = Process()
+  process.executableURL = URL(fileURLWithPath: shell)
+  process.arguments = ["-c", "printf %s " + quotedWord]
+  process.environment = ["LC_ALL": "C", "PATH": "/usr/bin:/bin"]
+  let output = Pipe()
+  process.standardOutput = output
+  process.standardError = FileHandle.nullDevice
+  try process.run()
+  let data = output.fileHandleForReading.readDataToEndOfFile()
+  process.waitUntilExit()
+  return data
+}
+
+/// 非 ASCII 用例：中文、emoji、含 0x88（ˈ = CB 88）与 0xAE（® = C2 AE）字节的字符，混入单引号与 Tab。
+private let nonASCIICases = ["中文", "部署 🚀 完成", "ˈ®", "it's 中'文'", "a\t中\tb", "行一 é\n行二 ü"]
+
 private let nonce = "0123456789ab"
 private let shells = ["/bin/sh", "/bin/bash", "/bin/zsh"].filter { FileManager.default.isExecutableFile(atPath: $0) }
 
@@ -157,5 +175,44 @@ struct AgentHostCommandFramingTests {
       try AgentHostCommandFraming.validate(command: String(repeating: "x", count: AgentHostLimits.maximumCommandLineBytes + 1))
     }
     #expect(throws: Never.self) { try AgentHostCommandFraming.validate(command: "echo a\n\techo b") }
+  }
+
+  @Test("非 ASCII 字节与 Tab 移到引号外按八进制转义：注入行只剩可打印 ASCII 与换行")
+  func nonASCIIEscapedToPrintableASCII() {
+    #expect(Array("ˈ".utf8).contains(0x88))
+    #expect(Array("®".utf8).contains(0xAE))
+    for command in nonASCIICases {
+      let line = AgentHostCommandFraming.commandLine(command: command, nonce: nonce)
+      let stray = line.unicodeScalars.filter { !(0x20...0x7E).contains($0.value) && !["\u{15}", "\n", "\r"].contains($0) }
+      #expect(stray.isEmpty, "\(command.debugDescription) 注入行含 \(stray.map { String($0.value, radix: 16) })")
+    }
+    #expect(AgentHostCommandFraming.quoted("中") == #"''"$(printf '\344\270\255')"''"#)
+    #expect(AgentHostCommandFraming.quoted("a\tb") == #"'a'"$(printf '\011')"'b'"#)
+  }
+
+  @Test("转义后的词在 C locale Shell 里逐字节还原原命令", arguments: shells)
+  func nonASCIIRoundTripsBytes(shell: String) throws {
+    for command in nonASCIICases {
+      let bytes = try shellBytes(shell, quotedWord: AgentHostCommandFraming.quoted(command))
+      #expect(bytes == Data(command.utf8), "\(shell): \(command.debugDescription)")
+    }
+  }
+
+  @Test("非 ASCII 命令经 eval 执行后输出正确，标记照常解析", arguments: shells)
+  func nonASCIIExecutesWithMarkers(shell: String) throws {
+    for text in nonASCIICases where !text.contains("'") {
+      let command = "printf '%s' '\(text)'"
+      let output = try runInShell(shell, AgentHostCommandFraming.commandLine(command: command, nonce: nonce))
+      #expect(AgentHostCommandFraming.parse(output, nonce: nonce) == .completed(exitCode: 0, output: text, beginSeen: true), "\(shell): \(command)")
+    }
+    let quoted = try runInShell(shell, AgentHostCommandFraming.commandLine(command: "printf '%s' \"it's 中文 ®\"", nonce: nonce))
+    #expect(AgentHostCommandFraming.parse(quoted, nonce: nonce) == .completed(exitCode: 0, output: "it's 中文 ®", beginSeen: true))
+  }
+
+  @Test("命令校验：单行长度按转义后计算，非 ASCII 约 4 倍")
+  func validationCountsEscapedLength() {
+    let limit = AgentHostLimits.maximumCommandLineBytes
+    #expect(throws: Never.self) { try AgentHostCommandFraming.validate(command: String(repeating: "中", count: limit / 20)) }
+    #expect(throws: AsterControlError.self) { try AgentHostCommandFraming.validate(command: String(repeating: "中", count: limit / 4)) }
   }
 }
