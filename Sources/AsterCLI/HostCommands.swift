@@ -10,6 +10,19 @@ enum HostCommands {
   static let usage = """
     已保存主机：
       host list [--json]
+
+    agent 远程执行（在已保存主机上的持久 Shell 里执行；首次访问需用户在 Aster 里批准）：
+      host exec <host> [--session K] [--reason R] [--timeout S] [--max-output N] [--json] -- <command…>
+      host wait <command_id> [--timeout S] [--json]
+      host read <host> [--lines N]
+      host interrupt <host|command_id>
+      host close <host>
+      host open <host> [--timeout S]
+      host terminals [--json]
+      `--` 之后的词以单个空格拼接；引号与转义由调用方的 Shell 处理，单个词原样传递。
+      会话键：--session > $ASTER_AGENT_SESSION > pane:$ASTER_PANE_ID > cli:default。
+      exec/wait 退出码：完成时为远端退出码；未完成（running/needs_input/…）为 75，
+      stderr 输出一行 {"status","command_id","prompt"}，随后用 host wait 继续。
     """
 
   /// 判断这组 argv 是否属于本模块。返回 false 表示交回其它解析器。
