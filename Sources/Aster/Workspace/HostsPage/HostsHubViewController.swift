@@ -56,7 +56,9 @@ final class HostsHubViewController: NSViewController {
 
   /// 生产环境的子页工厂。各子页实现落地后在这里登记。
   static func defaultFactories() -> [HostsHubSection: () -> NSViewController] {
-    [:]
+    [
+      .knownHosts: { KnownHostsPageViewController() },
+    ]
   }
 
   override func loadView() {
