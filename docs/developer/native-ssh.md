@@ -47,6 +47,34 @@
 - App 退出时发 `shutdown`，然后删除目录。broker 读到 stdin EOF（App 崩溃）时也会断开全部连接并退出。
 - **channel 生命周期是硬约束**：client 进程一死，broker 立即对它的 channel 发 EOF 和 close，远端 pty 收到 SIGHUP，`aster-session terminal attach` 在 2 秒内退出并释放写租约。原来 ControlMaster 方案有滞留 62 秒的问题，共享连接不能再引入它。
 
+## client 认证与威胁模型
+
+broker socket 位于 0700 目录，但同一用户的任何进程都能连上它。socket 路径还写在 Pane 子进程的 argv 里，`ps` 就能看到。不加限制时，一个 coding agent 可以直接跑 `aster-ssh client --broker … --host-id …`，绕过 App 的批准和审计，用已保存主机的钥匙串凭证连到远端。
+
+启动票据（契约见 `PROTOCOL.md` §3、§4.2）关掉这条路：
+
+1. `SSHBrokerSupervisor` 每拉起一个 broker 实例，就由 `NativeSSHTicketIssuer` 生成一把 32 字节密钥，作为第一条控制消息 `tickets.key` 经 broker 的私有 stdin 下发。密钥不进 argv、环境变量和文件。broker 重启时换新密钥。App 关闭 broker 时作废密钥。
+2. App 每拉起一个 `aster-ssh client`，就现签一张一次性票据（120 秒有效），经环境变量 `ASTER_SSH_TICKET` 交给它。`NativeSSHTicketing` 只给「可执行文件名是 aster-ssh，且第一个参数是 client」的进程注入，并总是先去掉继承来的同名变量。
+3. client 读出票据后立刻把它从自己的环境里抹掉，放进 OPEN。broker 先验票再做别的事：HMAC、到期时间、nonce 防重放。
+
+注入点（新增 `aster-ssh client` 启动点时必须接上，否则会稳定失败，这是安全的失败方式）：
+
+| 启动点 | 位置 | 签票时机 |
+| --- | --- | --- |
+| 原生 SSH 标签 | `TerminalSession.applyNativeSSHLaunch` → `GhosttySurfaceView.launchEnvironmentProvider` | 每次真正创建 surface 时（后台标签可能很久后才创建；重新连接会重建 surface，再签一张） |
+| 受管终端显示桥 | `ManagedTerminalCoordinator.bridgeLaunch` → 同上 | 同上 |
+| 后台结构化命令、`config` 以外的短命调用 | `RemoteSSHProcessRunner.run` | 每次拉起进程前 |
+| 文件上传下载 | `RemoteSSHStreamRunner.stream` | 同上 |
+| 安装产物上传 | `RemoteSSHInstallExecutor.upload` | 同上 |
+| 图片粘贴上传 | `RemoteManagedSessionClient.uploadImage` | 同上 |
+| 事件订阅 | `ProcessSessionEventLineSource.start`（`SessionEventStreamClient.swift`） | 同上 |
+
+签发入口在 App 启动时注册（`AsterApp` 里 `NativeSSHTicketing.install`）。没有注册（测试、CLI）或 broker 不在时不签票，client 会被拒，报 `authenticationRequired`。
+
+**威胁模型：只约束配合的 agent，不防恶意软件。** 票据防的是「好好按规矩办事的 agent 走了捷径」：它不知道票据密钥，拿不到有效票据，直连 socket 会被拒；它从 `ps` 看到的 argv 里也没有票据。同一用户下的恶意进程仍然可以：读 App 进程内存（拿到密钥）、在 client 抹掉环境变量之前读到它的环境（票据一次性，client 启动即用掉，窗口很短）、用 ssh-agent、读 `~/.ssh` 下的私钥文件、模拟键盘鼠标操作 App。这些不在本机制的范围内，需要系统层面的隔离（沙箱、独立用户）。
+
+调试时可以用 `ASTER_SSH_TICKETS=off` 启动 App（broker 继承这个环境变量）关闭校验，产品构建不要设置。
+
 ## 调用形状
 
 | 场景 | OpenSSH | 原生 |
@@ -97,5 +125,5 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 ## 验证
 
 - Rust：`cd SshRuntime && cargo test`。用进程内的 russh 服务端覆盖认证、known_hosts、exec 退出码、pty、channel 关闭时限、跳板链、结构化错误行和协议样例。
-- Swift：`./scripts/test.sh --no-parallel --filter 'nativeTransport|sshBrokerSupervisor|machineHostBinding|sshAuthCoordinator|sshCredentialStore|sshHostProfile|sshHostStore|sshBrokerProtocol|settingsHosts|sshConfigImport'`。
+- Swift：`./scripts/test.sh --no-parallel --filter 'nativeTransport|sshBrokerSupervisor|machineHostBinding|sshAuthCoordinator|sshCredentialStore|sshHostProfile|sshHostStore|sshBrokerProtocol|settingsHosts|sshConfigImport|nativeSSHTicket|nativeSSHRunners'`。
 - 打包：`./scripts/build-app.sh` 会构建 aster-ssh、复制进 `Contents/MacOS/`、签名并运行 `--version` 自检。

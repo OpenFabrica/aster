@@ -50,6 +50,9 @@ final class SSHBrokerSupervisor {
   /// 最近的诊断（事件码与脱敏说明），只保留最后 20 条，供排障与测试断言。
   private(set) var diagnostics: [String] = []
 
+  /// 启动票据签发器。每次拉起 broker 换一把密钥；任意线程都可以签票。
+  nonisolated let tickets = NativeSSHTicketIssuer()
+
   /// 回答认证与主机密钥请求。为 nil 时一律回答取消 / 拒绝。
   var authCoordinator: (any SSHAuthCoordinating)?
   /// `link.state` 事件的接收者（机器连接状态）。
@@ -226,6 +229,7 @@ final class SSHBrokerSupervisor {
     }
     channel = nil
     isReady = false
+    tickets.revoke()
     routing?.publish(nil)
     endpoint = nil
     removeSocketDirectory()
@@ -239,6 +243,11 @@ final class SSHBrokerSupervisor {
   func nativeEndpoint() throws -> NativeSSHEndpoint {
     guard engine == .native, let endpoint else { throw SSHBrokerError.engineDisabled }
     return endpoint
+  }
+
+  /// 签一张启动票据，给即将拉起的 `aster-ssh client`。broker 不在（未启动或已关闭）时返回 nil。
+  nonisolated func mintTicket() -> String? {
+    tickets.mint()
   }
 
   /// 等到 broker 报告 ready。超过 `readyTimeout` 抛 `startFailed`。
@@ -269,6 +278,11 @@ final class SSHBrokerSupervisor {
       },
       onExit: { [weak self] status in self?.handleExit(status: status, generation: generation) },
       onWriteFailure: { code in Self.recordGlobal("ssh.broker.write_failed", "errno=\(code)") })
+    // 第一条控制消息就是新密钥：旧实例签出的票随之作废，新实例只认这把。
+    do { try channel.send(.ticketsKey(tickets.rotateKey())) } catch {
+      channel.terminate()
+      throw error
+    }
     self.channel = channel
     isReady = false
     lastSyncedSpecs = nil

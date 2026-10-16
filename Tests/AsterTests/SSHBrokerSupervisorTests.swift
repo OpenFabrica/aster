@@ -187,3 +187,34 @@ func sshBrokerSupervisorReadsConfigListing() async throws {
   #expect(listing.hosts.first?.port == 32222)
   #expect(listing.ignored.first?.option == "Match")
 }
+
+@MainActor
+@Test("broker 监管：重启后的实例第一条控制消息是 tickets.key；关闭后不再签票")
+func sshBrokerSupervisorSendsAFreshTicketKeyPerInstance() async throws {
+  let broker = try FakeSSHBroker()
+  defer { broker.remove() }
+  try broker.mark("crash-once")
+  let (directory, hostsURL) = makeTemporaryHostDirectory()
+  defer { try? FileManager.default.removeItem(at: hostsURL.deletingLastPathComponent()) }
+  let supervisor = makeFakeBrokerSupervisor(broker, directory: directory, routing: SSHEngineRouting())
+  #expect(supervisor.mintTicket() == nil)
+
+  supervisor.start(preferredEngine: .native)
+  #expect(await sshBrokerEventually { supervisor.launchCount == 2 && supervisor.isReady })
+  #expect(await sshBrokerEventually { !broker.received(2).isEmpty })
+  /// 取出某个实例收到的第一行里的密钥；第一行不是 tickets.key 时为 nil。
+  func firstKey(_ instance: Int) throws -> String? {
+    guard let line = broker.received(instance).first else { return nil }
+    let object = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+    guard object?["type"] as? String == "tickets.key" else { return nil }
+    return object?["key"] as? String
+  }
+  // 第一个实例在读 stdin 前就崩溃了，只能看到重启后的实例。
+  let key = try #require(try firstKey(2))
+  #expect(key.count == 64)
+  let ticket = try #require(supervisor.mintTicket())
+  #expect(ticket.hasPrefix("v1."))
+
+  supervisor.shutdown()
+  #expect(supervisor.mintTicket() == nil)
+}

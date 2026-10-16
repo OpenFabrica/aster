@@ -19,6 +19,7 @@ mod protocol;
 mod ssh_config;
 mod target;
 mod terminal;
+mod tickets;
 
 #[cfg(test)]
 mod e2e_tests;

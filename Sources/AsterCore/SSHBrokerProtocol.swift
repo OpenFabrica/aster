@@ -270,6 +270,8 @@ public enum SSHBrokerCommand: Equatable, Sendable {
   case hostKeyAnswer(id: String, accept: Bool)
   case disconnect(endpoint: String)
   case shutdown
+  /// 启动票据的 HMAC 密钥（小写 hex）。每个 broker 实例启动后的第一条消息，只走 stdin。
+  case ticketsKey(String)
 
   /// 编码成一行 JSON（不含换行）。
   public func encodedLine() throws -> Data {
@@ -306,6 +308,9 @@ public enum SSHBrokerCommand: Equatable, Sendable {
     case .shutdown:
       struct Body: Encodable { let type = "shutdown" }
       return try encoder.encode(Body())
+    case .ticketsKey(let key):
+      struct Body: Encodable { let type = "tickets.key"; var key: String }
+      return try encoder.encode(Body(key: key))
     }
   }
 }

@@ -3009,9 +3009,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     pendingManagedTakeover = false
     if let managedTerminal,
       let bridge = ManagedTerminalCoordinatorRegistry.coordinator(for: managedTerminal)
-        .bridgeCommandText(for: managedTerminal, takeover: takeover)
+        .bridgeLaunch(for: managedTerminal, takeover: takeover)
     {
-      view.command = bridge
+      view.command = bridge.command
+      // 远端桥经 `aster-ssh client` 时，票据在 surface 真正创建时现签（一次性、120 秒有效）。
+      view.launchEnvironmentProvider = bridge.environment
     }
     // 先登记再创建 surface；极短命命令的退出 callback 可能在 createSurface 返回前到达。
     ghosttyView = view
@@ -6018,6 +6020,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     switch NativeSSHPaneLaunch.plan(for: spec, endpoint: endpoint, hosts: SSHHostDirectory.shared.hosts) {
     case .native(let executable, let arguments):
       view.command = GhosttyConfiguration.launchCommand(shell: executable, arguments: arguments)
+      // 票据一次性、120 秒有效：后台标签的 surface 可能很久后才创建，所以在创建时现签，
+      // surface 重建（重新连接）也会再签一张。
+      view.launchEnvironmentProvider = {
+        NativeSSHTicketing.launchEnvironment(executablePath: executable, arguments: arguments)
+      }
     case .openssh(let target, let reason):
       appendStartupWarning(reason)
       let command = NativeSSHPaneLaunch.typedSSHCommand(target: target)

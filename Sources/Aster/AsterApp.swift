@@ -358,6 +358,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // 认证与主机密钥请求交给钥匙串协调者，且必须在拉起 broker 之前接上：
     // ready 之后的第一条 auth.request 可能立刻到达，没接上时请求一律被取消。
     SSHBrokerSupervisor.shared.authCoordinator = SSHAuthCoordinator.shared
+    // 所有 `aster-ssh client` 启动点经 NativeSSHTicketing 取票；签发器自带锁，可在任意线程调用。
+    let brokerSupervisor = SSHBrokerSupervisor.shared
+    NativeSSHTicketing.install { brokerSupervisor.mintTicket() }
     SSHBrokerSupervisor.shared.start(preferredEngine: preferences.configuration.shell.resolvedSSHEngine)
     configureWorkspaceModel(model)
     model.beginApplicationSession(launchBehavior: preferences.configuration.launchBehavior)

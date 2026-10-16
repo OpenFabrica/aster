@@ -52,6 +52,9 @@ final class GhosttySurfaceView: NSView {
   var command: String?
   /// 命令退出后保持 surface 不销毁，让用户看到程序的最后输出。
   var waitAfterCommand = false
+  /// 每次真正创建 surface 时现取的附加环境，覆盖 `environment` 的同名键。
+  /// 用于一次性、有时效的值（原生 SSH 的启动票据）：surface 可能在视图构造很久之后才进窗口创建。
+  var launchEnvironmentProvider: (() -> [String: String])?
   private var configurationText: String
   nonisolated(unsafe) private var configStrings: [UnsafeMutablePointer<CChar>] = []
   private var environmentVariables: [ghostty_env_var_s] = []
@@ -456,7 +459,8 @@ final class GhosttySurfaceView: NSView {
       config.command = UnsafePointer(pointer)
       config.wait_after_command = waitAfterCommand
     }
-    for (key, value) in environment.sorted(by: { $0.key < $1.key }) {
+    let launchEnvironment = environment.merging(launchEnvironmentProvider?() ?? [:]) { _, fresh in fresh }
+    for (key, value) in launchEnvironment.sorted(by: { $0.key < $1.key }) {
       guard let keyPointer = strdup(key), let valuePointer = strdup(value) else { continue }
       configStrings.append(keyPointer)
       configStrings.append(valuePointer)

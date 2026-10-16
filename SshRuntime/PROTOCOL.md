@@ -33,6 +33,10 @@ aster-ssh client --broker <socket>
 - `<remote command>`：**单个字符串**，原样作为 SSH exec 请求发送（和 OpenSSH 一样由远端登录 Shell 解释），
   调用方负责 POSIX 转义（`RemoteSSHInvocation.shellQuoted`）。省略时请求交互 Shell（原生 SSH Pane）。
 
+环境变量 `ASTER_SSH_TICKET`：App 为这一次启动签发的启动票据（见 §3）。**只走环境变量，不进 argv。**
+client 启动后、起任何线程之前读出它，把 environ 里那段字节原地清零并 `unsetenv`，再放进 OPEN 的 `ticket`。
+没有这个变量时 OPEN 不带票据，broker 会拒绝。
+
 退出码：
 - 远端命令正常结束：远端退出码；远端被信号结束：`128 + 信号值`。
 - 传输层失败：`255`，并在 stderr **最后一行**输出一行结构化错误：
@@ -55,7 +59,7 @@ unix socket，每帧 `type:u8 | len:u32 BE | payload`。
 
 | type | 名称 | 方向 | payload |
 | --- | --- | --- | --- |
-| 1 | OPEN | c→b | JSON `{"hostID"?, "target"?, "tty":bool, "cols","rows", "term", "command"?, "interactive":bool, "connectTimeout"?}` |
+| 1 | OPEN | c→b | JSON `{"hostID"?, "target"?, "tty":bool, "cols","rows", "term", "command"?, "interactive":bool, "connectTimeout"?, "ticket"?}` |
 | 2 | OPENED | b→c | JSON `{}` |
 | 3 | STDIN | c→b | 原始字节 |
 | 4 | STDOUT | b→c | 原始字节 |
@@ -64,6 +68,20 @@ unix socket，每帧 `type:u8 | len:u32 BE | payload`。
 | 7 | RESIZE | c→b | JSON `{"cols","rows"}` |
 | 8 | EXIT | b→c | JSON `{"status":int?, "signal":string?}` |
 | 9 | ERROR | b→c | JSON `{"kind","detail"}` |
+
+**启动票据（`ticket`）**：broker 收到 OPEN 后，在解析 `hostID` / `target` 之前先验票，
+没有有效票据就回 `ERROR {"kind":"authenticationRequired","detail":"invalid launch ticket"}` 并关闭连接，
+连「主机 ID 是否存在」也不回答。
+
+- 格式：`v1.<nonce>.<expiryMs>.<hmac>`。`nonce` 是 16 字节随机数的小写 hex（32 字符）；
+  `expiryMs` 是 Unix 毫秒到期时间（App 签发时为当前时间加 120 秒）；
+  `hmac = HMAC-SHA256(key, "v1|<nonce>|<expiryMs>")` 的小写 hex，`key` 来自 §4.2 的 `tickets.key`。
+- 校验顺序：先常量时间比较 HMAC（伪造的票据不会占用 nonce），再查到期（已过期，或离现在超过 5 分钟，都拒绝），
+  最后查 nonce 是否用过。通过即登记 nonce，到期后清掉。**每张票只能 OPEN 一次**。
+- client 每个进程只 OPEN 一次，所以「一次启动一张票」就够：Pane 重新连接是新进程，App 会在创建 surface 时再签一张。
+- 还没收到 `tickets.key` 时，OPEN 最多等 2 秒（broker 先 bind socket 再读 stdin）。
+- 拒绝原因（缺失、伪造、过期、重放）只写 broker 日志，不回给 client。
+- 仅调试：broker 环境里有 `ASTER_SSH_TICKETS=off` 时不校验。产品构建不设置它。
 
 ## 4. App ↔ broker 控制协议
 
@@ -100,6 +118,10 @@ broker 的 stderr 只写脱敏日志。未知 `type` 必须忽略（向前兼容
 ### 4.2 App → broker
 
 ```jsonc
+// 启动票据密钥（§3），32 字节的小写 hex。每个 broker 实例启动后的第一条消息；
+// broker 重启时 App 换一把新密钥，旧实例签出的票随之作废。
+{"type":"tickets.key","key":"<64 位 hex>"}
+
 // 全量替换已保存主机的解析后规格（已合并「默认」项、已展开跳板链）。
 {"type":"profiles.sync","profiles":{"UUID":{ /* ResolvedSpec */ }}}
 

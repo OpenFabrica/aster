@@ -349,6 +349,9 @@ pub struct OpenRequest {
     pub interactive: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_timeout: Option<u32>,
+    /// 启动票据（App 经 `ASTER_SSH_TICKET` 交给 client，broker 校验后作废）。见 `tickets.rs`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket: Option<String>,
 }
 
 /// 缺省列数。
@@ -514,6 +517,9 @@ pub enum AppCommand {
     Disconnect { endpoint: String },
     #[serde(rename = "shutdown")]
     Shutdown,
+    /// 启动票据的 HMAC 密钥（hex），每个 broker 实例一把，只经 stdin 下发。
+    #[serde(rename = "tickets.key")]
+    TicketsKey { key: String },
     #[serde(other)]
     Unknown,
 }
@@ -527,6 +533,7 @@ impl fmt::Display for AppCommand {
             AppCommand::HostKeyAnswer { .. } => "hostkey.answer",
             AppCommand::Disconnect { .. } => "disconnect",
             AppCommand::Shutdown => "shutdown",
+            AppCommand::TicketsKey { .. } => "tickets.key",
             AppCommand::Unknown => "unknown",
         };
         f.write_str(name)
