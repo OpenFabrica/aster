@@ -94,6 +94,14 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 安全上限：单个文件 1MB，最多 64 个文件。
 - 与 OpenSSH 的差异：Host 匹配不区分大小写。
 
+## known_hosts 管理
+
+- 解析只有一份：`aster-ssh known-hosts list|remove`（`SshRuntime/src/known_hosts_cli.rs`）复用连接校验用的 `known_hosts.rs`，能处理 hashed、`[host]:port`、通配、取反、`@revoked` 与 `@cert-authority`。请求走 stdin JSON，协议见 `SshRuntime/PROTOCOL.md`「known-hosts 子命令」。
+- 查询参数（`SSHKnownHostsQuery`，AsterCore）：文件 = 默认文件 + 各主机（含跳板各跳）`knownHostsFiles` 的并集，系统级文件只读列出；`match` = 各可解析主机及其跳板的 `host:port`，再加没有绑定主机的旧机器 target。hashed 记录只能靠 `matches` 显示主机名。
+- 删除防误删：`remove` 带 `lineDigest`（原行 SHA-256），行已变化时退出码 3（stale），App toast 提示并重新列出。`host` 非空时只删多主机行里命中的模式，其余字节不变。系统级文件一律拒绝。
+- App 侧 `SettingsKnownHostsBridge` 只接受上一次列表里出现过、所在文件可写、摘要一致的记录；指定主机时它必须是该记录的 `matches` 之一。同一时刻只跑一个删除，删除后不论成败都重新列出，旧行号不再复用。
+- 写入修复：改写走 `atomic_file::write`，先顺着符号链接找到真实文件，在它的目录写临时文件（`create_new`）再 rename，保留原权限。之前 `replace()` 直接 rename 会把指向 dotfiles 的 `~/.ssh/known_hosts` 链接换成普通文件。
+
 ## 主机标签
 
 - 模型：`SSHHostProfile.tags: [String]?`，nil 表示没有标签。默认项不使用标签，`SSHHostStore.normalized` 会把它清成 nil，标签也不参与继承。

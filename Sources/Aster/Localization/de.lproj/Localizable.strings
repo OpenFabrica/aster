@@ -1907,3 +1907,16 @@
 "；" = "; ";
 "；如 PATH 未包含 ~/.local/bin 请自行加入" = "; falls PATH ~/.local/bin nicht enthält, bitte selbst hinzufügen";
 "标签过长或包含逗号/换行" = "Tags sind zu lang oder zu viele oder enthalten ein Komma oder einen Zeilenumbruch";
+"aster-ssh 返回了无法识别的结果" = "aster-ssh hat ein unbekanntes Ergebnis zurückgegeben";
+"known_hosts 参数无效" = "Ungültige known_hosts-Anfrage";
+"known_hosts 文件不存在" = "Die known_hosts-Datei existiert nicht";
+"读取 known_hosts 超时" = "Zeitüberschreitung beim Lesen von known_hosts";
+"无法读取 known_hosts：%@" = "known_hosts konnte nicht gelesen werden: %@";
+"无法修改 known_hosts：%@" = "known_hosts konnte nicht geändert werden: %@";
+"系统级 known_hosts 文件是只读的" = "Systemweite known_hosts-Dateien sind schreibgeschützt";
+"已从 known_hosts 删除" = "Aus known_hosts entfernt";
+"找不到这条记录，请重新加载列表" = "Dieser Eintrag wurde nicht gefunden. Laden Sie die Liste neu";
+"这个 known_hosts 文件不可写" = "Diese known_hosts-Datei ist nicht beschreibbar";
+"这条记录已在别处被修改，列表已重新加载" = "Dieser Eintrag wurde an anderer Stelle geändert. Die Liste wurde neu geladen";
+"这条记录已在别处被修改，请重新加载" = "Dieser Eintrag wurde an anderer Stelle geändert. Laden Sie neu";
+"这一行里没有这台主机" = "Diese Zeile enthält diesen Host nicht";

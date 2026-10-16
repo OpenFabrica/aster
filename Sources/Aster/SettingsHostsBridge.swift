@@ -41,6 +41,8 @@ final class SettingsHostsBridge {
     var addMachine: @MainActor (MachineSetupFlow.Prefill, NSWindow?) -> Void
     /// 用户名的内置缺省值（表单占位符用）。
     var localUser: String
+    /// 「已知主机」页运行 `aster-ssh known-hosts` 的方式；测试注入假实现。
+    var knownHosts: SettingsKnownHostsBridge.Dependencies = .live()
 
     /// 生产依赖：共享主机目录、真实钥匙串、机器编队与 aster-ssh。
     @MainActor static func live() -> Dependencies {
@@ -80,6 +82,8 @@ final class SettingsHostsBridge {
   private var cancellables: Set<AnyCancellable> = []
   /// 导入进行中。连点只跑一次，避免两次合并基于同一旧列表互相覆盖。
   var isImporting = false
+  /// 「已知主机」页的协作者，处理 `hosts.knownHosts.*` 动作，快照放在 `knownHosts` 下。
+  private(set) lazy var knownHosts: SettingsKnownHostsBridge = makeKnownHostsBridge()
 
   /// 快照的输入摘要，用来判断外部通知是否真的改变了页面内容。
   private struct RenderedState: Equatable {
@@ -97,6 +101,19 @@ final class SettingsHostsBridge {
 
   init(dependencies: Dependencies) {
     self.dependencies = dependencies
+  }
+
+  /// 建「已知主机」协作者；推快照与 toast 在调用时才转给本对象，晚于构造设置的闭包也能生效。
+  private func makeKnownHostsBridge() -> SettingsKnownHostsBridge {
+    let directory = directory
+    let machines = dependencies.machines
+    let bridge = SettingsKnownHostsBridge(
+      dependencies: dependencies.knownHosts,
+      hosts: { directory.hosts },
+      machineTargets: { machines().filter { $0.hostID == nil }.compactMap(\.sshTarget) })
+    bridge.pushSnapshot = { [weak self] in self?.pushSnapshot() }
+    bridge.toast = { [weak self] text, isError in self?.toast(text, isError) }
+    return bridge
   }
 
   /// 当前的快照输入摘要。
@@ -133,7 +150,8 @@ final class SettingsHostsBridge {
   ///
   /// 形状：`defaults`（默认项）、`hosts`（已排序的主机行）、`groups`（已有分组，供 datalist）、
   /// `tags`（已有标签，供候选与筛选）、
-  /// `builtin`（内置缺省值，供占位符）、`importedGroup`、`sshConfigPath`、`loadError`。
+  /// `builtin`（内置缺省值，供占位符）、`importedGroup`、`sshConfigPath`、`loadError`、
+  /// `knownHosts`（「已知主机」页，见 `SettingsKnownHostsBridge.snapshot`）。
   func snapshot() -> [String: Any] {
     let hosts = directory.hosts
     let machines = dependencies.machines()
@@ -192,6 +210,7 @@ final class SettingsHostsBridge {
       "importedGroup": SSHHostProfile.importedGroup,
       "sshConfigPath": (dependencies.sshConfigURL.path as NSString).abbreviatingWithTildeInPath,
       "loadError": directory.loadError ?? "",
+      "knownHosts": knownHosts.snapshot(),
     ]
   }
 

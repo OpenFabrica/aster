@@ -186,3 +186,49 @@ endpoint 身份（凭证共享、连接复用的键）：`user@host:port`；有�
 - `userKnownHostsFiles`、`globalKnownHostsFiles`：路径数组，可多个；`none` 写成 `["none"]`；没写为空数组。
 
 新增字段一律可省略，旧版 JSON 仍能解码。
+
+## known-hosts 子命令
+
+`aster-ssh known-hosts list` / `aster-ssh known-hosts remove` 给设置页的 known_hosts 管理界面用，不依赖 broker。
+请求是 stdin 上的一个 JSON 对象（上限 64 KiB），结果是 stdout 上的一个 JSON 对象；参数不进 argv。
+解析与匹配复用连接时校验用的同一个解析器（`known_hosts.rs`）。
+
+```jsonc
+// aster-ssh known-hosts list   （stdin，字段都可省略）
+{"files":["~/.orbstack/ssh/known_hosts"],"includeDefault":true,"includeGlobal":true,
+ "match":[{"host":"10.0.0.5","port":22}]}
+// → stdout
+{"files":[{"path":"/Users/me/.ssh/known_hosts","exists":true,"writable":true,"global":false,"error":null}],
+ "entries":[{"file":"/Users/me/.ssh/known_hosts","line":3,"marker":null,
+             "hosts":["10.0.0.5","[db]:2222"],"hashed":false,"algorithm":"ssh-ed25519",
+             "fingerprint":"SHA256:…","comment":null,
+             "matches":[{"host":"10.0.0.5","port":22}],"lineDigest":"<64 位十六进制>"}],
+ "skipped":[{"file":"/Users/me/.ssh/known_hosts","line":9,"reason":"malformed"}]}
+
+// aster-ssh known-hosts remove （stdin）
+{"file":"/Users/me/.ssh/known_hosts","line":3,"lineDigest":"…","host":null}
+// → stdout
+{"removed":"line"}            // 或 "pattern"
+```
+
+`list`：
+- 文件顺序：默认文件（`~/.ssh/known_hosts`，`ASTER_SSH_KNOWN_HOSTS` 可覆盖）→ `files`（展开 `~`，`none` 与空串忽略）→
+  系统级文件（`/etc/ssh/ssh_known_hosts`、`/etc/ssh/ssh_known_hosts2`）。按解析符号链接后的真实路径去重；`path` 回显展开后的原路径。
+- `exists:false` 的文件照样列出；读失败时 `error` 是错误文本。`writable` 要求文件存在、不是系统级、文件和它（解析链接后）所在目录都可写。
+- `line` 从 1 开始；注释与空行不算记录。`marker` 为 `null | "revoked" | "certAuthority"`。
+- `hosts` 是主机字段按逗号拆开的原文（含 `!` 取反模式），hashed 模式写成 `"(hashed)"`，`hashed` 表示行里至少有一个 hashed 模式。
+- `matches` 是请求 `match` 里被这条记录覆盖的主机，判定与连接时一致（`[host]:port`、通配、取反、hashed 都算）；hashed 记录只能靠它显示主机名。
+- `lineDigest` 是原行（不含 `\n`，含 `\r`）的 SHA-256 十六进制。
+- `skipped.reason`：`malformed`（字段不全、未知 `@` 标记、非 UTF-8）或 `invalidKey`（公钥 base64 解析失败）。
+- 只输出公钥指纹，不输出公钥原文。
+
+`remove`：
+- `file` 可含 `~`。`line` 处原行的摘要必须等于 `lineDigest`，否则（含行号越界）退出码 **3**，stdout `{"error":"stale"}`，文件不变。
+- `host` 为 null 时删整行，返回 `"line"`。
+- `host` 非空时只去掉这一行里命中该主机的模式（明文通配或 hashed，取反模式不动），行的其余字节原样保留，返回 `"pattern"`；
+  去掉后不剩非取反模式时删整行，返回 `"line"`。没有模式命中时失败（`noMatch`）。
+- 其它行逐字节保留（含 `\r\n` 与结尾换行的有无）。
+- 写入时先顺着符号链接找到真实文件，在它的目录里写临时文件再 rename，保留原权限；链接本身不变。
+- 失败时退出码 1，stdout `{"error":…}`：`global`（系统级文件，一律拒绝）、`notFound`、`notWritable`、`noMatch`、
+  `malformed`（目标行解析不了，只在给了 `host` 时出现）、`invalidRequest`、`tooLarge`、`io`。
+- 子命令名不对时退出码 2，只打 usage 到 stderr。

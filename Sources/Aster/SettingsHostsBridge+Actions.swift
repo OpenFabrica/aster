@@ -40,6 +40,8 @@ extension SettingsHostsBridge {
     case "hosts.import": importSSHConfig(complete: complete)
     case "hosts.editSSHConfig": editSSHConfig(complete: complete)
     default:
+      // `hosts.knownHosts.*` 交给「已知主机」协作者；它不认识的才算未知动作。
+      guard !knownHosts.handle(action: action, payload: payload, complete: complete) else { return }
       toast(L("“\(action)”尚无可用的 macOS 操作"), true)
       complete(false)
     }

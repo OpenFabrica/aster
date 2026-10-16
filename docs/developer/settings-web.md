@@ -87,6 +87,7 @@ scripts/build-app.sh
 - 快照键 `hosts`：`defaults`、`hosts[{profile, connect, hasPassword, machines, jumpDependents, credentialSharedWith, jumpName}]`、`groups`、`tags`（已有标签，不分大小写去重，供表单候选与列表筛选）、`builtin`、`importedGroup`、`sshConfigPath`、`loadError`。主机对象的键与 `SSHHostProfile` 的 Codable 键一致。
 - 动作白名单：`hosts.` 前缀，包括 `save`、`duplicate`、`delete`、`forgetPassword`、`addMachine`、`import`、`editSSHConfig`。成功后先推快照再发回执；`hosts.json` 或机器引用在外部变化时另行刷新。
 - 导入：调用 `aster-ssh config list --json`，合并规则是纯函数 `SSHConfigImport.merge`，只更新 `~/.ssh/config` 导入组，保留用户改过的认证方式、代理和主机密钥校验。汇总通过 `hostsImportReport` 消息展示，其中包括 ignored 列表。
+- 已知主机：`Resources/settings-ui/known-hosts.js` 暴露 `window.AsterKnownHosts.render(container, hostsSnapshot, send)`，由「主机」页的子标签挂载；数据在快照 `hosts.knownHosts`（`state` 为 `idle|loading|loaded|error`，另有 `error`、`files[{path, rawPath, exists, writable, global, error}]`、`entries[{file, line, marker, hosts, hashed, algorithm, fingerprint, comment, matches, names, removable, lineDigest}]`、`skipped`）。首次显示时网页发 `hosts.knownHosts.refresh`；删除发 `hosts.knownHosts.remove {file, line, lineDigest, host?}`，确认面板在行内（多主机行可只删一台）。协作者是 `SettingsKnownHostsBridge`，由 `SettingsHostsBridge` 持有并转交 `hosts.knownHosts.*`。
 - 主机标签：表单是逗号分隔的输入框（`parseTags` 同时接受全角逗号），候选来自快照 `tags`；列表行显示 `#tag` chip，标签筛选行按「全部选中标签都要有」过滤，搜索框也匹配标签。规范化与校验只在 `SSHHostStore`，网页只做拆分。
 - 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
 - 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
