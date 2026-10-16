@@ -5,29 +5,15 @@ import Foundation
 // 「主机」分类的动作：保存、复制、删除、忘记口令、添加为机器、导入与编辑 ~/.ssh/config。
 // 每个动作都以 `complete(succeeded)` 结束，SettingsViewController 据此给网页发回执。
 
-/// 主机动作失败的原因。文案直接给用户看。
-enum SettingsHostsError: Error, Equatable {
-  case invalidPayload
-  case unknownHost
-  case invalidProfile([String])
-  case noTextEditor
-
-  var message: String {
-    switch self {
-    case .invalidPayload: L("主机参数无效")
-    case .unknownHost: L("主机不存在，可能已被删除")
-    case .invalidProfile(let reasons): L("主机配置无效：\(reasons.joined(separator: "；"))")
-    case .noTextEditor: L("找不到可以打开纯文本文件的编辑器")
-    }
-  }
-}
+/// 主机动作失败的原因；定义已移到 `SSHHostEditingError`，保留旧名供既有调用方使用。
+typealias SettingsHostsError = SSHHostEditingError
 
 extension SettingsHostsBridge {
   /// 网页回传的主机对象最大字节数；远大于任何正常配置，只挡异常输入。
   static let maximumPayloadBytes = 64 * 1024
-  static let maximumForwards = 64
+  static let maximumForwards = SSHHostEditRules.maximumForwards
   /// 私钥文件与 known_hosts 文件各自的最多行数。
-  static let maximumIdentityFiles = 16
+  static let maximumIdentityFiles = SSHHostEditRules.maximumIdentityFiles
 
   /// 分发一个 `hosts.` 前缀的动作。未知动作 toast 报错并回执失败。
   func handle(action: String, payload: [String: Any], complete: @escaping (Bool) -> Void) {
@@ -53,18 +39,10 @@ extension SettingsHostsBridge {
 
   // MARK: - 保存
 
-  /// 新增或更新一台主机（含默认项）。先整份校验，失败时 toast 原因且不落盘。
+  /// 新增或更新一台主机（含默认项）。清理、校验与落盘都在 `SSHHostEditing.save`，失败时 toast 原因且不落盘。
   private func save(_ payload: [String: Any], complete: (Bool) -> Void) {
     do {
-      let profile = try Self.decodeProfile(payload["profile"])
-      var candidate = directory.hosts
-      if let index = candidate.firstIndex(where: { $0.id == profile.id }) {
-        candidate[index] = profile
-      } else {
-        candidate.append(profile)
-      }
-      try Self.validate(profile, in: candidate)
-      try directory.upsert(profile)
+      try SSHHostEditing.save(try Self.decodeProfile(payload["profile"]), in: directory)
       pushSnapshot()
       complete(true)
     } catch {
@@ -73,96 +51,36 @@ extension SettingsHostsBridge {
     }
   }
 
-  /// 解码网页回传的主机对象，并做只属于边界的限制（大小、条目数、控制字符）。
+  /// 解码网页回传的主机对象：先挡超大 payload，再按 `SSHHostEditing.sanitize` 做边界清理。
   static func decodeProfile(_ raw: Any?) throws -> SSHHostProfile {
     guard let object = raw as? [String: Any], JSONSerialization.isValidJSONObject(object) else {
       throw SettingsHostsError.invalidPayload
     }
     let data = try JSONSerialization.data(withJSONObject: object)
     guard data.count <= maximumPayloadBytes else { throw SettingsHostsError.invalidPayload }
-    var profile: SSHHostProfile
+    let profile: SSHHostProfile
     do { profile = try JSONDecoder().decode(SSHHostProfile.self, from: data) } catch {
       throw SettingsHostsError.invalidPayload
     }
-    // 空 known_hosts 列表与 nil 同义（都继承默认项），统一存成 nil，文件里不留空数组。
-    if profile.knownHostsFiles?.isEmpty == true { profile.knownHostsFiles = nil }
-    // 保险库密钥列表同理：空数组表示继承，存成 nil。
-    if profile.vaultKeyIDs?.isEmpty == true { profile.vaultKeyIDs = nil }
-    // 空白的 identityAgent 同理存成 nil（继承），前后空白不属于路径。
-    let identityAgent = profile.identityAgent?.trimmingCharacters(in: .whitespaces) ?? ""
-    profile.identityAgent = identityAgent.isEmpty ? nil : identityAgent
-    guard profile.forwards.count <= maximumForwards,
-      profile.identityFiles.count <= maximumIdentityFiles,
-      (profile.knownHostsFiles?.count ?? 0) <= maximumIdentityFiles,
-      (profile.vaultKeyIDs?.count ?? 0) <= SSHHostStore.maximumVaultKeys
-    else { throw SettingsHostsError.invalidPayload }
-    // `SSHHostStore.validate` 只查 host/user/group 的换行；这里补齐其余会进入 argv 或
-    // 配置文件的文本字段，任何控制字符都拒绝。
-    let texts =
-      [
-        profile.name, profile.host, profile.user, profile.group ?? "", profile.proxyCommand ?? "",
-        profile.identityAgent ?? "",
-      ]
-      + profile.identityFiles + (profile.knownHostsFiles ?? []) + (profile.tags ?? [])
-      + [profile.socksProxy?.host ?? "", profile.httpProxy?.host ?? ""]
-      + profile.forwards.flatMap { [$0.bind.host, $0.target.host, $0.description] }
-    let hasControl = texts.contains { text in
-      text.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
-    }
-    if hasControl { throw SettingsHostsError.invalidProfile([L("不能包含换行或控制字符")]) }
-    return profile
+    return try SSHHostEditing.sanitize(profile)
   }
 
-  /// 按存储规则校验候选列表，只报告与这台主机相关的原因；再确认跳板链可以解析。
+  /// 校验候选列表；规则在 `SSHHostEditing.validate`。
   static func validate(_ profile: SSHHostProfile, in candidate: [SSHHostProfile]) throws {
-    let normalized = SSHHostStore.normalized(candidate)
-    let reasons = SSHHostStore.validate(normalized)
-    if !reasons.isEmpty {
-      let tag = normalized.firstIndex(where: { $0.id == profile.id }).map { "[\($0)]" }
-      let own = reasons.filter { tag.map($0.hasPrefix) ?? true }
-      throw SettingsHostsError.invalidProfile((own.isEmpty ? reasons : own).map(friendlyReason))
-    }
-    guard !profile.isDefaults else { return }
-    // validate 只挡「跳板是自己」；更长的环与过深的链要靠解析才能发现。
-    do {
-      _ = try SSHHostResolver.resolve(profile.id, in: normalized)
-    } catch SSHHostResolutionError.jumpCycle {
-      throw SettingsHostsError.invalidProfile([L("跳板机形成了循环")])
-    } catch SSHHostResolutionError.jumpTooDeep {
-      throw SettingsHostsError.invalidProfile(
-        [L("跳板链超过 \(SSHHostResolver.maximumJumpDepth) 层")])
-    } catch {
-      throw SettingsHostsError.invalidProfile([L("主机无法解析：\(String(describing: error))")])
-    }
+    try SSHHostEditing.validate(profile, in: candidate)
   }
 
-  /// 把 `SSHHostStore.validate` 的英文原因换成给用户看的中文。
+  /// 存储校验原因的中文说明；规则在 `SSHHostEditing.friendlyReason`。
   static func friendlyReason(_ reason: String) -> String {
-    switch SSHConfigImport.stripIndexTag(reason) {
-    case "empty name": L("名称不能为空")
-    case "empty host": L("主机不能为空")
-    case "newline in host/user": L("主机和用户名不能换行")
-    case "invalid group": L("分组名过长或包含换行")
-    case "invalid tags": L("标签过长或包含逗号/换行")
-    case "invalid port": L("端口必须在 1–65535 之间")
-    case "invalid proxy": L("代理地址不能为空，端口必须在 1–65535 之间")
-    case "invalid forward": L("端口转发的端口无效")
-    case "invalid jumpHostID": L("跳板机无效：不能选自己，也不能选已删除的主机")
-    case "negative timing": L("keepalive 与超时不能是负数")
-    case "duplicate id": L("主机 ID 重复")
-    case "invalid vaultKeyIDs": L("保险库密钥重复或超过 \(SSHHostStore.maximumVaultKeys) 把")
-    case let other: other
-    }
+    SSHHostEditing.friendlyReason(reason)
   }
 
   // MARK: - 复制、删除、忘记口令
 
-  /// 复制一台主机：新 ID、名称加「副本」。导入组归 ssh_config 管，副本放到未分组。
+  /// 复制一台主机；规则在 `SSHHostEditing.duplicate`。
   private func duplicate(_ payload: [String: Any], complete: (Bool) -> Void) {
     do {
-      let source = try savedHost(payload)
-      let copy = source.duplicated(name: L("\(source.name) 副本"))
-      try directory.upsert(copy)
+      try SSHHostEditing.duplicate(try savedHost(payload).id, in: directory)
       pushSnapshot()
       complete(true)
     } catch {
@@ -199,10 +117,7 @@ extension SettingsHostsBridge {
   private func forgetPassword(_ payload: [String: Any], complete: (Bool) -> Void) {
     do {
       let profile = try savedHost(payload)
-      guard let endpoint = Self.credentialEndpoints(directory.hosts)[profile.id] else {
-        throw SettingsHostsError.invalidProfile([L("主机无法解析，找不到对应的口令")])
-      }
-      try dependencies.passwords.deletePassword(for: endpoint)
+      try SSHHostEditing.forgetPassword(profile.id, in: directory, passwords: dependencies.passwords)
       toast(L("已忘记“\(profile.name)”的口令"), false)
       pushSnapshot()
       complete(true)
@@ -290,16 +205,9 @@ extension SettingsHostsBridge {
     }
   }
 
-  /// 确保配置文件存在。已存在的文件（可能是指向 dotfiles 的软链）不改权限、不改内容。
+  /// 确保配置文件存在；规则在 `SSHHostEditing.ensureSSHConfigFile`。
   static func ensureSSHConfigFile(at url: URL, fileManager: FileManager = .default) throws {
-    guard !fileManager.fileExists(atPath: url.path) else { return }
-    let directory = url.deletingLastPathComponent()
-    if !fileManager.fileExists(atPath: directory.path) {
-      try fileManager.createDirectory(
-        at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    }
-    guard fileManager.createFile(atPath: url.path, contents: Data(), attributes: [.posixPermissions: 0o600])
-    else { throw CocoaError(.fileWriteUnknown) }
+    try SSHHostEditing.ensureSSHConfigFile(at: url, fileManager: fileManager)
   }
 
   // MARK: - 工具
@@ -315,18 +223,6 @@ extension SettingsHostsBridge {
     return profile
   }
 
-  /// 把各类错误转成一句给用户看的话。
-  static func describe(_ error: Error) -> String {
-    switch error {
-    case let error as SettingsHostsError: return error.message
-    case SSHHostStoreError.invalidHosts(let reasons):
-      return L("主机配置无效：\(reasons.map(friendlyReason).joined(separator: "；"))")
-    case SSHHostStoreError.corrupted(let detail): return L("hosts.json 已损坏：\(detail)")
-    case SSHHostStoreError.ioFailure(let detail): return L("读写 hosts.json 失败：\(detail)")
-    case SSHBrokerError.executableMissing:
-      return L("找不到 aster-ssh，请重新构建 Aster.app")
-    case SSHBrokerError.startFailed(let detail): return L("aster-ssh 启动失败：\(detail)")
-    default: return error.localizedDescription
-    }
-  }
+  /// 把各类错误转成一句给用户看的话；规则在 `SSHHostEditing.describe`。
+  static func describe(_ error: Error) -> String { SSHHostEditing.describe(error) }
 }

@@ -2055,3 +2055,11 @@
 "（主机已删除）" = "(host deleted)";
 "（只打开 SSH 终端，不执行命令）" = "(Opens an SSH terminal only; no command is run)";
 "（未说明）" = "(none given)";
+"Keepalive 间隔（秒）" = "Keepalive Interval (s)";
+"Keepalive 次数" = "Keepalive Count";
+"连接超时（秒）" = "Connection Timeout (s)";
+"SOCKS 代理" = "SOCKS Proxy";
+"HTTP 代理" = "HTTP Proxy";
+"%@ 必须是整数" = "%@ must be an integer";
+"%@ 要写成 主机:端口" = "%@ must be written as host:port";
+"第 %@ 条转发规则的地址要写成 主机:端口" = "The address in forwarding rule %@ must be written as host:port";

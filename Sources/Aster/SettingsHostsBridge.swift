@@ -9,16 +9,8 @@ import Foundation
 // 不对这里开放，需要的能力（推送快照、toast、向网页发消息、取窗口）都以闭包注入。
 // 主机真值只在 `SSHHostDirectory`，这里不持有可写副本。
 
-/// 设置页用到的口令钥匙串能力：只判断与删除，读写口令本身由认证流程负责。
-@MainActor
-protocol SettingsHostPasswordStore {
-  /// 是否已为该 endpoint 保存口令。
-  func hasPassword(for endpoint: String) -> Bool
-  /// 删除该 endpoint 的口令；不存在不算错误。
-  func deletePassword(for endpoint: String) throws
-}
-
-extension SSHCredentialStore: SettingsHostPasswordStore {}
+/// 设置页用到的口令钥匙串能力；定义已移到 `SSHHostPasswordStore`，保留旧名供既有调用方使用。
+typealias SettingsHostPasswordStore = SSHHostPasswordStore
 
 /// 设置页「主机」分类的快照与动作处理。
 @MainActor
@@ -54,8 +46,8 @@ final class SettingsHostsBridge {
         machines: { MachineFleetModel.shared.profiles },
         machinesDidChange: MachineFleetModel.shared.$rows.map { _ in () }.eraseToAnyPublisher(),
         configListing: { try await SSHBrokerSupervisor.shared.configListing() },
-        sshConfigURL: URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh/config"),
-        openInEditor: SettingsHostsBridge.openInDefaultTextEditor,
+        sshConfigURL: SSHHostEditing.sshConfigURL,
+        openInEditor: SSHHostEditing.openInDefaultTextEditor,
         addMachine: { prefill, window in
           Task { @MainActor in
             _ = await MachineSetupFlow.presentAddMachine(prefill: prefill, in: window)
@@ -228,16 +220,16 @@ final class SettingsHostsBridge {
       "groups": groups,
       "tags": Self.orderedTags(saved),
       "builtin": [
-        "port": 22,
+        "port": SSHHostBuiltinDefaults.port,
         "user": dependencies.localUser,
-        "auth": SSHAuthMode.auto.rawValue,
-        "keepaliveInterval": 15,
-        "keepaliveCountMax": 3,
-        "connectTimeout": 10,
-        "verifyHostKeys": true,
-        "agentForward": false,
-        "identitiesOnly": false,
-        "knownHostsFiles": ["~/.ssh/known_hosts"],
+        "auth": SSHHostBuiltinDefaults.auth.rawValue,
+        "keepaliveInterval": SSHHostBuiltinDefaults.keepaliveInterval,
+        "keepaliveCountMax": SSHHostBuiltinDefaults.keepaliveCountMax,
+        "connectTimeout": SSHHostBuiltinDefaults.connectTimeout,
+        "verifyHostKeys": SSHHostBuiltinDefaults.verifyHostKeys,
+        "agentForward": SSHHostBuiltinDefaults.agentForward,
+        "identitiesOnly": SSHHostBuiltinDefaults.identitiesOnly,
+        "knownHostsFiles": SSHHostBuiltinDefaults.knownHostsFiles,
       ] as [String: Any],
       "importedGroup": SSHHostProfile.importedGroup,
       "sshConfigPath": (dependencies.sshConfigURL.path as NSString).abbreviatingWithTildeInPath,
@@ -247,41 +239,22 @@ final class SettingsHostsBridge {
     ].merging(keysBridge?.snapshot(hosts: hosts) ?? [:]) { current, _ in current }
   }
 
-  /// 列表顺序：`~/.ssh/config` 导入组在前，其它分组按名称，最后是未分组；组内按名称。
-  static func sorted(_ hosts: [SSHHostProfile]) -> [SSHHostProfile] {
-    hosts.sorted { lhs, rhs in
-      let left = groupRank(lhs.group)
-      let right = groupRank(rhs.group)
-      if left != right { return left < right }
-      if let a = lhs.group, let b = rhs.group, a != b {
-        return a.localizedStandardCompare(b) == .orderedAscending
-      }
-      let order = lhs.name.localizedStandardCompare(rhs.name)
-      return order == .orderedSame ? lhs.id.uuidString < rhs.id.uuidString : order == .orderedAscending
-    }
-  }
+  /// 列表顺序；规则在 `SSHHostEditing.sorted`。
+  static func sorted(_ hosts: [SSHHostProfile]) -> [SSHHostProfile] { SSHHostEditing.sorted(hosts) }
 
-  /// 分组排名：导入组 0、命名分组 1、未分组 2。
-  private static func groupRank(_ group: String?) -> Int {
-    guard let group else { return 2 }
-    return group == SSHHostProfile.importedGroup ? 0 : 1
-  }
-
-  /// 已排序主机里出现过的分组名（去重、保持显示顺序）。
+  /// 已排序主机里出现过的分组名；规则在 `SSHHostEditing.orderedGroups`。
   static func orderedGroups(_ sortedHosts: [SSHHostProfile]) -> [String] {
-    var seen: Set<String> = []
-    return sortedHosts.compactMap(\.group).filter { seen.insert($0).inserted }
+    SSHHostEditing.orderedGroups(sortedHosts)
   }
 
-  /// 已排序主机里出现过的标签（不分大小写去重，保留第一次出现的写法与显示顺序）。
+  /// 已排序主机里出现过的标签；规则在 `SSHHostEditing.orderedTags`。
   static func orderedTags(_ sortedHosts: [SSHHostProfile]) -> [String] {
-    SSHHostStore.normalizedTags(sortedHosts.flatMap { $0.tags ?? [] }) ?? []
+    SSHHostEditing.orderedTags(sortedHosts)
   }
 
-  /// 每台可解析主机的凭证 endpoint（`user@host:port`）。解析失败的主机没有 endpoint，
-  /// 也就不可能有已保存口令，这不是需要报告的错误。
+  /// 每台可解析主机的凭证 endpoint；规则在 `SSHHostEditing.credentialEndpoints`。
   static func credentialEndpoints(_ hosts: [SSHHostProfile]) -> [UUID: String] {
-    SSHHostResolver.resolveAll(hosts).specs.mapValues(\.credentialEndpoint)
+    SSHHostEditing.credentialEndpoints(hosts)
   }
 
   /// 把主机编码成网页用的对象。键名与 `SSHHostProfile` 的 Codable 键一致，网页原样回传后
@@ -322,14 +295,8 @@ final class SettingsHostsBridge {
     return object
   }
 
-  /// 用系统登记的纯文本编辑器打开文件。`~/.ssh/config` 没有扩展名，直接 `open(url)`
-  /// 会找不到默认应用，所以先按纯文本类型查编辑器。
+  /// 用系统登记的纯文本编辑器打开文件；实现在 `SSHHostEditing.openInDefaultTextEditor`。
   static func openInDefaultTextEditor(_ url: URL) async throws {
-    let workspace = NSWorkspace.shared
-    guard let editor = workspace.urlForApplication(toOpen: .plainText) else {
-      guard workspace.open(url) else { throw SettingsHostsError.noTextEditor }
-      return
-    }
-    _ = try await workspace.open([url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
+    try await SSHHostEditing.openInDefaultTextEditor(url)
   }
 }

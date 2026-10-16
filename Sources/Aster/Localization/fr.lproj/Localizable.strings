@@ -2055,3 +2055,11 @@
 "（主机已删除）" = "(hôte supprimé)";
 "（只打开 SSH 终端，不执行命令）" = "(Ouvre seulement un terminal SSH, sans exécuter de commande)";
 "（未说明）" = "(non précisé)";
+"Keepalive 间隔（秒）" = "Intervalle keepalive (s)";
+"Keepalive 次数" = "Nombre de keepalive";
+"连接超时（秒）" = "Délai de connexion (s)";
+"SOCKS 代理" = "Proxy SOCKS";
+"HTTP 代理" = "Proxy HTTP";
+"%@ 必须是整数" = "%@ doit être un entier";
+"%@ 要写成 主机:端口" = "%@ doit être au format hôte:port";
+"第 %@ 条转发规则的地址要写成 主机:端口" = "L'adresse de la règle de redirection %@ doit être au format hôte:port";
