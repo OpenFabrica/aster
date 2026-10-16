@@ -248,3 +248,49 @@ private func temporaryHostsStoreURL() -> URL {
 
   #expect(Set(referencing.map(\.id)) == Set([userA.id, userB.id]))
 }
+
+/// 测：标签去首尾空白、丢空串、不分大小写去重（保留首次写法），空列表变 nil；默认项不带标签。
+@Test func sshHostStoreNormalizesTags() {
+  var defaults = SSHHostProfile.emptyDefaults()
+  defaults.tags = ["ignored"]
+  let host = SSHHostProfile(name: "Box", host: "10.0.0.1", tags: [" Prod ", "prod", "", "db", "DB"])
+  let blank = SSHHostProfile(name: "Blank", host: "10.0.0.2", tags: ["  ", ""])
+  let normalized = SSHHostStore.normalized([defaults, host, blank])
+
+  #expect(normalized[0].tags == nil)
+  #expect(normalized[1].tags == ["Prod", "db"])
+  #expect(normalized[2].tags == nil)
+}
+
+/// 测：超过 16 个、单个超过 32 字节、含逗号 / 换行 / 控制字符的标签报 `invalid tags`。
+@Test func sshHostStoreRejectsInvalidTags() {
+  let valid = SSHHostProfile(name: "ok", host: "h", tags: (0..<SSHHostStore.maximumTags).map { "t\($0)" })
+  #expect(SSHHostStore.validate(SSHHostStore.normalized([valid])).isEmpty)
+  let cases: [[String]] = [
+    (0...SSHHostStore.maximumTags).map { "t\($0)" },
+    [String(repeating: "x", count: SSHHostStore.maximumTagBytes + 1)],
+    ["a,b"],
+    ["line\nbreak"],
+    ["tab\there"],
+  ]
+  for tags in cases {
+    let host = SSHHostProfile(name: "bad", host: "h", tags: tags)
+    let reasons = SSHHostStore.validate([.emptyDefaults(), host])
+    #expect(reasons == ["[1] invalid tags"], "\(tags) 应被拒绝")
+  }
+  let fine = SSHHostProfile(
+    name: "fine", host: "h",
+    tags: [String(repeating: "x", count: SSHHostStore.maximumTagBytes), "生产"])
+  #expect(SSHHostStore.validate([.emptyDefaults(), fine]).isEmpty)
+}
+
+/// 测：标签随 save → load 往返。
+@Test func sshHostStoreRoundTripsTags() throws {
+  let url = temporaryHostsStoreURL()
+  let store = SSHHostStore(fileURL: url)
+  defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+  let host = SSHHostProfile(name: "Box", host: "10.0.0.1", tags: ["prod", "web"])
+  try store.save([host])
+  #expect(try store.load().last?.tags == ["prod", "web"])
+}

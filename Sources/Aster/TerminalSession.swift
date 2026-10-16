@@ -2583,9 +2583,12 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     return process.shellPid
   }
 
-  /// CLI 写入 SSH/sudo/su Pane 需要第二个显式权限。判断只使用当前 Shell Integration
-  /// 命令首 token 与远端 OSC 7 状态，不扫描终端输出，避免提示文字造成误判。
+  /// CLI 写入 SSH/sudo/su Pane 需要第二个显式权限。原生 SSH Pane 与远端受管终端从一开始
+  /// 就算敏感：不等 OSC 7 上报远端目录，否则连接建立到首次上报之间的空窗里 `pane.send_text`
+  /// 能绕过这道开关。其余 Pane 只看当前 Shell Integration 命令首 token 与远端 OSC 7 状态，
+  /// 不扫描终端输出，避免提示文字造成误判。
   var isSensitiveAutomationSession: Bool {
+    if nativeSSH != nil || remoteManagedMachineLabel != nil { return true }
     if !currentWorkingDirectoryIsLocal { return true }
     guard let command = submittedCommand else { return false }
     let executable = ShellCommandTokenizer.tokenize(command).tokens.first.map {
@@ -3006,9 +3009,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     pendingManagedTakeover = false
     if let managedTerminal,
       let bridge = ManagedTerminalCoordinatorRegistry.coordinator(for: managedTerminal)
-        .bridgeCommandText(for: managedTerminal, takeover: takeover)
+        .bridgeLaunch(for: managedTerminal, takeover: takeover)
     {
-      view.command = bridge
+      view.command = bridge.command
+      // 远端桥经 `aster-ssh client` 时，票据在 surface 真正创建时现签（一次性、120 秒有效）。
+      view.launchEnvironmentProvider = bridge.environment
     }
     // 先登记再创建 surface；极短命命令的退出 callback 可能在 createSurface 返回前到达。
     ghosttyView = view
@@ -4102,6 +4107,24 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     guard let terminalView else { return nil }
     let lines = terminalView.boundedTextSnapshot().lines
     return lines.suffix(maximumLines).joined(separator: "\n")
+  }
+
+  /// agent 主机终端读屏：活动屏幕（主屏或备用屏中正在显示的那个），不含回滚。
+  /// 标记符轮询只看这一屏，开销与屏幕大小相关而不是与回滚长度相关。
+  func readActiveScreenText() -> String? {
+    ghosttyView?.readAgentDetectionText()
+  }
+
+  /// PTY 前台进程 PID。agent 主机终端据此确认连接的确是 `aster-ssh`，
+  /// 而不是引擎不可用时回退出来的本地 Shell（那样命令会在本机执行）。
+  var foregroundProcessIdentifier: Int32? {
+    ghosttyView?.foregroundProcessIdentifier
+  }
+
+  /// 是否处在备用屏（vim、less、top 等全屏程序）。agent 主机终端此时不敲任何探针，
+  /// 否则 `export …` 会被当成 vim 普通模式命令执行。
+  var isAlternateScreenActive: Bool {
+    ghosttyView?.bufferInfo()?.alternate_screen ?? false
   }
 
   func textSnapshot() -> TerminalTextSnapshot {
@@ -6015,6 +6038,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     switch NativeSSHPaneLaunch.plan(for: spec, endpoint: endpoint, hosts: SSHHostDirectory.shared.hosts) {
     case .native(let executable, let arguments):
       view.command = GhosttyConfiguration.launchCommand(shell: executable, arguments: arguments)
+      // 票据一次性、120 秒有效：后台标签的 surface 可能很久后才创建，所以在创建时现签，
+      // surface 重建（重新连接）也会再签一张。
+      view.launchEnvironmentProvider = {
+        NativeSSHTicketing.launchEnvironment(executablePath: executable, arguments: arguments)
+      }
     case .openssh(let target, let reason):
       appendStartupWarning(reason)
       let command = NativeSSHPaneLaunch.typedSSHCommand(target: target)

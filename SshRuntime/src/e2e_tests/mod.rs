@@ -6,10 +6,13 @@ mod agent_tests;
 mod auth_tests;
 mod known_hosts_tests;
 mod session_tests;
+mod ticket_tests;
+mod vault_tests;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -24,12 +27,26 @@ use crate::client::{self, ClientIo, Outcome};
 use crate::env::Paths;
 use crate::protocol::{OpenRequest, ResizeRequest, ResolvedSpec};
 
+/// 夹具模拟 App 下发的启动票据密钥（`tickets.key`）。
+pub const TICKET_KEY: [u8; 32] = [0x5a; 32];
+
+/// 夹具签发票据用的 nonce 计数器，保证每次运行的 nonce 不同。
+static NEXT_NONCE: AtomicU64 = AtomicU64::new(1);
+
+/// 像 App 一样签一张新票据。
+pub fn fresh_ticket() -> String {
+    let nonce = format!("{:032x}", NEXT_NONCE.fetch_add(1, Ordering::Relaxed));
+    crate::tickets::mint_now(&TICKET_KEY, &nonce)
+}
+
 /// 模拟 App 的作答脚本；队列空了就回答取消 / 拒绝。
 #[derive(Default)]
 pub struct Script {
     pub passwords: VecDeque<Option<String>>,
     pub passphrases: VecDeque<Option<String>>,
     pub kbd: VecDeque<Option<Vec<String>>>,
+    /// 保险库私钥请求的回答（按请求顺序）。
+    pub private_keys: VecDeque<Option<String>>,
     pub host_keys: VecDeque<bool>,
 }
 
@@ -73,6 +90,9 @@ impl Harness {
             local_user: "tester".into(),
         };
         let (broker, mut rx) = Broker::new(paths, lookup);
+        // 与 App 一样，第一条控制消息就是票据密钥。
+        let key = json!({"type": "tickets.key", "key": hex::encode(TICKET_KEY)});
+        broker.handle_line(&key.to_string()).await;
         let socket = dir.path().join("broker.sock");
         let listener = crate::broker::bind_socket(&socket).expect("bind broker socket");
         tokio::spawn(broker.clone().serve(listener));
@@ -141,13 +161,18 @@ impl Harness {
     }
 
     /// 同 `run`，可选择不关 stdin、并在 OPENED 后发送窗口变化。
+    ///
+    /// `open.ticket` 为 None 时像 App 一样自动签一张新票；测试要验证拒绝路径时自己填。
     pub async fn run_with(
         &self,
-        open: OpenRequest,
+        mut open: OpenRequest,
         input: Vec<&[u8]>,
         close_stdin: bool,
         resizes: Vec<ResizeRequest>,
     ) -> Run {
+        if open.ticket.is_none() {
+            open.ticket = Some(fresh_ticket());
+        }
         let stream = UnixStream::connect(&self.socket)
             .await
             .expect("connect broker");
@@ -195,6 +220,9 @@ fn answer_for(event: &Value, script: &Mutex<Script>) -> Option<Value> {
             ),
             "passphrase" => Some(
                 json!({"type":"auth.answer","id":id,"secret":script.passphrases.pop_front().flatten(),"responses":null}),
+            ),
+            "privateKey" => Some(
+                json!({"type":"auth.answer","id":id,"secret":script.private_keys.pop_front().flatten(),"responses":null}),
             ),
             _ => Some(
                 json!({"type":"auth.answer","id":id,"secret":null,"responses":script.kbd.pop_front().flatten()}),
@@ -267,6 +295,7 @@ pub fn open_host(id: &str, command: Option<&str>, interactive: bool) -> OpenRequ
         command: command.map(String::from),
         interactive,
         connect_timeout: None,
+        ticket: None,
     }
 }
 

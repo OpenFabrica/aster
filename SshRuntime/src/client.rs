@@ -330,8 +330,32 @@ fn spawn_signal_exit() -> std::io::Result<()> {
     Ok(())
 }
 
+/// 取出启动票据并从本进程环境里抹掉。
+///
+/// 先把 environ 里那段字节原地清零（`ps -E` / KERN_PROCARGS2 读的就是这块初始内存，
+/// 只 unsetenv 删不掉它），再 unsetenv，免得票据被继承或被同用户进程多看一眼。
+/// 票据本身一次性，这一步只是缩短暴露窗口。
+fn take_ticket() -> Option<String> {
+    let value = std::env::var(crate::tickets::TICKET_ENV)
+        .ok()
+        .filter(|v| !v.is_empty());
+    let name = std::ffi::CString::new(crate::tickets::TICKET_ENV).expect("no NUL in name");
+    // SAFETY: 调用时只有主线程（tokio runtime 与 stdin 读线程都还没起），没有并发读写 environ；
+    // getenv 返回的指针指向以 NUL 结尾、长度为 strlen 的可写字节。
+    unsafe {
+        let ptr = libc::getenv(name.as_ptr());
+        if !ptr.is_null() {
+            std::ptr::write_bytes(ptr, 0, libc::strlen(ptr));
+        }
+    }
+    std::env::remove_var(crate::tickets::TICKET_ENV);
+    value
+}
+
 /// `aster-ssh client …` 入口。
 pub fn run_cli(args: &[String]) -> ExitCode {
+    // 必须在起任何线程之前做：见 take_ticket 的 SAFETY 说明。
+    let ticket = take_ticket();
     let args = match parse_args(args) {
         Ok(a) => a,
         Err(e) => finish(&Outcome::Failed(SshFailure::new(
@@ -385,6 +409,7 @@ pub fn run_cli(args: &[String]) -> ExitCode {
             command: args.command.clone(),
             interactive: !args.no_prompt,
             connect_timeout: args.connect_timeout,
+            ticket,
         };
         let (resize_tx, resize_rx) = mpsc::unbounded_channel();
         if raw {

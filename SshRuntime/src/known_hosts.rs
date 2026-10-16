@@ -45,27 +45,41 @@ pub fn fingerprint(key: &PublicKey) -> String {
 
 /// 行标记。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Marker {
+pub(crate) enum Marker {
     Revoked,
     CertAuthority,
 }
 
-/// 解析后的一行。
-struct Entry<'a> {
-    marker: Option<Marker>,
-    hosts: &'a str,
-    key: Option<PublicKey>,
+/// 解析后的一行。各字段都是原行的子串，`known-hosts` 子命令靠它定位并原样保留其余字节。
+pub(crate) struct Entry<'a> {
+    pub(crate) marker: Option<Marker>,
+    pub(crate) hosts: &'a str,
+    pub(crate) algorithm: &'a str,
+    pub(crate) key: Option<PublicKey>,
+    /// 密钥之后的注释；没有时为 None。
+    pub(crate) comment: Option<&'a str>,
+}
+
+/// 切出下一个空白分隔的字段，返回（字段，剩余部分）；没有字段时返回 None。
+fn split_field(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    Some(match s.find(char::is_whitespace) {
+        Some(i) => (&s[..i], &s[i..]),
+        None => (s, ""),
+    })
 }
 
 impl<'a> Entry<'a> {
     /// 解析一行；注释、空行和格式不对的行返回 None。
-    fn parse(line: &'a str) -> Option<Self> {
+    pub(crate) fn parse(line: &'a str) -> Option<Self> {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             return None;
         }
-        let mut fields = line.split_whitespace();
-        let mut first = fields.next()?;
+        let (mut first, mut rest) = split_field(line)?;
         let marker = match first {
             "@revoked" => Some(Marker::Revoked),
             "@cert-authority" => Some(Marker::CertAuthority),
@@ -73,19 +87,22 @@ impl<'a> Entry<'a> {
             _ => None,
         };
         if marker.is_some() {
-            first = fields.next()?;
+            (first, rest) = split_field(rest)?;
         }
-        let _algorithm = fields.next()?;
-        let b64 = fields.next()?;
+        let (algorithm, rest) = split_field(rest)?;
+        let (b64, rest) = split_field(rest)?;
+        let comment = Some(rest.trim()).filter(|c| !c.is_empty());
         Some(Self {
             marker,
             hosts: first,
+            algorithm,
             key: russh::keys::parse_public_key_base64(b64).ok(),
+            comment,
         })
     }
 
     /// 主机字段是否匹配 token。取反模式命中时整行不匹配（OpenSSH 语义）。
-    fn matches(&self, token: &str) -> bool {
+    pub(crate) fn matches(&self, token: &str) -> bool {
         let mut matched = false;
         for pattern in self.hosts.split(',') {
             if let Some(negated) = pattern.strip_prefix('!') {
@@ -107,8 +124,19 @@ impl<'a> Entry<'a> {
     }
 }
 
+/// 单个非取反模式是否命中 token（明文通配或 hashed）。替换与删除只去掉这样的模式。
+pub(crate) fn pattern_hits(pattern: &str, token: &str) -> bool {
+    if pattern.starts_with('!') {
+        false
+    } else if pattern.starts_with("|1|") {
+        hashed_matches(pattern, token)
+    } else {
+        glob_match(pattern, token)
+    }
+}
+
 /// `*` / `?` 通配匹配，大小写不敏感（主机名本身不区分大小写）。
-fn glob_match(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
     /// 字节级回溯匹配。
     fn inner(p: &[u8], t: &[u8]) -> bool {
         match (p.first(), t.first()) {
@@ -123,7 +151,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 /// hashed 条目：`|1|base64(salt)|base64(HMAC-SHA1(salt, token))`。
-fn hashed_matches(pattern: &str, token: &str) -> bool {
+pub(crate) fn hashed_matches(pattern: &str, token: &str) -> bool {
     let mut parts = pattern.trim_start_matches("|1|").split('|');
     let (Some(salt), Some(hash)) = (parts.next(), parts.next()) else {
         return false;
@@ -216,7 +244,7 @@ fn entry_line(host: &str, port: u16, key: &PublicKey) -> std::io::Result<String>
 }
 
 /// 确保父目录存在（0700）。
-fn ensure_parent(path: &Path) -> std::io::Result<()> {
+pub(crate) fn ensure_parent(path: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         if !dir.exists() {
             std::fs::create_dir_all(dir)?;
@@ -252,7 +280,8 @@ pub fn append(path: &Path, host: &str, port: u16, key: &PublicKey) -> std::io::R
 ///
 /// 同算法、不同密钥、只列这一台主机的行原地换成新行；列了多台主机的行只去掉命中的模式，
 /// 保留其它主机，新记录追加到末尾。没有可替换的行时退化为追加。
-/// 写入走「临时文件 + rename」，中途失败不会留下半个文件。
+/// 写入走 `atomic_file::write`：先解析符号链接再「临时文件 + rename」，中途失败不会留下半个文件，
+/// 指向别处的 `~/.ssh/known_hosts` 链接也不会被换成普通文件。
 pub fn replace(path: &Path, host: &str, port: u16, key: &PublicKey) -> std::io::Result<()> {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -282,10 +311,7 @@ pub fn replace(path: &Path, host: &str, port: u16, key: &PublicKey) -> std::io::
                 let hosts: Vec<&str> = entry
                     .hosts
                     .split(',')
-                    .filter(|p| {
-                        !(glob_match(p, &token)
-                            || (p.starts_with("|1|") && hashed_matches(p, &token)))
-                    })
+                    .filter(|p| !pattern_hits(p, &token))
                     .collect();
                 let rest = line
                     .trim_start()
@@ -299,21 +325,9 @@ pub fn replace(path: &Path, host: &str, port: u16, key: &PublicKey) -> std::io::
     if !replaced {
         out.push(new_line);
     }
-    ensure_parent(path)?;
-    let tmp = path.with_extension("aster-tmp");
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        file.write_all(out.join("\n").as_bytes())?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)
+    let mut bytes = out.join("\n").into_bytes();
+    bytes.push(b'\n');
+    crate::atomic_file::write(path, &bytes)
 }
 
 /// 一跳要查的 known_hosts 文件：用户级文件依次查、写入第一个；系统级文件只读。
@@ -535,6 +549,32 @@ mod tests {
             check_file(&path, "b.example", 22, &key(1)),
             HostKeyStatus::Known
         );
+    }
+
+    #[test]
+    fn replace_through_a_symlink_keeps_the_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real_known_hosts");
+        let link = dir.path().join("known_hosts");
+        std::fs::write(&real, format!("h {}\n", key_text(&key(1)))).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        replace(&link, "h", 22, &key(2)).unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(check_file(&real, "h", 22, &key(2)), HostKeyStatus::Known);
+    }
+
+    #[test]
+    fn entry_parse_exposes_algorithm_and_comment() {
+        let line = format!("@revoked a,b {} me@laptop  x", key_text(&key(1)));
+        let entry = Entry::parse(&line).unwrap();
+        assert_eq!(entry.marker, Some(Marker::Revoked));
+        assert_eq!(entry.hosts, "a,b");
+        assert_eq!(entry.algorithm, "ssh-ed25519");
+        assert_eq!(entry.comment, Some("me@laptop  x"));
+        assert!(Entry::parse("@bogus h ssh-ed25519 AAAA").is_none());
     }
 
     #[test]

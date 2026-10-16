@@ -39,6 +39,15 @@ private final class InMemoryCredentialStore: SSHCredentialStoring {
   func deletePassphrase(forKeyDigest digest: String) throws {
     _ = entries.withLock { $0.removeValue(forKey: Self.passphraseKey(digest)) }
   }
+  // 保险库私钥：本文件只测口令与 passphrase，私钥用例见 SSHAuthCoordinatorVaultTests。
+  func vaultPrivateKey(id: UUID) throws -> String? { entries.withLock { $0["vault|\(id)"] } }
+  func setVaultPrivateKey(_ privateKey: String, id: UUID, label: String) throws {
+    entries.withLock { $0["vault|\(id)"] = privateKey }
+  }
+  func deleteVaultPrivateKey(id: UUID) throws {
+    _ = entries.withLock { $0.removeValue(forKey: "vault|\(id)") }
+  }
+  func hasVaultPrivateKey(id: UUID) -> Bool { entries.withLock { $0["vault|\(id)"] != nil } }
 
   /// 条目总数。
   var count: Int { entries.withLock { $0.count } }

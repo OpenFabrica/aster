@@ -3,7 +3,7 @@ import AsterCore
 import Foundation
 
 // 「保存为主机…」表单：Open Quickly 快连行、ssh alias 行与手敲 ssh 的标签菜单共用。
-// 只收集名称、分组与 `user@host:port`；认证、跳板等进阶字段仍在设置 ▸ 主机里编辑。
+// 只收集名称、分组与 `user@host:port`；认证、跳板等进阶字段在侧栏「主机」页的编辑面板里编辑。
 // 风格与 `MachineSetupSheet` 一致：NSAlert + accessoryView，真实可点。
 
 /// 保存为主机的表单与纯转换逻辑。
@@ -56,11 +56,15 @@ enum SaveSSHHostSheet {
 
   /// 展示表单；取消返回 nil。
   ///
-  /// - Parameter groups: 已有分组，供分组下拉补全。
-  static func prompt(prefill: Prefill, groups: [String], in window: NSWindow?) -> Draft? {
+  /// - Parameters:
+  ///   - groups: 已有分组，供分组下拉补全。
+  ///   - title: 表单标题；nil 用「保存为主机」（主机页「新建主机」传自己的标题）。
+  static func prompt(
+    prefill: Prefill, groups: [String], title: String? = nil, in window: NSWindow?
+  ) -> Draft? {
     let alert = NSAlert()
-    alert.messageText = L("保存为主机")
-    alert.informativeText = L("保存后可在 Open Quickly 与「设置 ▸ 主机」里使用。认证方式、跳板机等选项请到设置里补充。")
+    alert.messageText = title ?? L("保存为主机")
+    alert.informativeText = L("保存后可在 Open Quickly 与侧栏「主机」页里使用。认证方式、跳板机等选项请到主机页里补充。")
     alert.addButton(withTitle: L("保存"))
     alert.addButton(withTitle: L("取消"))
 
@@ -121,14 +125,14 @@ enum SaveSSHHostSheet {
     if case SaveError.invalidTarget(let text) = error {
       return L("无法识别「\(text)」。请填写 user@host、user@host:port 或 [IPv6]:port。")
     }
-    return SettingsHostsBridge.describe(error)
+    return SSHHostEditing.describe(error)
   }
 
   /// 手敲 ssh 命令不能保存时的用户文案。
   static func describe(_ rejection: QuickConnectTarget.DerivationRejection) -> String {
     switch rejection {
     case .unsupportedOption(let option):
-      L("这条命令用了 \(option) 等选项，只保存地址会连到不同的配置。请在「设置 ▸ 主机」里新建主机并填写这些选项。")
+      L("这条命令用了 \(option) 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。")
     case .missingValue(let option):
       L("命令里的 \(option) 缺少取值。")
     case .invalidPort(let value):

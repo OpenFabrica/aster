@@ -25,6 +25,7 @@ use crate::protocol::{
 };
 use crate::ssh_config::HostEntry;
 use crate::target::Resolver;
+use crate::tickets::LaunchTickets;
 use crate::{bridge, forward, log_info, log_warn};
 
 /// ssh_config 查询函数。
@@ -44,6 +45,8 @@ pub struct Broker {
     /// hostID（大写）→ 规格，由 `profiles.sync` 全量替换。
     profiles: Mutex<HashMap<String, ResolvedSpec>>,
     lookup: Lookup,
+    /// 启动票据校验：OPEN 必须带 App 签发的一次性票据。
+    tickets: LaunchTickets,
 }
 
 impl Broker {
@@ -63,6 +66,7 @@ impl Broker {
             env,
             profiles: Mutex::new(HashMap::new()),
             lookup,
+            tickets: LaunchTickets::new(),
         });
         (broker, rx)
     }
@@ -70,6 +74,12 @@ impl Broker {
     /// 控制通道。
     pub fn control(&self) -> &Arc<Control> {
         &self.env.control
+    }
+
+    /// 启动票据校验器。发行版只有关票开关用它，那段代码不编译，所以放过 dead_code。
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    pub fn tickets(&self) -> &LaunchTickets {
+        &self.tickets
     }
 
     /// 连接池（测试用）。
@@ -125,6 +135,13 @@ impl Broker {
                 self.env.control.deliver_host_key(&id, accept)
             }
             AppCommand::Disconnect { endpoint } => self.pool.disconnect(&endpoint).await,
+            AppCommand::TicketsKey { key } => {
+                let key = Zeroizing::new(key);
+                match self.tickets.set_key_hex(&key) {
+                    Ok(()) => log_info!("tickets.key: launch ticket key installed"),
+                    Err(e) => log_warn!("tickets.key ignored: {e}"),
+                }
+            }
             AppCommand::Shutdown => return Flow::Shutdown,
             AppCommand::Unknown => {}
         }
@@ -186,7 +203,7 @@ impl Broker {
         resolver.resolve(text)
     }
 
-    /// 服务一个 client：OPEN → 连接 → 开 channel → OPENED → 转发。
+    /// 服务一个 client：OPEN → 验启动票据 → 连接 → 开 channel → OPENED → 转发。
     async fn serve_client(self: Arc<Self>, stream: UnixStream) {
         let (mut rd, mut wr) = stream.into_split();
         let open = match read_frame(&mut rd).await {
@@ -203,6 +220,14 @@ impl Broker {
             },
             _ => return,
         };
+        // 先验票再解析目标：没有 App 签发的票据，连「主机 ID 是否存在」也不回答。
+        if let Err(reason) = self.tickets.check(open.ticket.as_deref()).await {
+            log_warn!("OPEN rejected: launch ticket {reason}");
+            let failure =
+                SshFailure::new(FailureKind::AuthenticationRequired, "invalid launch ticket");
+            let _ = send_error(&mut wr, &failure).await;
+            return;
+        }
         let spec = match self.spec_for(&open) {
             Ok(s) => s,
             Err(f) => {
@@ -462,6 +487,13 @@ async fn run(socket: PathBuf) -> i32 {
         )
     });
     let (broker, mut out_rx) = Broker::new(paths, lookup);
+    // 关票开关只在 debug 构建生效：发行版 broker 继承 App 的环境，`launchctl setenv` 就能
+    // 改到它，若照样认这个开关，同一用户的任何进程都能关掉票据校验。
+    #[cfg(debug_assertions)]
+    if std::env::var(crate::tickets::SWITCH_ENV).as_deref() == Ok("off") {
+        broker.tickets().disable();
+        log_warn!("launch tickets disabled by ASTER_SSH_TICKETS=off (debug only)");
+    }
     let writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(line) = out_rx.recv().await {

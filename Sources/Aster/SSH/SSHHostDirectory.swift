@@ -3,7 +3,7 @@ import Combine
 import Foundation
 
 // 已保存 SSH 主机的 App 侧唯一权威入口：读写 hosts.json、监听外部修改、发布变化。
-// 设置页、Open Quickly、新建工作区表单与 broker 同步都从这里读，不各自持有副本。
+// 侧栏主机页、Open Quickly、新建工作区表单与 broker 同步都从这里读，不各自持有副本。
 
 /// 已保存 SSH 主机目录。
 @MainActor
@@ -74,6 +74,20 @@ final class SSHHostDirectory: ObservableObject {
       return copy
     }
     try commit(next)
+  }
+
+  /// 把 `~/.ssh/config` 的解析结果合并进导入组并落盘；内容没变时不写文件。
+  ///
+  /// 合并基于调用这一刻的列表：调用方在 `await` 解析完成后才调用，等待期间其它窗口的
+  /// 修改不会被覆盖。主机页的「导入」走这里。
+  func mergeSSHConfig(_ listing: SSHConfigListing) throws -> SSHConfigImportResult {
+    let current = hosts
+    let result = SSHConfigImport.merge(listing, into: current)
+    if result.hosts != current {
+      try store.save(result.hosts)
+      reload()
+    }
+    return result
   }
 
   /// 只改分组。

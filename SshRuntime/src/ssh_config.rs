@@ -279,13 +279,11 @@ fn expand_hostname_tokens(hostname: &str, alias: &str) -> String {
     out
 }
 
-/// 当前用户的家目录：`ASTER_SSH_HOME` 优先于 `$HOME`（空值视为未设置），与 broker
-/// 找 known_hosts、默认密钥用同一个目录，测试把它指到临时目录时两边不会分叉。
+/// 当前用户的家目录：`ASTER_SSH_HOME`（仅 debug 构建）优先于 `$HOME`（空值视为未设置），
+/// 与 broker 找 known_hosts、默认密钥用同一个目录，测试把它指到临时目录时两边不会分叉。
 fn home_dir() -> Option<PathBuf> {
-    ["ASTER_SSH_HOME", "HOME"]
-        .iter()
-        .filter_map(std::env::var_os)
-        .find(|value| !value.is_empty())
+    crate::env::debug_override_env("ASTER_SSH_HOME")
+        .or_else(|| std::env::var("HOME").ok().filter(|value| !value.is_empty()))
         .map(PathBuf::from)
 }
 

@@ -54,7 +54,9 @@ public struct RemoteSSHStreamRunner: RemoteSSHStreaming {
     var environment = ProcessInfo.processInfo.environment
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     environment["LC_ALL"] = "C"
-    process.environment = environment
+    // `aster-ssh client` 需要一张现签的启动票据，其它可执行文件不带。
+    process.environment = NativeSSHTicketing.environment(
+      environment, executablePath: executablePath, arguments: arguments)
 
     let input: FileHandle
     if let stdinFile {

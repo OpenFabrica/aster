@@ -407,6 +407,10 @@ public final class ProcessSessionEventLineSource: SessionEventLineSource, @unche
 
     process.executableURL = URL(fileURLWithPath: invocation.executablePath)
     process.arguments = invocation.arguments
+    // 远端订阅经 `aster-ssh client` 时带一张现签的启动票据；本机 aster-session 环境不变。
+    process.environment = NativeSSHTicketing.environment(
+      ProcessInfo.processInfo.environment, executablePath: invocation.executablePath,
+      arguments: invocation.arguments)
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = output
     process.standardError = errors

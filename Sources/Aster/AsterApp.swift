@@ -358,6 +358,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // 认证与主机密钥请求交给钥匙串协调者，且必须在拉起 broker 之前接上：
     // ready 之后的第一条 auth.request 可能立刻到达，没接上时请求一律被取消。
     SSHBrokerSupervisor.shared.authCoordinator = SSHAuthCoordinator.shared
+    // 所有 `aster-ssh client` 启动点经 NativeSSHTicketing 取票；签发器自带锁，可在任意线程调用。
+    let brokerSupervisor = SSHBrokerSupervisor.shared
+    NativeSSHTicketing.install { brokerSupervisor.mintTicket() }
     SSHBrokerSupervisor.shared.start(preferredEngine: preferences.configuration.shell.resolvedSSHEngine)
     configureWorkspaceModel(model)
     model.beginApplicationSession(launchBehavior: preferences.configuration.launchBehavior)
@@ -426,6 +429,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // broker 读到 shutdown / stdin EOF 即断开全部原生 SSH 连接并退出。
     SSHBrokerSupervisor.shared.shutdown()
     quickTerminalController.shutdown()
+    AgentHostRuntime.shared?.shutdown()
     tearDownUsageMonitor()
     themeSwitcherPanelController?.dismiss(commit: false)
     themeSwitcherPanelController = nil
@@ -455,8 +459,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    let models: [any WorkspaceTerminationParticipant] =
+    var models: [any WorkspaceTerminationParticipant] =
       [quickTerminalController, model] + additionalWorkspaceWindows.values.map { $0.model }
+    if let agentHosts = AgentHostRuntime.shared { models.append(agentHosts) }
     guard WorkspaceTerminationTransaction.commit(models) else {
       // 用户在关闭确认里取消了退出，重启请求随之作废，避免下次普通退出时莫名再开一个实例。
       relaunchAfterTerminate = false
@@ -531,6 +536,10 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
         allowSensitiveSessions: controls.resolvedIPCAllowSensitiveSessions,
         shell: self?.preferences.configuration.shell ?? AsterConfiguration().shell)
     }
+    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID。
+    dispatcher.agentHostService = AgentHostRuntime.install(preferences: preferences) {
+      [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector)
+    }.service
     let server = AsterControlServer(
       socketPath: socketPath,
       onDisconnect: { [weak bridge] connection in
@@ -831,6 +840,19 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     showSettings(nil)
     (settingsWindowController?.contentViewController as? SettingsViewController)?
       .showSection(section)
+  }
+
+  /// 在最前面的工作区窗口里显示侧栏「主机」页，可同时请求打开原生编辑面板。
+  /// 设置页「打开主机页」与新建工作区表单「添加主机…」共用；没有可见工作区窗口时先恢复主窗口。
+  func showHostsPage(section: HostsHubSection = .hosts, editor: HostEditorMode? = nil) {
+    if WorkspaceGroupNavigator.frontmostController() == nil { showMainWindow() }
+    guard let controller = WorkspaceGroupNavigator.frontmostController() else { return }
+    WorkspaceGroupNavigator.bringToFront(controller)
+    if let editor {
+      controller.model.showHostEditor(editor)
+    } else {
+      controller.model.presentHostsPage(section: section)
+    }
   }
 
   /// 设置控件会广播全局配置。打开设置期间让所有工作区只就地更新现存终端，并把
@@ -2155,6 +2177,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     let submenu = NSMenu(title: L("窗口"))
     submenu.addItem(menuItem("Quick Terminal", #selector(toggleQuickTerminal(_:)), "", modifiers: []))
     submenu.addItem(menuItem(L("重新启动 Quick Terminal"), #selector(restartQuickTerminal(_:)), "", modifiers: []))
+    if let agentHosts = AgentHostRuntime.shared { submenu.addItem(agentHosts.makeMenuItem()) }
     submenu.addItem(.separator())
     submenu.addItem(menuItem(L("新建窗口"), #selector(newWindow(_:)), "n"))
     submenu.addItem(menuItem(L("关闭窗口"), #selector(closeActiveWindow(_:)), "w", modifiers: [.command, .shift]))

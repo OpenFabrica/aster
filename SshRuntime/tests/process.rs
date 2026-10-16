@@ -8,7 +8,10 @@ mod test_support;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use hmac::{Hmac, KeyInit, Mac};
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -18,6 +21,23 @@ use test_support::{FakeConfig, FakeSshd};
 
 const BIN: &str = env!("CARGO_BIN_EXE_aster-ssh");
 const HOST_ID: &str = "6F1C0A4E-8C1B-4B7E-9E55-3C4B1D2A9F10";
+/// 测试里扮演 App 的票据密钥。
+const TICKET_KEY: [u8; 32] = [0x42; 32];
+static NEXT_NONCE: AtomicU64 = AtomicU64::new(1);
+
+/// 按 App 的规则签一张 120 秒有效的启动票据（PROTOCOL §3）。
+fn ticket() -> String {
+    let nonce = format!("{:032x}", NEXT_NONCE.fetch_add(1, Ordering::Relaxed));
+    let expiry = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 120_000;
+    let mut mac = <Hmac<sha2_v011::Sha256> as KeyInit>::new_from_slice(&TICKET_KEY).unwrap();
+    mac.update(format!("v1|{nonce}|{expiry}").as_bytes());
+    let tag = hex::encode(mac.finalize().into_bytes());
+    format!("v1.{nonce}.{expiry}.{tag}")
+}
 
 /// 一个运行中的 broker 进程。
 struct BrokerProcess {
@@ -71,9 +91,11 @@ impl BrokerProcess {
             }
         });
         let mut stdin = child.stdin.take().unwrap();
+        // 与 App 一样，先发票据密钥。
+        let key = json!({"type":"tickets.key","key":hex::encode(TICKET_KEY)});
         let sync = json!({"type":"profiles.sync","profiles":{HOST_ID: spec}});
         stdin
-            .write_all(format!("{sync}\n").as_bytes())
+            .write_all(format!("{key}\n{sync}\n").as_bytes())
             .await
             .unwrap();
         stdin.flush().await.unwrap();
@@ -86,13 +108,21 @@ impl BrokerProcess {
         }
     }
 
-    /// 启动一个 client 进程。
+    /// 启动一个带新票据的 client 进程。
     fn client(&self, host_id: &str, command: &str) -> Command {
+        let mut cmd = self.client_without_ticket(host_id, command);
+        cmd.env("ASTER_SSH_TICKET", ticket());
+        cmd
+    }
+
+    /// 启动一个不带票据的 client 进程（模拟绕过 App 直连 socket 的调用方）。
+    fn client_without_ticket(&self, host_id: &str, command: &str) -> Command {
         let mut cmd = Command::new(BIN);
         cmd.args(["client", "--broker"])
             .arg(&self.socket)
             .args(["--host-id", host_id, "--no-prompt", "--", command])
             .env_remove("SSH_AUTH_SOCK")
+            .env_remove("ASTER_SSH_TICKET")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -190,6 +220,31 @@ async fn exit_status_and_structured_error_line_reach_the_caller() {
         .unwrap_or_else(|| panic!("last stderr line: {stderr}"));
     let err: Value = serde_json::from_str(json).unwrap();
     assert_eq!(err["kind"], "transportFailure");
+}
+
+/// 直连 socket 却没有 App 签发的票据：broker 拒绝，client 以 255 退出并写结构化错误行。
+#[tokio::test]
+async fn client_without_a_ticket_is_refused_before_connecting() {
+    let server = FakeSshd::start(FakeConfig {
+        accept_none: true,
+        ..Default::default()
+    })
+    .await;
+    let broker = BrokerProcess::start(server.port).await;
+    let out = tokio::time::timeout(
+        Duration::from_secs(10),
+        broker.client_without_ticket(HOST_ID, "exit 0").output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(out.status.code(), Some(255));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        stderr.lines().last().unwrap_or_default(),
+        r#"aster-ssh-error {"kind":"authenticationRequired","detail":"invalid launch ticket"}"#
+    );
+    assert!(server.stats.execs.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

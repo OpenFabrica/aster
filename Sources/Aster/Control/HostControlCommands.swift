@@ -1,4 +1,4 @@
-// `host.*` 控制协议方法：只读列出已保存的 SSH 主机，供 `aster-cli host list` 使用。
+// `host.*` 控制协议方法：只读列出已保存的 SSH 主机（可按标签筛选），供 `aster-cli host list` 使用。
 import AsterCore
 import Foundation
 
@@ -22,6 +22,15 @@ struct HostControlRow: Codable, Equatable, Sendable {
   var jumpHostID: String?
   /// 跳板主机的名称；跳板引用已失效时为 nil，`jumpHostID` 仍原样回显。
   var jumpHostName: String?
+  /// 主机标签（保持保存时的写法与顺序）；没有标签时为空数组。
+  var tags: [String] = []
+  /// agent 远程执行的授权状态：`always`（有「一直允许」授权）或 `ask`（每次需要批准）。
+  var agentAccess: String?
+}
+
+/// `host.list` 的可选参数。`tags` 非空时只返回同时带有全部这些标签的主机（不分大小写）。
+struct HostListParams: Codable, Equatable, Sendable {
+  var tags: [String]?
 }
 
 struct HostListResult: Codable, Equatable, Sendable {
@@ -35,11 +44,15 @@ struct HostControlSnapshot: Sendable {
   /// 含默认项的全部主机；默认项只用于合并字段，不出现在输出里。
   var hosts: [SSHHostProfile]
   var loadError: String?
+  /// 有「一直允许」agent 授权、且授权指纹与当前目标一致的主机。
+  var alwaysGrantedHostIDs: Set<UUID> = []
 
   /// 从主机目录取当前快照。
   @MainActor
   static func live(_ directory: SSHHostDirectory = .shared) -> HostControlSnapshot {
-    HostControlSnapshot(hosts: directory.hosts, loadError: directory.loadError)
+    HostControlSnapshot(
+      hosts: directory.hosts, loadError: directory.loadError,
+      alwaysGrantedHostIDs: AgentHostService.shared?.alwaysGrantedHostIDs() ?? [])
   }
 }
 
@@ -53,10 +66,17 @@ extension AsterControlDispatcher {
     do {
       switch method {
       case .hostList:
-        let result = HostListResult(
-          hosts: Self.hostRows(snapshot.hosts), configurationError: snapshot.loadError)
+        let params = try request.decodeParams(HostListParams.self)
+        var rows = Self.filter(Self.hostRows(snapshot.hosts), tags: params.tags ?? [])
+        for index in rows.indices {
+          let granted = UUID(uuidString: rows[index].id).map(snapshot.alwaysGrantedHostIDs.contains) ?? false
+          rows[index].agentAccess = granted ? "always" : "ask"
+        }
+        let result = HostListResult(hosts: rows, configurationError: snapshot.loadError)
         return AsterControlResponse(id: request.id, result: try JSONValue(encoding: result))
       }
+    } catch let error as AsterControlError {
+      return AsterControlResponse(id: request.id, error: error)
     } catch {
       return AsterControlResponse(
         id: request.id, error: AsterControlError(code: .internalError, message: "\(error)"))
@@ -83,8 +103,16 @@ extension AsterControlDispatcher {
         group: profile.group,
         target: hostTarget(host: profile.host, user: user, port: port),
         jumpHostID: jumpID?.uuidString,
-        jumpHostName: jumpID.flatMap { names[$0] })
+        jumpHostName: jumpID.flatMap { names[$0] },
+        tags: profile.tags ?? [])
     }
+  }
+
+  /// 按标签筛选：每个要求的标签都必须出现在主机标签里（不分大小写、忽略首尾空白）；空条件不筛选。
+  static func filter(_ rows: [HostControlRow], tags: [String]) -> [HostControlRow] {
+    let wanted = Set(tags.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
+    guard !wanted.isEmpty else { return rows }
+    return rows.filter { row in wanted.isSubset(of: Set(row.tags.map { $0.lowercased() })) }
   }
 
   /// `user@host:port`；IPv6 地址加方括号，避免和端口分隔符混淆。

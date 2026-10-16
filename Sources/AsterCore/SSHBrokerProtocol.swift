@@ -123,6 +123,8 @@ public enum SSHAuthRequestKind: String, Codable, Sendable {
   case password
   case passphrase
   case keyboardInteractive
+  /// 保险库私钥：`secret` 回答未加密的 OpenSSH 私钥文本，或 null 跳过这把密钥。
+  case privateKey
 }
 
 /// broker 发来的凭证请求。
@@ -136,6 +138,8 @@ public struct SSHAuthRequest: Codable, Equatable, Sendable {
   public var keyFile: String?
   /// passphrase 请求时私钥文件内容 SHA-512 的小写 hex，是钥匙串账户名。
   public var keyDigest: String?
+  /// privateKey 请求要的保险库密钥 ID；其它类型为 nil。
+  public var vaultKeyID: UUID?
   public var name: String?
   public var instruction: String?
   public var prompts: [SSHAuthPrompt]
@@ -147,7 +151,7 @@ public struct SSHAuthRequest: Codable, Equatable, Sendable {
     id: String, endpoint: String, kind: SSHAuthRequestKind, hostID: UUID? = nil,
     keyFile: String? = nil, keyDigest: String? = nil, name: String? = nil,
     instruction: String? = nil, prompts: [SSHAuthPrompt] = [], attempt: Int = 1,
-    interactive: Bool = true
+    interactive: Bool = true, vaultKeyID: UUID? = nil
   ) {
     self.id = id
     self.endpoint = endpoint
@@ -160,6 +164,7 @@ public struct SSHAuthRequest: Codable, Equatable, Sendable {
     self.prompts = prompts
     self.attempt = attempt
     self.interactive = interactive
+    self.vaultKeyID = vaultKeyID
   }
 }
 
@@ -270,6 +275,8 @@ public enum SSHBrokerCommand: Equatable, Sendable {
   case hostKeyAnswer(id: String, accept: Bool)
   case disconnect(endpoint: String)
   case shutdown
+  /// 启动票据的 HMAC 密钥（小写 hex）。每个 broker 实例启动后的第一条消息，只走 stdin。
+  case ticketsKey(String)
 
   /// 编码成一行 JSON（不含换行）。
   public func encodedLine() throws -> Data {
@@ -306,6 +313,9 @@ public enum SSHBrokerCommand: Equatable, Sendable {
     case .shutdown:
       struct Body: Encodable { let type = "shutdown" }
       return try encoder.encode(Body())
+    case .ticketsKey(let key):
+      struct Body: Encodable { let type = "tickets.key"; var key: String }
+      return try encoder.encode(Body(key: key))
     }
   }
 }

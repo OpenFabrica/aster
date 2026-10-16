@@ -12,6 +12,7 @@ Aster 把 Otty 的工作区流程、CLI 与代码 Agent 能力放在同一安全
 
 - `WorkflowRecipe`：可移植的 tab/window、Pane 树、内容级别和可选命令；不含 PID、FD 或运行对象。
 - `WorkflowRecipeTrustStore`：按规范化内容 SHA-256 记录信任，不按路径授权。
+- 命令片段（Snippet）：`.commands` scope 的 Recipe，可带 `tags`；规则在 `WorkflowSnippet`，不另建存储。
 - `WorkflowCLIAction`：已解析、有限大小的 CLI 意图；交付层再执行 IPC 和敏感会话门禁。
 - `WorkflowSessionRecoveryPlanner`：根据正常退出、崩溃、更新和 crash loop 决定恢复行为。
 - `AgentProvider` / `AgentSetupPlan`：八类 provider（含 Grok Build）的能力和最小增量安装步骤。
@@ -70,6 +71,14 @@ pnpm 的常见 bin 目录；不会启动登录 shell 或执行用户 rc 文件�
 版本造成 CLI 暂不可见时，已经存在的受管集成不会被误报为未安装。
 
 内置 `AsterNerdSymbols-Regular.ttf` 以进程级 CoreText 注册，并作为终端基础字体 cascade fallback；来源和许可证见 `THIRD-PARTY-NOTICES.md`。
+
+### 命令片段
+
+- 存储：Recipes 目录里的 `.commands` scope `.asterrecipe`。`[recipe]` 表新增可选 `tags = [...]`，只允许 `.commands` scope（布局 Recipe 带标签是 `invalidStructure`），最多 16 个、每个 ≤32 字节，不含逗号与控制字符；为空时不写出，所以没有标签的片段旧版本照样能读；带标签的文件在旧版本里会因未知键 `tags` 报 `unknownKey`。JSON 解码缺 `tags` 时补空数组。v1 不支持变量。
+- 编辑：`SnippetEditorSheet`（AppKit，NSAlert + accessoryView）收集名称、多行命令（一行一条，丢空行）和标签，`WorkflowSnippet.make` 规范化并按 `WorkflowRecipeTOML.validate` 校验，非法时带原输入重弹。设置页 Recipes 动作 `createTextSnippet`、`editSnippet {id}`、`deleteSnippet {id}`；`SnippetRecipeFiles` 只接受 Recipes 目录的直接子文件与 `.commands` scope，删除用 `trashItem`。
+- Open Quickly：`OpenQuicklySnippetCatalog` 把片段行的标题设为片段名、detail 为「首条命令 · 共 N 条 · #tags」，徽章「片段」。主动作 `AppModel.pasteSnippetIntoActivePane` 用 `pastePromptText`（bracketed paste + 粘贴保护），命令以 `\n` 连接，不发 Return。菜单「运行」`AppModel.runSnippet` 与打开 Recipe 共用 `authorizeRecipeReplay`（`WorkflowRecipeOpenPlanner` 信任审查 → 重放模式确认），再把命令放进当前 Pane 的 `pendingRecipeCommands`，经 `sendRecipeCommand`（`.recipeReplay` 来源）逐条发送；同一 Pane 已有未发完的 Recipe 命令时拒绝。「在新标签页打开」走原 `openRecipe`。
+- 排序：当前活动 Pane 是原生 SSH 主机（`TerminalSession.nativeSSH.hostID`）时，片段标签与该主机标签的交集数作为 `OpenQuicklyItem.score`，同匹配质量内排前。
+- 信任：Recipes 目录里的文件按 `recipeFile` 来源加载，内容 SHA-256 变化（包括改标签）后「运行」会重新要求审查；「粘贴」不执行命令，不需要审查。
 
 ### Project Memory MCP
 
@@ -155,7 +164,8 @@ Pane 描述符 UUID，跨 App 重启稳定——后台保活的受管 shell 在�
 
 **安全门禁**（`AsterControlWriteGate`，与旧 CLI 的 `permitsWorkflowCLIWrite` 同源）：写方法需
 「设置 → 控制 → IPC 允许发送输入」，否则 `write_not_allowed`；SSH/sudo 等敏感会话还需
-「允许敏感会话」，否则 `sensitive_session_not_allowed`；只读模式等阻断返回 `write_rejected`。
+「允许敏感会话」，否则 `sensitive_session_not_allowed`（原生 SSH Pane 与远端受管终端不等 OSC 7，
+从一开始就算敏感，见 `TerminalSession.isSensitiveAutomationSession`）；只读模式等阻断返回 `write_rejected`。
 `agent.prompt` 对 `blocked` 的 agent 不写入（`agent_blocked`）；`agent.start` 要求 pane 没有前台
 命令且没有 agent，否则 `pane_busy`；`name` 与某个存活 agent 重名则 `agent_name_taken`（换个名字重试，
 不会启动第二份）。`events.wait` 的 `after_sequence` 早于 512 条回放环的最旧一条时返回 `replay_gap`：
@@ -184,6 +194,45 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
 识别并覆盖旧版 sh 启动器，拒绝覆盖来历不明的文件。`AgentSkillInstallService` 把
 `Resources/skills/aster/` 复制到 `~/.claude/skills/aster` 或 `~/.codex/skills/aster`，
 写 `.aster-skill-version`（App 版本 + SKILL.md sha256）；只接管带标记的目录，符号链接一律拒绝。
+
+### Agent 远程执行（`host.*`）
+
+编程 agent 经控制协议在**已保存的 SSH 主机**上执行命令，命令敲进一个用户看得见的原生 SSH 浮动终端。
+这组方法的协议常量在 `Sources/AsterCore/AgentHostAccess/AgentHostControlProtocol.swift`（`AgentHostControlMethod`），
+服务端分发在 `Sources/Aster/Control/AgentHostControlCommands.swift`，业务在 `Sources/Aster/AgentHosts/`。
+设计、标记符协议、授权与审计全文见 [Agent 远程执行](agent-host-access.md)，这里只写与控制 API 相关的约定。
+
+| 方法 | 说明 |
+| --- | --- |
+| `host.list` | 已有方法；行里新增 `agentAccess`（`always` / `ask`） |
+| `host.open` | 批准后建立或复用主机终端并等就绪 |
+| `host.exec` | 在持久 Shell 里执行命令（默认等 120 s，上限 600 s；输出默认 64 KiB，上限 1 MiB） |
+| `host.wait` | 继续等未结束的命令；只有发起会话能等 |
+| `host.read` | 读该主机终端的活动屏幕（≤500 行） |
+| `host.interrupt` / `host.close` | 对运行中的命令发 Ctrl-C / 关闭终端 |
+| `host.terminals` | 列出调用方本会话的 agent 终端（`agent` 必填，结果不含会话键） |
+
+- 结果状态 `status`：`completed`（带 `exit_code`）、`running`、`needs_input`、`interrupted`、`ended`。`running` 与
+  `needs_input` 不是错误：命令仍在终端里，用 `host.wait` 继续；sudo 口令之类只能由用户在浮动终端里输入，
+  v1 没有任何让 agent 授权或发送任意输入的方法。
+- 新增错误码：`agent_access_disabled`（总开关关着）、`approval_pending`（批准面板还在等用户，稍后重试同一请求）、
+  `approval_denied`（用户拒绝，该会话对该主机 10 分钟冷却）、`agent_paused`（用户在浮动终端里暂停了 agent）、
+  `host_not_ready`（SSH 终端期限内没就绪）、`terminal_ended`、`limit_exceeded`。沿用 `not_found`、
+  `ambiguous_target`、`pane_busy`、`invalid_params`。消息文本是给 agent 的协议文本，不走界面本地化。
+- **不走 IPC 写门禁。** `host.*` 不受「设置 → 控制 → IPC 允许发送输入」与「允许敏感会话」约束，也不经
+  `AsterControlWriteGate`；它有自己的总开关（设置「主机」分类里的「Agent 访问」，默认关）和**按主机的批准**。
+  `pane.*`、`session.snapshot`、`agent.*` 碰不到 agent 终端：它们是独立的 `TerminalSession`，不在任何标签里。
+- **批准是非模态的。** 需要批准时弹浮动面板（不 `runModal`、不用 sheet，否则会挂住控制连接），请求最多等
+  `min(剩余期限, 50 s)`，超时回 `approval_pending`，面板保留，agent 重试即可。50 s 是因为 Codex 工具调用默认 60 s 超时。
+  等待类方法（`host.exec` / `wait` / `open` / `interrupt`）占用每连接 4 个等待名额，等待只挂起 Task，不阻塞主线程。
+- **会话标识。** 所有方法带 `agent: {session, client?, caller_pane?}`；服务端把 `caller_pane` 解析出的 provider 与
+  agent session ID 并进有效会话键，新开的 agent 会话不继承旧会话的「本会话允许」。
+- **入口。** CLI `aster host exec|wait|read|interrupt|close|open|terminals`（`Sources/AsterCLI/HostExecCommands.swift`；
+  `--` 之后的词原样作为命令，未完成时 stderr 一行 JSON 并以退出码 75 退出）；`aster mcp`（`MCPCommand.swift`，
+  stdio MCP server，工具 `list_hosts`、`host_exec`、`host_wait`、`host_read`、`host_interrupt`、`host_close`，
+  目录在 `AgentHostMCPToolCatalog.swift`；Codex 沙箱多半连不上控制 socket，MCP 是它的主路径）。
+- **审计。** 每次执行、授权变化与总开关改动都追加到 `~/Library/Application Support/Aster/audit/agent-hosts-YYYY-MM.jsonl`
+  （保留 13 个月，命令先脱敏、从不记录输出内容）；设置「主机」分类里的「Agent 访问」可分页查看。
 
 ## 失败语义
 

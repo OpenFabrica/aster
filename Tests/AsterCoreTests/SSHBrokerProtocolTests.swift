@@ -280,6 +280,13 @@ private func decodedObject(_ data: Data) throws -> [String: Any] {
   #expect(object.count == 1)
 }
 
+/// 测：`tickets.key` 编码（PROTOCOL §4.2）。
+@Test func sshBrokerProtocolEncodesTicketsKey() throws {
+  let key = String(repeating: "ab", count: 32)
+  let line = try SSHBrokerCommand.ticketsKey(key).encodedLine()
+  #expect(String(decoding: line, as: UTF8.self) == #"{"key":"\#(key)","type":"tickets.key"}"#)
+}
+
 // MARK: - NativeSSHErrorLine.parse
 
 /// 测：从 stderr 里取最后一条结构化错误行，忽略前面的普通日志。

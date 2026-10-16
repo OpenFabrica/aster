@@ -298,7 +298,7 @@
         action("previewExtractionPayload", t("查看将发送的内容"), t("预览提炼时会离开本机的会话摘要"), t("查看…")),
       ]},
     ]},
-    { id: "hosts", title: t("主机"), description: t("保存 SSH 主机、跳板、端口转发与认证方式，供远程机器和原生 SSH 使用。"), special: "hosts", groups: [] },
+    { id: "hosts", title: t("主机"), description: t("控制 Agent 是否能在已保存的主机上远程执行命令，并查看授权与活动记录。"), special: "hosts", groups: [] },
     { id: "view", title: t("视图"), description: t("标签页标题与图标规则、角标、网页窗格和详情面板。"), special: "view", groups: [
       { title: t("标签页与标题定制"), rows: [
         row("view.tabRules.alias", t("项目别名"), t("项目的简称，也可以在标题模板中用 ${alias} 引用。"), "rules", { field: "alias" }),
@@ -2896,14 +2896,26 @@
       card.appendChild(empty);
     } else {
       for (const recipe of recipes) {
-        card.appendChild(makeRow({
+        const recipeRow = makeRow({
           label: recipe.name,
           detail: recipe.summary,
           type: "action",
           action: "openRecipeDetail",
           button: recipe.shortcut || t("查看"),
           payload: { id: recipe.id },
-        }));
+        });
+        // 命令片段可在原生表单里编辑，或移到废纸篓；布局 Recipe 只能查看。
+        if (recipe.snippet) {
+          const controls = recipeRow.querySelector(".setting-control") ?? recipeRow;
+          for (const [name, label] of [["editSnippet", t("编辑…")], ["deleteSnippet", t("删除…")]]) {
+            const button = document.createElement("button");
+            button.className = "action-button";
+            button.textContent = label;
+            button.addEventListener("click", () => send("action", { action: name, payload: { id: recipe.id } }));
+            controls.appendChild(button);
+          }
+        }
+        card.appendChild(recipeRow);
       }
     }
     const actions = document.createElement("div");
@@ -2911,7 +2923,7 @@
     actions.appendChild(document.createElement("div"));
     const controls = document.createElement("div");
     controls.className = "setting-control";
-    for (const [name, label] of [["createTextSnippet", t("新建文本片段")], ["openRecipesFolder", t("打开 Recipe 文件夹")]]) {
+    for (const [name, label] of [["createTextSnippet", t("新建命令片段")], ["openRecipesFolder", t("打开 Recipe 文件夹")]]) {
       const button = document.createElement("button");
       button.className = "action-button";
       button.textContent = label;
@@ -3082,11 +3094,8 @@
         reply?.(message.succeeded === true);
       } else if (message.type === "selectSection") {
         setSection(message.section);
-      } else if (message.type === "hostsEdit") {
-        setSection("hosts");
-        if (snapshot) window.AsterHosts.edit(message.id, hostsContext());
-      } else if (message.type === "hostsImportReport") {
-        window.AsterHosts.showImportReport(message.report, hostsContext());
+      } else if (message.type === "agentAccessAuditPage") {
+        window.AsterAgentAccess?.receive?.(message);
       } else if (message.type === "toast") {
         showToast(message.message, message.level === "error");
       }

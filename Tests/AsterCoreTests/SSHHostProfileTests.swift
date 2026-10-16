@@ -315,3 +315,18 @@ private func makeJumpChain(count: Int) -> [SSHHostProfile] {
   #expect(plainJSON?["identityAgent"] == nil)
   #expect(try JSONDecoder().decode(SSHResolvedSpec.self, from: JSONEncoder().encode(plain)) == plain)
 }
+
+/// 测：没有 `tags` 键的旧 hosts.json 仍能解码，标签为 nil；带标签的 JSON 原样读出。
+@Test func sshHostProfileDecodesLegacyJSONWithoutTags() throws {
+  let legacy = Data(
+    #"{"id":"6F9E1D3C-0B5A-4C1E-9D2F-3A4B5C6D7E8F","name":"old","host":"10.0.0.1","user":"","identityFiles":[],"forwards":[]}"#
+      .utf8)
+  let profile = try JSONDecoder().decode(SSHHostProfile.self, from: legacy)
+  #expect(profile.tags == nil)
+  #expect(profile.name == "old")
+
+  var tagged = profile
+  tagged.tags = ["prod"]
+  let decoded = try JSONDecoder().decode(SSHHostProfile.self, from: JSONEncoder().encode(tagged))
+  #expect(decoded.tags == ["prod"])
+}

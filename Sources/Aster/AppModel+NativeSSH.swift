@@ -183,7 +183,14 @@ extension AppModel {
       let tab = TerminalTabItem(
         title: title, workingDirectory: directory, layout: .leaf(pane),
         titleState: TerminalTitleState(fallback: title))
+      // 记下是否从主机页发起：插入标签会选中它并收起主机页，所以要在插入前读取。
+      let fromHostsPage = isHostsPagePresented
       insertTab(tab, hasContent: true)
+      if fromHostsPage {
+        // 顺带清掉已关闭标签的残留记录，集合只保留仍存在的标签。
+        hostsPageOriginTabIDs = hostsPageOriginTabIDs.filter { id in tabs.contains { $0.id == id } }
+        hostsPageOriginTabIDs.insert(tab.id)
+      }
     }
   }
 
@@ -229,32 +236,24 @@ extension AppModel {
 // MARK: - 保存为主机 / 编辑主机
 
 extension AppModel {
-  /// 弹出「保存为主机…」表单，保存后可选立即连接。
-  func presentSaveHost(prefill: SaveSSHHostSheet.Prefill, in window: NSWindow?) {
+  /// 弹出「保存为主机…」表单，保存后可选立即连接。`title` 为 nil 时用表单默认标题。
+  func presentSaveHost(prefill: SaveSSHHostSheet.Prefill, title: String? = nil, in window: NSWindow?) {
     let groups = Set(SSHHostDirectory.shared.savedHosts.compactMap(\.group)).sorted()
-    guard let draft = SaveSSHHostSheet.prompt(prefill: prefill, groups: groups, in: window) else {
+    guard
+      let draft = SaveSSHHostSheet.prompt(prefill: prefill, groups: groups, title: title, in: window)
+    else {
       return
     }
     let profile: SSHHostProfile
     do {
       profile = try SaveSSHHostSheet.makeProfile(draft)
-      try SettingsHostsBridge.validate(profile, in: SSHHostDirectory.shared.hosts + [profile])
+      try SSHHostEditing.validate(profile, in: SSHHostDirectory.shared.hosts + [profile])
       try SSHHostDirectory.shared.upsert(profile)
     } catch {
       MachineSetupSheet.presentFailure(SaveSSHHostSheet.describe(error), in: window)
       return
     }
     if draft.connectNow { openNativeSSH(hostID: profile.id) }
-  }
-
-  /// 打开设置的「主机」分类并编辑指定主机（主机不存在时停在列表）。
-  func showHostSettings(hostID: UUID?) {
-    guard let delegate = NSApp.delegate as? AsterAppDelegate else { return }
-    delegate.showSettings(section: .hosts)
-    guard let hostID else { return }
-    let settings = NSApp.windows.lazy
-      .compactMap { $0.contentViewController as? SettingsViewController }.first
-    settings?.showHost(hostID)
   }
 
   /// 标签右键菜单里的主机项：原生 SSH 标签给「编辑主机…」，手敲 ssh 的本地标签给「保存为主机…」。
@@ -264,7 +263,7 @@ extension AppModel {
       if let hostID = spec.hostID {
         return [
           ActionMenuItem(title: L("编辑主机…")) { [weak self] in
-            self?.showHostSettings(hostID: hostID)
+            self?.showHostEditor(hostID: hostID)
           }
         ]
       }

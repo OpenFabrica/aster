@@ -89,8 +89,8 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
   private let agentSetupService: AgentSetupService
   /// 生产环境是 SoftwareUpdateService.shared；开发构建与测试为 nil / stub。
   private let updateController: (any SoftwareUpdateControlling)?
-  /// 「主机」分类的快照与动作协作者；回调在 viewDidLoad 接线，不向它开放本类的 private 成员。
-  private let hostsBridge: SettingsHostsBridge
+  /// 「主机」分类（Agent 访问）的快照与动作协作者；回调在 viewDidLoad 接线，不向它开放本类的 private 成员。
+  private let agentAccessBridge: SettingsAgentAccessBridge
   private var selection: Section = .general
   private var searchText = ""
   private var focusedThemeID: String?
@@ -134,8 +134,6 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
   private var settingsMessageProxy: SettingsScriptMessageProxy?
   private var webRevision = 0
   private var webReady = false
-  /// 等网页就绪后要打开编辑表单的主机（「编辑主机…」深链）。
-  private var pendingHostEditID: UUID?
   /// Session Memory 目录的已用空间文本。目录遍历是磁盘 IO，绝不能落在快照构建里
   /// （每次设置改动都会重建快照）；这里只缓存后台算好的结果。
   private var memoryStoreSizeText = L("计算中…")
@@ -233,13 +231,13 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     panelLayoutBinding: WorkspacePanelSettingsBinding = WorkspacePanelSettingsBinding(),
     agentSetupService: AgentSetupService = AgentSetupService(),
     updateController: (any SoftwareUpdateControlling)? = SoftwareUpdateService.shared,
-    hostsBridge: SettingsHostsBridge? = nil
+    agentAccessBridge: SettingsAgentAccessBridge? = nil
   ) {
     self.preferences = preferences
     self.panelLayoutBinding = panelLayoutBinding
     self.agentSetupService = agentSetupService
     self.updateController = updateController
-    self.hostsBridge = hostsBridge ?? SettingsHostsBridge(dependencies: .live())
+    self.agentAccessBridge = agentAccessBridge ?? SettingsAgentAccessBridge()
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -324,7 +322,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
         self.scheduleRefresh()
       }
       .store(in: &cancellables)
-    connectHostsBridge()
+    connectAgentAccessBridge()
     TerminalNotificationService.shared.refreshAuthorizationStatus()
     refreshMemoryStoreSize()
     refreshMemoryMCPState()
@@ -339,20 +337,6 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
       "type": "selectSection",
       "section": section.webIdentifier,
     ])
-  }
-
-  /// 切到「主机」分类并打开指定主机的编辑表单；网页尚未就绪时等 `ready` 后再发。
-  func showHost(_ id: UUID) {
-    showSection(.hosts)
-    pendingHostEditID = id
-    flushPendingHostEdit()
-  }
-
-  /// 网页就绪后发出待处理的主机编辑请求。快照先于它送达，网页能找到这台主机。
-  private func flushPendingHostEdit() {
-    guard webReady, let id = pendingHostEditID else { return }
-    pendingHostEditID = nil
-    sendWebMessage(["type": "hostsEdit", "id": id.uuidString])
   }
 
   private func scheduleRefresh() {
@@ -1527,26 +1511,26 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
 
   // MARK: - 主机
 
-  /// 把「主机」协作者接到本页的快照推送、toast 与网页消息上，并开始监听主机目录。
-  private func connectHostsBridge() {
-    hostsBridge.pushSnapshot = { [weak self] in self?.pushWebSnapshot() }
-    hostsBridge.scheduleRefresh = { [weak self] in self?.scheduleRefresh() }
-    hostsBridge.toast = { [weak self] text, isError in
+  /// 把「主机」分类（Agent 访问）协作者接到本页的快照推送、toast 与网页消息上，并开始监听运行时。
+  private func connectAgentAccessBridge() {
+    agentAccessBridge.pushSnapshot = { [weak self] in self?.pushWebSnapshot() }
+    agentAccessBridge.scheduleRefresh = { [weak self] in self?.scheduleRefresh() }
+    agentAccessBridge.toast = { [weak self] text, isError in
       self?.sendWebToast(text, level: isError ? "error" : "info")
     }
-    hostsBridge.postMessage = { [weak self] message in self?.sendWebMessage(message) }
-    hostsBridge.window = { [weak self] in self?.view.window }
-    hostsBridge.start()
+    agentAccessBridge.postMessage = { [weak self] message in self?.sendWebMessage(message) }
+    agentAccessBridge.start()
   }
 
-  /// 原生回退页只做说明：主机列表与编辑表单只在网页设置页中提供。
+  /// 原生回退页只做说明：Agent 访问只在网页设置页中提供；主机管理在侧栏「主机」页。
   private func hostViews() -> [NSView] {
     [
       sectionTitle(L("主机")),
       card([
-        infoRow(
-          L("已保存的 SSH 主机"), L("主机列表与编辑表单只在网页设置页中提供"),
-          "\(hostsBridge.directory.savedHosts.count)")
+        actionRow(
+          L("主机、密钥与已知主机"), L("主机、密钥与已知主机已移到侧栏「主机」页。"),
+          title: L("打开主机页")
+        ) { [weak self] in self?.agentAccessBridge.openHostsPage() }
       ]),
     ]
   }
@@ -3214,7 +3198,6 @@ extension SettingsViewController: WKNavigationDelegate {
     case "ready":
       webReady = true
       pushWebSnapshot()
-      flushPendingHostEdit()
     case "set":
       handleWebSet(message)
     case "action":
@@ -3505,7 +3488,7 @@ extension SettingsViewController: WKNavigationDelegate {
       "agentControl": agentControlStatus.jsonValue,
       "recipes": makeWebRecipes(),
       "shortcuts": makeWebShortcuts(),
-      "hosts": hostsBridge.snapshot(),
+      "hosts": agentAccessBridge.snapshot(),
     ]
   }
 
@@ -3635,7 +3618,19 @@ extension SettingsViewController: WKNavigationDelegate {
     return urls.filter { $0.pathExtension.lowercased() == WorkflowRecipeTOML.fileExtension }
       .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
       .map { url in
-        [
+        // 命令片段显示片段名、首条命令与标签，并可编辑 / 删除；其它 Recipe 保持文件名与「查看」。
+        if let snippet = try? SnippetRecipeFiles.loadSnippet(at: url) {
+          let tags = snippet.tags.map { "#\($0)" }.joined(separator: " ")
+          return [
+            "id": url.path,
+            "name": snippet.name,
+            "summary": [L("命令片段"), snippet.commands.first ?? "", tags].filter { !$0.isEmpty }
+              .joined(separator: " · "),
+            "shortcut": L("查看"),
+            "snippet": true,
+          ]
+        }
+        return [
           "id": url.path,
           "name": url.deletingPathExtension().lastPathComponent,
           "summary": L("Aster Recipe 文件"),
@@ -4451,6 +4446,8 @@ extension SettingsViewController: WKNavigationDelegate {
       guard let path = payload["id"] as? String, path.hasPrefix(recipesDirectoryURL().path) else { return }
       NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     case "createTextSnippet": createTextSnippetRecipe()
+    case "editSnippet": editSnippetRecipe(path: payload["id"] as? String)
+    case "deleteSnippet": deleteSnippetRecipe(path: payload["id"] as? String)
     case "openConfig":
       do { try writeEditableConfiguration(); NSWorkspace.shared.open(settingsConfigurationURL()) }
       catch { sendWebToast(L("无法打开配置：\(error.localizedDescription)"), level: "error") }
@@ -4472,8 +4469,8 @@ extension SettingsViewController: WKNavigationDelegate {
     case "uninstallAgentSkill": uninstallAgentSkill(providerRawValue: payload["provider"] as? String)
     case "clearWebPaneData": clearWebPaneBrowsingData()
     case _ where action.hasPrefix("hosts."):
-      // 主机动作可能异步完成（导入、打开编辑器），回执由协作者在真正结束时触发。
-      hostsBridge.handle(action: action, payload: payload) { [weak self] succeeded in
+      // Agent 访问动作可能异步完成（审计分页、安装 MCP），回执由协作者在真正结束时触发。
+      agentAccessBridge.handle(action: action, payload: payload) { [weak self] succeeded in
         self?.completeWebMutation(request, succeeded: succeeded)
       }
     case "resetAdvanced":
@@ -4981,55 +4978,54 @@ extension SettingsViewController: WKNavigationDelegate {
     )
   }
 
+  /// 新建命令片段：原生表单收集名称、多行命令与标签，保存为 `.commands` scope 的 Recipe。
   private func createTextSnippetRecipe() {
-    let nameAlert = NSAlert()
-    nameAlert.messageText = L("新建文本片段")
-    nameAlert.informativeText = L("片段将保存为命令型 .asterrecipe；打开时仍遵循 Recipe 重放确认策略。")
-    nameAlert.addButton(withTitle: L("下一步"))
-    nameAlert.addButton(withTitle: L("取消"))
-    let nameField = NSTextField(string: "Text Snippet")
-    nameField.frame.size = NSSize(width: 360, height: 24)
-    nameAlert.accessoryView = nameField
-    guard nameAlert.runModal() == .alertFirstButtonReturn else { return }
-
-    let textAlert = NSAlert()
-    textAlert.messageText = L("片段内容")
-    textAlert.informativeText = L("输入要在终端中重放的文本。")
-    textAlert.addButton(withTitle: L("保存"))
-    textAlert.addButton(withTitle: L("取消"))
-    let textField = NSTextField(string: "")
-    textField.frame.size = NSSize(width: 360, height: 24)
-    textAlert.accessoryView = textField
-    guard textAlert.runModal() == .alertFirstButtonReturn else { return }
-
-    let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    let text = textField.stringValue
-    guard !name.isEmpty, name.utf8.count <= 128, !text.isEmpty, text.utf8.count <= 8_192,
-      !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
-    else {
-      sendWebToast(L("片段名称或内容无效"), level: "error")
-      return
-    }
+    guard let recipe = SnippetEditorSheet.prompt(
+      title: L("新建命令片段"), initial: .init(name: L("新片段")), in: view.window)
+    else { return }
     do {
       let directory = recipesDirectoryURL()
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let safeName = name.replacingOccurrences(
-        of: "[^A-Za-z0-9._-]+",
-        with: "-",
-        options: .regularExpression
-      )
-      let url = directory.appendingPathComponent(safeName)
-        .appendingPathExtension(WorkflowRecipeTOML.fileExtension)
-      let recipe = WorkflowRecipe(
-        name: name,
-        scope: .commands,
-        content: .includeCommands,
-        commands: [text]
-      )
-      try WorkflowRecipeTOML.save(recipe, to: url)
-      message = L("文本片段“\(name)”已保存。")
+      try WorkflowRecipeTOML.save(recipe, to: SnippetRecipeFiles.newURL(for: recipe.name, in: directory))
+      message = L("命令片段“\(recipe.name)”已保存。")
     } catch {
-      message = L("文本片段保存失败：\(error.localizedDescription)")
+      message = L("命令片段保存失败：\(error.localizedDescription)")
+    }
+    refresh()
+  }
+
+  /// 编辑已有命令片段：只接受 Recipes 目录里的 `.commands` scope 文件，保存回原文件。
+  private func editSnippetRecipe(path: String?) {
+    do {
+      let url = try SnippetRecipeFiles.validatedURL(path ?? "", in: recipesDirectoryURL())
+      let current = try SnippetRecipeFiles.loadSnippet(at: url)
+      guard let recipe = SnippetEditorSheet.prompt(
+        title: L("编辑命令片段"), initial: .init(recipe: current), in: view.window)
+      else { return }
+      try WorkflowRecipeTOML.save(recipe, to: url)
+      message = L("命令片段“\(recipe.name)”已保存。")
+    } catch {
+      sendWebToast(L("无法编辑命令片段：\(error.localizedDescription)"), level: "error")
+    }
+    refresh()
+  }
+
+  /// 删除命令片段：确认后移到废纸篓（可恢复），只处理 Recipes 目录里的片段文件。
+  private func deleteSnippetRecipe(path: String?) {
+    do {
+      let url = try SnippetRecipeFiles.validatedURL(path ?? "", in: recipesDirectoryURL())
+      let recipe = try SnippetRecipeFiles.loadSnippet(at: url)
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = L("删除命令片段“\(recipe.name)”？")
+      alert.informativeText = L("文件会移到废纸篓。")
+      alert.addButton(withTitle: L("删除"))
+      alert.addButton(withTitle: L("取消"))
+      guard alert.runModal() == .alertFirstButtonReturn else { return }
+      try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+      message = L("命令片段“\(recipe.name)”已删除。")
+    } catch {
+      sendWebToast(L("无法删除命令片段：\(error.localizedDescription)"), level: "error")
     }
     refresh()
   }

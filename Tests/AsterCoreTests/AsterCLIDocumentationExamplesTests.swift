@@ -78,6 +78,9 @@ private func substitutePlaceholder(_ token: String) -> String {
   }
 }
 
+/// 由 AsterCLI 自己的路由解析、不经过 `AsterCLIArguments` 的命令组。
+private let cliRoutedGroups: Set<String> = ["host", "mcp"]
+
 @Test("SKILL.md 与用户手册里的每条 aster 示例都能被解析器接受", arguments: [
   "Resources/skills/aster/SKILL.md",
   "docs/user/help.md",
@@ -87,6 +90,8 @@ func documentedCLIExamplesParse(path: String) throws {
   #expect(!lines.isEmpty, "\(path) 里没有找到 aster 示例，抽取逻辑可能失效")
   for line in lines {
     let argv = Array(tokenize(line).dropFirst())
+    // `aster host …` 与 `aster mcp` 在 AsterCLI 可执行 target 里先于本解析器拦截，语法不归 AsterCore 管。
+    if let group = argv.first, cliRoutedGroups.contains(group) { continue }
     #expect(throws: Never.self, "\(path): `\(line)`") {
       try AsterCLIArguments.parse(argv)
     }

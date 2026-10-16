@@ -38,6 +38,7 @@ final class SSHBrokerSupervisor {
   static let shared = SSHBrokerSupervisor(
     routing: .shared,
     hostDirectory: { SSHHostDirectory.shared },
+    vaultKeyDirectory: { SSHVaultKeyDirectory.shared },
     linkStateHandler: { MachineFleetModel.shared.handleLinkState($0) })
 
   /// 当前生效引擎：native 表示 broker 已拉起、传输走 aster-ssh；openssh 是改造前的路径。
@@ -50,6 +51,9 @@ final class SSHBrokerSupervisor {
   /// 最近的诊断（事件码与脱敏说明），只保留最后 20 条，供排障与测试断言。
   private(set) var diagnostics: [String] = []
 
+  /// 启动票据签发器。每次拉起 broker 换一把密钥；任意线程都可以签票。
+  nonisolated let tickets = NativeSSHTicketIssuer()
+
   /// 回答认证与主机密钥请求。为 nil 时一律回答取消 / 拒绝。
   var authCoordinator: (any SSHAuthCoordinating)?
   /// `link.state` 事件的接收者（机器连接状态）。
@@ -57,6 +61,8 @@ final class SSHBrokerSupervisor {
 
   private let routing: SSHEngineRouting?
   private let hostDirectory: () -> SSHHostDirectory
+  /// 保险库目录；nil 表示不提供保险库密钥（测试默认）。
+  private let vaultKeyDirectory: (() -> SSHVaultKeyDirectory)?
   private let tuning: Tuning
   private let environment: [String: String]
   private let locateExecutable: () -> URL?
@@ -79,12 +85,15 @@ final class SSHBrokerSupervisor {
   /// - Parameters:
   ///   - routing: 发布原生端点的位置；测试传独立实例或 nil，避免影响全局传输选择。
   ///   - hostDirectory: 主机目录（profiles.sync 的来源），首次需要时才取。
+  ///   - vaultKeyDirectory: 保险库目录，把主机引用的密钥换成公钥随 profiles.sync 下发；nil 表示没有。
   ///   - linkStateHandler: `link.state` 的接收者。
-  ///   - environment: 读取 `ASTER_SSH_ENGINE`、`ASTER_SSH_BINARY`，并作为 broker 的环境。
+  ///   - environment: 读取 `ASTER_SSH_ENGINE`、`ASTER_SSH_BINARY`（仅 DEBUG），按
+  ///     `brokerEnvironment(from:)` 过滤后作为 broker 的环境。
   ///   - locateExecutable: 定位 aster-ssh；缺省按 `executableURL(environment:bundle:)`。
   init(
     routing: SSHEngineRouting?,
     hostDirectory: @escaping () -> SSHHostDirectory,
+    vaultKeyDirectory: (() -> SSHVaultKeyDirectory)? = nil,
     linkStateHandler: ((SSHLinkStateEvent) -> Void)? = nil,
     environment: [String: String] = ProcessInfo.processInfo.environment,
     tuning: Tuning = Tuning(),
@@ -92,72 +101,11 @@ final class SSHBrokerSupervisor {
   ) {
     self.routing = routing
     self.hostDirectory = hostDirectory
+    self.vaultKeyDirectory = vaultKeyDirectory
     self.linkStateHandler = linkStateHandler
-    self.environment = environment
+    self.environment = Self.brokerEnvironment(from: environment)
     self.tuning = tuning
     self.locateExecutable = locateExecutable ?? { Self.executableURL(environment: environment) }
-  }
-
-  // MARK: - 定位与引擎选择
-
-  /// 可执行文件名。
-  nonisolated static let executableName = "aster-ssh"
-
-  /// 定位 aster-ssh：`ASTER_SSH_BINARY` → App 包 `Contents/MacOS/aster-ssh` →
-  /// 与主程序同目录 → 开发构建 `SshRuntime/target/{release,debug}/aster-ssh`。
-  nonisolated static func executableURL(
-    environment: [String: String] = ProcessInfo.processInfo.environment,
-    bundle: Bundle = .main
-  ) -> URL? {
-    locate(
-      environment: environment, bundleURL: bundle.bundleURL, mainExecutableURL: bundle.executableURL,
-      fileManager: .default)
-  }
-
-  /// `executableURL` 的可注入版本。
-  ///
-  /// aster-session 在开发构建里只能靠环境变量指定；aster-ssh 多给两个开发候选：
-  /// SwiftPM 调试产物在 `<仓库>/.build/<配置>/Aster`，与之同目录的 aster-ssh 覆盖手工复制的情况；
-  /// 由 `.build` 反推出仓库根后再找 cargo 产物，覆盖「只跑了 cargo build」的常见情况。
-  nonisolated static func locate(
-    environment: [String: String],
-    bundleURL: URL,
-    mainExecutableURL: URL?,
-    fileManager: FileManager
-  ) -> URL? {
-    var candidates: [URL] = []
-    if let override = environment["ASTER_SSH_BINARY"], !override.isEmpty {
-      candidates.append(URL(fileURLWithPath: override))
-    }
-    candidates.append(bundleURL.appendingPathComponent("Contents/MacOS/\(executableName)"))
-    if let mainExecutableURL {
-      let directory = mainExecutableURL.deletingLastPathComponent()
-      candidates.append(directory.appendingPathComponent(executableName))
-      let components = directory.standardizedFileURL.pathComponents
-      if let buildIndex = components.lastIndex(of: ".build"), buildIndex > 0 {
-        let root = NSString.path(withComponents: Array(components[..<buildIndex]))
-        for configuration in ["release", "debug"] {
-          candidates.append(
-            URL(fileURLWithPath: root)
-              .appendingPathComponent("SshRuntime/target/\(configuration)/\(executableName)"))
-        }
-      }
-    }
-    return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }?.standardizedFileURL
-  }
-
-  /// 用户要求的引擎：环境变量 `ASTER_SSH_ENGINE` 优先，其次设置项。
-  /// 环境变量取值非法时忽略它并返回说明，由调用方记诊断。
-  nonisolated static func requestedEngine(
-    environment: [String: String], preferred: SSHEngine
-  ) -> (engine: SSHEngine, problem: String?) {
-    guard let raw = environment[SSHEngine.environmentKey]?.trimmingCharacters(in: .whitespaces),
-      !raw.isEmpty
-    else { return (preferred, nil) }
-    guard let engine = SSHEngine(rawValue: raw.lowercased()) else {
-      return (preferred, "invalid \(SSHEngine.environmentKey)=\(raw)")
-    }
-    return (engine, nil)
   }
 
   // MARK: - 生命周期
@@ -226,6 +174,7 @@ final class SSHBrokerSupervisor {
     }
     channel = nil
     isReady = false
+    tickets.revoke()
     routing?.publish(nil)
     endpoint = nil
     removeSocketDirectory()
@@ -239,6 +188,11 @@ final class SSHBrokerSupervisor {
   func nativeEndpoint() throws -> NativeSSHEndpoint {
     guard engine == .native, let endpoint else { throw SSHBrokerError.engineDisabled }
     return endpoint
+  }
+
+  /// 签一张启动票据，给即将拉起的 `aster-ssh client`。broker 不在（未启动或已关闭）时返回 nil。
+  nonisolated func mintTicket() -> String? {
+    tickets.mint()
   }
 
   /// 等到 broker 报告 ready。超过 `readyTimeout` 抛 `startFailed`。
@@ -269,6 +223,11 @@ final class SSHBrokerSupervisor {
       },
       onExit: { [weak self] status in self?.handleExit(status: status, generation: generation) },
       onWriteFailure: { code in Self.recordGlobal("ssh.broker.write_failed", "errno=\(code)") })
+    // 第一条控制消息就是新密钥：旧实例签出的票随之作废，新实例只认这把。
+    do { try channel.send(.ticketsKey(tickets.rotateKey())) } catch {
+      channel.terminate()
+      throw error
+    }
     self.channel = channel
     isReady = false
     lastSyncedSpecs = nil
@@ -406,22 +365,27 @@ final class SSHBrokerSupervisor {
   /// 把最新主机规格推给 broker（`profiles.sync`）。broker 未就绪时忽略，ready 后会自动补发。
   func syncProfiles() {
     guard isReady else { return }
-    sync(hosts: hostDirectory().hosts)
+    sync(hosts: hostDirectory().hosts, vaultKeys: vaultKeyDirectory?().keys ?? [])
   }
 
-  /// 订阅主机目录变化。`@Published` 在赋值前发出新值，所以直接用发出的值，不回读属性。
+  /// 订阅主机目录与保险库目录变化。`@Published` 在赋值前发出新值，所以直接用发出的值，不回读属性。
+  /// 两者任一变化都要重新解析：删掉一把密钥会改变引用它的主机规格。
   private func subscribeToHosts() {
+    let vaultKeys: AnyPublisher<[SSHVaultKey], Never> =
+      vaultKeyDirectory.map { $0().$keys.eraseToAnyPublisher() }
+      ?? Just([]).eraseToAnyPublisher()
     hostsSubscription = hostDirectory().$hosts
+      .combineLatest(vaultKeys)
       .dropFirst()
-      .sink { [weak self] hosts in
-        MainActor.assumeIsolated { self?.sync(hosts: hosts) }
+      .sink { [weak self] hosts, keys in
+        MainActor.assumeIsolated { self?.sync(hosts: hosts, vaultKeys: keys) }
       }
   }
 
   /// 解析并发送；与上次发给同一实例的内容相同则跳过。
-  private func sync(hosts: [SSHHostProfile]) {
+  private func sync(hosts: [SSHHostProfile], vaultKeys: [SSHVaultKey]) {
     guard isReady, let channel else { return }
-    let resolved = SSHHostResolver.resolveAll(hosts)
+    let resolved = SSHHostResolver.resolveAll(hosts, vaultKeys: vaultKeys)
     if !resolved.failures.isEmpty {
       note("ssh.hosts.unresolved", "count=\(resolved.failures.count)", level: .warning)
     }
@@ -438,7 +402,7 @@ final class SSHBrokerSupervisor {
 
   /// 读取 `~/.ssh/config` 解析结果（`aster-ssh config list --json`），在后台执行。
   ///
-  /// 不依赖 broker，也不受引擎选择影响：openssh 引擎下设置页的导入同样需要它。
+  /// 不依赖 broker，也不受引擎选择影响：openssh 引擎下主机页的导入同样需要它。
   func configListing() async throws -> SSHConfigListing {
     guard let executable = executable ?? locateExecutable() else {
       throw SSHBrokerError.executableMissing

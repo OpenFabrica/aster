@@ -11,6 +11,7 @@ Aster 设置页以 Otty 1.3.1 应用包内的 `settings-ui.html` 为功能与视
 
 - `Resources/settings-ui/index.html`：静态入口与 CSP，只允许同目录脚本、样式和图片，禁止网络连接、对象、表单和外部 base URL。
 - `Resources/settings-ui/settings.js`：十一类字段清单、搜索、Otty 外观页专用渲染器、主题/Agent/Recipe/快捷键列表和消息协议。
+  Recipe 列表里的命令片段行（快照 `recipes[].snippet == true`）多出「编辑…」「删除…」，分别发 `editSnippet` / `deleteSnippet {id}`，由原生表单与确认框处理；见 [Workflows 与 Agent](workflows-and-agents.md)「命令片段」。
 - `Resources/settings-ui/settings.css`：Otty 风格的 200px 侧栏、单列卡片、外观预览、明暗外观、键盘焦点和响应式布局。
 - `Resources/settings-ui/nav-icons.js` / `nav-icons.css`：侧栏分区图标（24 网格，淡色填充 + 描边）与点击动画，对齐 Otty。`renderNav` 用 `AsterNavIcons.svg(id)` 填图标；点击时 `setSection` 会重建侧栏，所以动画要播在重建后的新按钮上（`AsterNavIcons.play`）。系统开启「减弱动态效果」时不播放。新增分区要同时补图标、动画名和测试 `SettingsNavIconsTests` 里的清单。
 - 滚动面包屑：`index.html` 的 `.content-column` 里 `#content-topbar` 悬浮在滚动区之上。内容滚过 24px 时 `#app` 加 `content-scrolled`，面包屑（Aster 标志 / 设置 / 当前分区）淡入，页内大标题淡出，过渡 200ms；切换分区或搜索时回到顶部并复位。
@@ -82,10 +83,25 @@ scripts/build-app.sh
 
 ## 「主机」分类
 
-「主机」排在「智能体」之后，使用 `special:"hosts"` 渲染器（`Resources/settings-ui/hosts.js`，表单在 `hosts-form.js`）。Swift 侧是协作者 `SettingsHostsBridge`（`SettingsHostsBridge.swift` 与 `+Actions.swift`），`SettingsView` 只负责接线，没有放宽任何 private 成员。
+「主机」排在「智能体」之后，**只承载「Agent 访问」**（agent 远程执行的总开关、授权、agent 终端、MCP 安装与活动记录），没有子标签控件。主机列表、编辑器、密钥保险库和已知主机都不在设置里，只在侧栏「主机」页（见 [原生 SSH](native-ssh.md) 的「侧栏主机页」）。
 
-- 快照键 `hosts`：`defaults`、`hosts[{profile, connect, hasPassword, machines, jumpDependents, credentialSharedWith, jumpName}]`、`groups`、`builtin`、`importedGroup`、`sshConfigPath`、`loadError`。主机对象的键与 `SSHHostProfile` 的 Codable 键一致。
-- 动作白名单：`hosts.` 前缀，包括 `save`、`duplicate`、`delete`、`forgetPassword`、`addMachine`、`import`、`editSSHConfig`。成功后先推快照再发回执；`hosts.json` 或机器引用在外部变化时另行刷新。
-- 导入：调用 `aster-ssh config list --json`，合并规则是纯函数 `SSHConfigImport.merge`，只更新 `~/.ssh/config` 导入组，保留用户改过的认证方式、代理和主机密钥校验。汇总通过 `hostsImportReport` 消息展示，其中包括 ignored 列表。
-- 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
-- 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
+- 前端：分类入口是 `special:"hosts"` 渲染器 `Resources/settings-ui/hosts.js`（`window.AsterHosts.render(ctx)`），它只画页顶说明与按钮，再把 Agent 访问交给 `Resources/settings-ui/agent-access.js`，入口 `window.AsterAgentAccess.render(container, hostsSnapshot, send, ui)`。`container` 是页面容器，每次快照都会传入新节点，不要缓存；`hostsSnapshot` 即快照里的 `hosts` 对象；`ui` 为 `{ t, makeDialog, showToast, element, button }`（翻译函数、模态框骨架、toast 与节点工具）。新文案要补进 `i18n.js` 五种语言。
+- 页顶说明与入口：一行说明「主机、密钥与已知主机已移到侧栏「主机」页。」和按钮「打开主机页」。按钮发动作 `hosts.openHostsPage`，由原生在最前面的工作区窗口里打开侧栏「主机」页。
+- 快照键 `hosts`：只有 `agentAccess`。
+- Swift 侧：这一类的 bridge 只有协作者 `SettingsAgentAccessBridge`，`SettingsView` 只负责接线，没有放宽任何 private 成员。
+- 动作白名单（`hosts.` 前缀）：`setAgentAccessEnabled`、`revokeAgentGrant`、`revokeAllAgentGrants`、`agentAuditPage`、`installAgentMCP`、`openHostsPage`。`send(action, payload = {})` 等价于 `mutate("action", { action, payload })`，返回 Promise：原生回执成功时 resolve；失败、桥不可用或 5 秒内没有回执时 reject。失败原因原生侧已经用 toast 说明，不关心结果的调用方要写 `.catch(() => {})`，并以下一次快照为准。
+- 消息：`agentAccessAuditPage`（`hosts.agentAuditPage {before?, limit≤50}` 的分页结果，异步送回）。
+- 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）在「高级」分类，走普通 set 管线。**重启后生效**。
+
+语义与审计字段见 [Agent 远程执行](agent-host-access.md)。
+
+### 已移除的网页入口
+
+主机列表与表单、密钥保险库、已知主机的网页实现已整体删除，不再有对应的快照键、动作或消息：
+
+- 模块：`hosts-form.js`、`ssh-keys.js`、`known-hosts.js`；`hosts.js` 只剩上面的最小分类入口。
+- Swift bridge：`SettingsHostsBridge`（含 `+Actions`）、`SettingsKnownHostsBridge`、`SettingsSSHKeysBridge`（含 `+Actions`、`+Original`）。
+- 消息：`hostsEdit`（原生「编辑主机…」深链）、`hostsImportReport`。
+- 动作：`hosts.save`、`duplicate`、`delete`、`forgetPassword`、`addMachine`、`import`、`editSSHConfig`，`hosts.keys.*`，`hosts.knownHosts.*`。
+
+原来从设置打开主机编辑器的入口改为打开侧栏「主机」页：终端标签右键菜单的「编辑主机…」和 Open Quickly 主机行的「编辑主机…」经 `AppModel.showHostEditor(hostID:)` 打开主机页并带出该主机的原生编辑面板；「新建工作区」面板里的「添加主机…」打开主机页并带出新建主机面板。详见 [原生 SSH](native-ssh.md)。

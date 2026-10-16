@@ -47,11 +47,13 @@ public struct RemoteSSHInstallExecutor: RemoteInstallExecuting {
     ]
     let process = Process()
     process.executableURL = URL(fileURLWithPath: transport.executablePath)
-    process.arguments = transport.sshArguments(remoteCommand: remoteCommand)
+    let arguments = transport.sshArguments(remoteCommand: remoteCommand)
+    process.arguments = arguments
     var environment = ProcessInfo.processInfo.environment
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     environment["LC_ALL"] = "C"
-    process.environment = environment
+    process.environment = NativeSSHTicketing.environment(
+      environment, executablePath: transport.executablePath, arguments: arguments)
     process.standardInput = input
     let err = Pipe()
     process.standardOutput = FileHandle.nullDevice

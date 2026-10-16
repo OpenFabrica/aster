@@ -28,6 +28,8 @@ hmac = "0.13"
 sha1 = "0.11"
 data-encoding = "2"
 zeroize = "1"
+# 启动票据的 HMAC-SHA256：hmac 0.13 依赖 digest 0.11，需配 sha2 0.11（同为 russh 的传递依赖）。
+sha2-v011 = { package = "sha2", version = "0.11" }
 
 [dev-dependencies]
 tempfile = "3"

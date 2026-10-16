@@ -75,6 +75,7 @@ async fn tty_requests_a_pty_and_forwards_resizes() {
     // 交互 shell：发一次窗口变化，然后结束 client。
     open.command = None;
     open.term = "xterm-ghostty".into();
+    open.ticket = Some(fresh_ticket());
     let stream = UnixStream::connect(&h.socket).await.unwrap();
     let (mut rd, mut wr) = stream.into_split();
     write_frame(&mut wr, &Frame::json(frame::OPEN, &open))
@@ -128,6 +129,7 @@ async fn client_disconnect_closes_the_channel_within_two_seconds() {
     for round in 1..=2 {
         let mut open = open_host("h", Some("hang"), false);
         open.tty = round == 2;
+        open.ticket = Some(fresh_ticket());
         let stream = UnixStream::connect(&h.socket).await.unwrap();
         let (mut rd, mut wr) = stream.into_split();
         write_frame(&mut wr, &Frame::json(frame::OPEN, &open))
@@ -170,12 +172,11 @@ async fn client_that_leaves_while_waiting_for_a_prompt_does_not_break_the_dial()
         .push_back(Some("pw".into()));
     let stream = UnixStream::connect(&h.socket).await.unwrap();
     let (_rd, mut wr) = stream.into_split();
-    write_frame(
-        &mut wr,
-        &Frame::json(frame::OPEN, &open_host("h", Some("hang"), true)),
-    )
-    .await
-    .unwrap();
+    let mut open = open_host("h", Some("hang"), true);
+    open.ticket = Some(fresh_ticket());
+    write_frame(&mut wr, &Frame::json(frame::OPEN, &open))
+        .await
+        .unwrap();
     drop((_rd, wr));
     let run = h.run(open_host("h", Some("exit 5"), true), vec![]).await;
     assert_eq!(exit_status(&run.outcome), 5);

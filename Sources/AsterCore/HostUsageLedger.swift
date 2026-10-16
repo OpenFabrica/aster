@@ -99,6 +99,15 @@ public struct HostUsageLedger: Equatable, Sendable {
       .map(\.key)
   }
 
+  /// 每个 ID 键（主机或机器）的最后使用时间；主机页「最近使用」排序用。
+  public var lastUsedByID: [UUID: Date] {
+    var result: [UUID: Date] = [:]
+    for (key, entry) in entries {
+      if case .id(let id) = key { result[id] = entry.lastUsed }
+    }
+    return result
+  }
+
   // MARK: - 清理
 
   /// 删除已经不存在的主机或机器 ID；文本键不受影响。返回是否有改动。

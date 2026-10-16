@@ -1563,8 +1563,22 @@ final class AppModel: ObservableObject {
   @Published var selectedTabID: UUID? {
     // 任何入口选中其它工作区的标签（Open Quickly、通知、CLI）都让工作区跟着切过去，
     // 保证「选中标签一定在当前工作区里」。
-    didSet { syncWorkspaceGroupWithSelectedTab() }
+    didSet {
+      syncWorkspaceGroupWithSelectedTab()
+      // 主机页是内容区的临时页面：任何入口选中标签（点侧栏、开 SSH、Open Quickly、CLI）
+      // 都表示用户要回到终端。赋同一个值也会走到这里，点当前标签同样能回去。
+      if isHostsPagePresented { isHostsPagePresented = false }
+    }
   }
+  /// 内容区是否显示侧栏「主机」页。只属于本窗口、不持久化；见 `AppModel+HostsPage`。
+  @Published var isHostsPagePresented = false
+  /// 主机页当前子页（主机 / 密钥 / 已知主机）。只属于本窗口、不持久化。
+  @Published var hostsPageSection: HostsHubSection = .hosts
+  /// 其它入口（标签菜单、Open Quickly、新建工作区）请求主机页打开的编辑面板；
+  /// 主机页在 `pageDidAppear` 消费后清空。不发布变化，见 `showHostEditor(_:)`。
+  var pendingHostEditor: HostEditorMode?
+  /// 在主机页打开的原生 SSH 标签。远端会话结束、标签自动关闭后回到主机页；不持久化。
+  var hostsPageOriginTabIDs: Set<UUID> = []
   /// 活动徽章的窗口级局部事件。视图只更新对应 Tab 的附件，Dock 只重新聚合状态；
   /// 该事件不承担布局、持久化或终端内容刷新。
   let tabActivityChanged = PassthroughSubject<UUID, Never>()
@@ -2433,7 +2447,10 @@ final class AppModel: ObservableObject {
       tab.layout.allPanes.contains(where: { $0.id == paneID })
     else { return }
     guard tab.layout.allPanes.count > 1 else {
+      // 从主机页连出去的 SSH 标签：会话结束即「退出主机」，关掉标签后回到主机页继续挑主机。
+      let returnsToHostsPage = hostsPageOriginTabIDs.remove(tab.id) != nil
       closeTab(id: tab.id, confirm: false)
+      if returnsToHostsPage { presentHostsPage() }
       return
     }
     if let remoteStructureHandler {
@@ -3701,32 +3718,95 @@ final class AppModel: ObservableObject {
     )
   }
 
+  /// Recipe 打开与片段运行共用的授权：来源信任审查（必要时弹出完整命令清单）→ 重放模式确认。
+  /// 用户取消审查时返回 nil；返回值里 `permitsReplay == false` 表示只打开布局、不运行命令。
+  private func authorizeRecipeReplay(
+    _ envelope: WorkflowRecipeEnvelope
+  ) throws -> (permitsReplay: Bool, confirmsEveryCommand: Bool)? {
+    let settings = workflowRecipeReplaySettings
+    let initial = try WorkflowRecipeOpenPlanner.plan(
+      envelope,
+      settings: settings,
+      trustStore: &workflowRecipeTrust
+    )
+    let choice: WorkflowRecipeTrustChoice?
+    if case .reviewRequired(let digest, let commands) = initial {
+      choice = reviewExternalRecipe(digest: digest, commands: commands)
+      guard choice != .cancel else { return nil }
+    } else {
+      choice = nil
+    }
+    let decision = try WorkflowRecipeOpenPlanner.plan(
+      envelope,
+      settings: settings,
+      trustStore: &workflowRecipeTrust,
+      trustChoice: choice
+    )
+    persistWorkflowRecipeTrust()
+    guard case .replay(let replayPlan) = decision else { return nil }
+    return (
+      confirmRecipeReplayIfNeeded(replayPlan, recipe: envelope.recipe),
+      WorkflowRecipeReplayExecutionPolicy.confirmsEveryCommand(replayPlan)
+    )
+  }
+
+  /// 当前活动 Pane 若是原生 SSH 主机，返回该主机的标签；Open Quickly 用它把相关片段排前。
+  var activeNativeSSHHostTags: [String] {
+    guard let hostID = selectedTab?.activeSession?.nativeSSH?.hostID else { return [] }
+    return SSHHostDirectory.shared.host(hostID)?.tags ?? []
+  }
+
+  /// 把命令片段粘贴到当前活动终端 Pane：走 bracketed paste 与粘贴保护，不回车。
+  func pasteSnippetIntoActivePane(_ text: String) {
+    dismissWorkspaceOverlays()
+    guard let session = selectedTab?.activeSession else {
+      notice = L("当前没有可粘贴的终端 Pane")
+      return
+    }
+    // 浮层关闭后焦点回到终端要等下一轮主队列，延后粘贴，保证粘贴确认等 UI 挂在正确的视图上。
+    DispatchQueue.main.async { [weak self, weak session] in
+      guard let session else { return }
+      if !session.pastePromptText(text) {
+        self?.notice = session.promptWriteBlocker ?? L("无法粘贴到当前 Pane")
+      }
+    }
+  }
+
+  /// 在当前活动终端 Pane 运行命令片段。与打开 Recipe 走同一套信任审查与重放确认，
+  /// 命令经 `.recipeReplay` 来源逐条写入，后续命令等上一条结束（OSC 133）后再发。
+  func runSnippet(from url: URL) {
+    dismissWorkspaceOverlays()
+    do {
+      let envelope = try WorkflowRecipeTOML.load(from: url)
+      guard envelope.recipe.scope == .commands else {
+        openWorkflowRecipe(from: url)
+        return
+      }
+      guard let tab = selectedTab, let session = tab.activeSession, session.statusIsRunning else {
+        notice = L("当前没有可运行命令的终端 Pane")
+        return
+      }
+      let paneID = tab.activePaneID
+      // 同一 Pane 上一组 Recipe 命令还没发完时不叠加，否则两组命令会交错写入。
+      guard pendingRecipeCommands[paneID] == nil, !activeRecipeReplayPaneIDs.contains(paneID) else {
+        notice = L("当前 Pane 还有未完成的 Recipe 命令")
+        return
+      }
+      guard let authorization = try authorizeRecipeReplay(envelope), authorization.permitsReplay else { return }
+      pendingRecipeCommands[paneID] = envelope.recipe.commands
+      if authorization.confirmsEveryCommand { recipeCommandConfirmationPaneIDs.insert(paneID) }
+      startPendingRecipeCommands(paneID: paneID)
+    } catch {
+      notice = L("命令片段运行失败：\(error.localizedDescription)")
+    }
+  }
+
   private func openWorkflowRecipe(from url: URL) {
     do {
       let envelope = try WorkflowRecipeTOML.load(from: url)
-      let settings = workflowRecipeReplaySettings
-      let initial = try WorkflowRecipeOpenPlanner.plan(
-        envelope,
-        settings: settings,
-        trustStore: &workflowRecipeTrust
-      )
-      let choice: WorkflowRecipeTrustChoice?
-      if case .reviewRequired(let digest, let commands) = initial {
-        choice = reviewExternalRecipe(digest: digest, commands: commands)
-        guard choice != .cancel else { return }
-      } else {
-        choice = nil
-      }
-      let decision = try WorkflowRecipeOpenPlanner.plan(
-        envelope,
-        settings: settings,
-        trustStore: &workflowRecipeTrust,
-        trustChoice: choice
-      )
-      persistWorkflowRecipeTrust()
-      guard case .replay(let replayPlan) = decision else { return }
-      let permitsReplay = confirmRecipeReplayIfNeeded(replayPlan, recipe: envelope.recipe)
-      let confirmsEveryCommand = WorkflowRecipeReplayExecutionPolicy.confirmsEveryCommand(replayPlan)
+      guard let authorization = try authorizeRecipeReplay(envelope) else { return }
+      let permitsReplay = authorization.permitsReplay
+      let confirmsEveryCommand = authorization.confirmsEveryCommand
       let context = WorkflowPortablePathContext(
         currentFolder: URL(fileURLWithPath: selectedTab?.workingDirectory ?? NSHomeDirectory()),
         homeFolder: FileManager.default.homeDirectoryForCurrentUser,
@@ -4392,6 +4472,7 @@ final class AppModel: ObservableObject {
       .init(id: "find", title: L("在当前 Pane 中查找"), keywords: ["search", "buffer"]),
       .init(id: "global-find", title: L("在全部 Pane 中查找"), keywords: ["search", "workspace"], scope: .window),
       .init(id: "open-quickly", title: "Open Quickly", keywords: ["jump", "recent", "ssh"], scope: .window),
+      .init(id: "hosts", title: L("主机"), keywords: ["ssh", "hosts", "server"], scope: .window),
       .init(id: "inspector", title: L("切换详情面板"), keywords: ["git", "info", "outline"], scope: .window),
       .init(id: "pin-window", title: L("切换窗口置顶"), keywords: ["pin", "floating"], scope: .window),
       .init(
@@ -4456,6 +4537,7 @@ final class AppModel: ObservableObject {
     case "find": presentFind()
     case "global-find": toggleGlobalFind()
     case "open-quickly": toggleOpenQuickly()
+    case "hosts": presentHostsPage()
     case "inspector": toggleInspector()
     case "pin-window": onRequestToggleWindowPin?()
     case "show-ai-usage": onRequestUsagePanel?()

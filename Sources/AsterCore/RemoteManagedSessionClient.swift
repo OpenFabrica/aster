@@ -361,7 +361,8 @@ public struct RemoteManagedSessionClient: ManagedSessionClient {
     var environment = ProcessInfo.processInfo.environment
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     environment["LC_ALL"] = "C"
-    process.environment = environment
+    process.environment = NativeSSHTicketing.environment(
+      environment, executablePath: transport.executablePath, arguments: sshArgs)
 
     // stdin 管道传入图片数据
     let stdinPipe = Pipe()

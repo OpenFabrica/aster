@@ -91,3 +91,14 @@ func hostCatalogInsertsQuickConnectAtSSHSection() {
   #expect(OpenQuicklyHostCatalog.inserting(quick, into: base + quick).count == base.count + quick.count)
   #expect(OpenQuicklyHostCatalog.inserting([], into: base) == base)
 }
+
+@Test("主机行的 detail 带上分组与 #标签，便于按标签搜索")
+func hostCatalogDetailIncludesTags() {
+  let tagged = SSHHostProfile(name: "web", group: "prod", host: "10.0.0.5", user: "deploy", tags: ["db", "eu"])
+  let plain = host("lab", "10.0.0.9")
+  let rows = OpenQuicklyHostCatalog.rows(
+    machines: [], hosts: [.emptyDefaults(), tagged, plain], aliases: [], ledger: HostUsageLedger(), now: now)
+  let detail = rows.first { $0.title == "web" }?.detail
+  #expect(detail == "deploy@10.0.0.5 · prod · #db #eu")
+  #expect(rows.first { $0.title == "lab" }?.detail == "deploy@10.0.0.9")
+}
