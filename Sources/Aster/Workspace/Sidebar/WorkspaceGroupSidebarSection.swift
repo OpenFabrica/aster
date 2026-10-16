@@ -393,6 +393,8 @@ extension WorkspaceViewController {
 
   /// 切到某个工作区。本机直接改模型；远端走切换器同一条路径（记使用时间、失败弹窗）。
   func selectWorkspaceGroupItem(_ item: WorkspaceGroupSidebarItem) {
+    // 主机页显示时点当前工作区也要回到终端，所以先关主机页再判断是否已选中。
+    model.dismissHostsPage()
     guard !item.isSelected else { return }
     switch item.target {
     case .local(let id):

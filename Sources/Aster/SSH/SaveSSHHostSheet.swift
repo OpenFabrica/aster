@@ -56,10 +56,14 @@ enum SaveSSHHostSheet {
 
   /// 展示表单；取消返回 nil。
   ///
-  /// - Parameter groups: 已有分组，供分组下拉补全。
-  static func prompt(prefill: Prefill, groups: [String], in window: NSWindow?) -> Draft? {
+  /// - Parameters:
+  ///   - groups: 已有分组，供分组下拉补全。
+  ///   - title: 表单标题；nil 用「保存为主机」（主机页「新建主机」传自己的标题）。
+  static func prompt(
+    prefill: Prefill, groups: [String], title: String? = nil, in window: NSWindow?
+  ) -> Draft? {
     let alert = NSAlert()
-    alert.messageText = L("保存为主机")
+    alert.messageText = title ?? L("保存为主机")
     alert.informativeText = L("保存后可在 Open Quickly 与「设置 ▸ 主机」里使用。认证方式、跳板机等选项请到设置里补充。")
     alert.addButton(withTitle: L("保存"))
     alert.addButton(withTitle: L("取消"))

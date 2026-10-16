@@ -229,10 +229,12 @@ extension AppModel {
 // MARK: - 保存为主机 / 编辑主机
 
 extension AppModel {
-  /// 弹出「保存为主机…」表单，保存后可选立即连接。
-  func presentSaveHost(prefill: SaveSSHHostSheet.Prefill, in window: NSWindow?) {
+  /// 弹出「保存为主机…」表单，保存后可选立即连接。`title` 为 nil 时用表单默认标题。
+  func presentSaveHost(prefill: SaveSSHHostSheet.Prefill, title: String? = nil, in window: NSWindow?) {
     let groups = Set(SSHHostDirectory.shared.savedHosts.compactMap(\.group)).sorted()
-    guard let draft = SaveSSHHostSheet.prompt(prefill: prefill, groups: groups, in: window) else {
+    guard
+      let draft = SaveSSHHostSheet.prompt(prefill: prefill, groups: groups, title: title, in: window)
+    else {
       return
     }
     let profile: SSHHostProfile

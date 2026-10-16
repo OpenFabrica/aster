@@ -1563,8 +1563,15 @@ final class AppModel: ObservableObject {
   @Published var selectedTabID: UUID? {
     // 任何入口选中其它工作区的标签（Open Quickly、通知、CLI）都让工作区跟着切过去，
     // 保证「选中标签一定在当前工作区里」。
-    didSet { syncWorkspaceGroupWithSelectedTab() }
+    didSet {
+      syncWorkspaceGroupWithSelectedTab()
+      // 主机页是内容区的临时页面：任何入口选中标签（点侧栏、开 SSH、Open Quickly、CLI）
+      // 都表示用户要回到终端。赋同一个值也会走到这里，点当前标签同样能回去。
+      if isHostsPagePresented { isHostsPagePresented = false }
+    }
   }
+  /// 内容区是否显示侧栏「主机」页。只属于本窗口、不持久化；见 `AppModel+HostsPage`。
+  @Published var isHostsPagePresented = false
   /// 活动徽章的窗口级局部事件。视图只更新对应 Tab 的附件，Dock 只重新聚合状态；
   /// 该事件不承担布局、持久化或终端内容刷新。
   let tabActivityChanged = PassthroughSubject<UUID, Never>()
@@ -4455,6 +4462,7 @@ final class AppModel: ObservableObject {
       .init(id: "find", title: L("在当前 Pane 中查找"), keywords: ["search", "buffer"]),
       .init(id: "global-find", title: L("在全部 Pane 中查找"), keywords: ["search", "workspace"], scope: .window),
       .init(id: "open-quickly", title: "Open Quickly", keywords: ["jump", "recent", "ssh"], scope: .window),
+      .init(id: "hosts", title: L("主机"), keywords: ["ssh", "hosts", "server"], scope: .window),
       .init(id: "inspector", title: L("切换详情面板"), keywords: ["git", "info", "outline"], scope: .window),
       .init(id: "pin-window", title: L("切换窗口置顶"), keywords: ["pin", "floating"], scope: .window),
       .init(
@@ -4519,6 +4527,7 @@ final class AppModel: ObservableObject {
     case "find": presentFind()
     case "global-find": toggleGlobalFind()
     case "open-quickly": toggleOpenQuickly()
+    case "hosts": presentHostsPage()
     case "inspector": toggleInspector()
     case "pin-window": onRequestToggleWindowPin?()
     case "show-ai-usage": onRequestUsagePanel?()
