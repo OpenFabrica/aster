@@ -39,6 +39,8 @@ extension SettingsHostsBridge {
     case "hosts.addMachine": addMachine(payload, complete: complete)
     case "hosts.import": importSSHConfig(complete: complete)
     case "hosts.editSSHConfig": editSSHConfig(complete: complete)
+    case _ where action.hasPrefix("hosts.keys.") && keysBridge != nil:
+      keysBridge?.handle(action: action, payload: payload, complete: complete)
     default:
       toast(L("“\(action)”尚无可用的 macOS 操作"), true)
       complete(false)
@@ -80,12 +82,15 @@ extension SettingsHostsBridge {
     }
     // 空 known_hosts 列表与 nil 同义（都继承默认项），统一存成 nil，文件里不留空数组。
     if profile.knownHostsFiles?.isEmpty == true { profile.knownHostsFiles = nil }
+    // 保险库密钥列表同理：空数组表示继承，存成 nil。
+    if profile.vaultKeyIDs?.isEmpty == true { profile.vaultKeyIDs = nil }
     // 空白的 identityAgent 同理存成 nil（继承），前后空白不属于路径。
     let identityAgent = profile.identityAgent?.trimmingCharacters(in: .whitespaces) ?? ""
     profile.identityAgent = identityAgent.isEmpty ? nil : identityAgent
     guard profile.forwards.count <= maximumForwards,
       profile.identityFiles.count <= maximumIdentityFiles,
-      (profile.knownHostsFiles?.count ?? 0) <= maximumIdentityFiles
+      (profile.knownHostsFiles?.count ?? 0) <= maximumIdentityFiles,
+      (profile.vaultKeyIDs?.count ?? 0) <= SSHHostStore.maximumVaultKeys
     else { throw SettingsHostsError.invalidPayload }
     // `SSHHostStore.validate` 只查 host/user/group 的换行；这里补齐其余会进入 argv 或
     // 配置文件的文本字段，任何控制字符都拒绝。
@@ -140,6 +145,7 @@ extension SettingsHostsBridge {
     case "invalid jumpHostID": L("跳板机无效：不能选自己，也不能选已删除的主机")
     case "negative timing": L("keepalive 与超时不能是负数")
     case "duplicate id": L("主机 ID 重复")
+    case "invalid vaultKeyIDs": L("保险库密钥重复或超过 \(SSHHostStore.maximumVaultKeys) 把")
     case let other: other
     }
   }
@@ -161,7 +167,8 @@ extension SettingsHostsBridge {
         identityAgent: source.identityAgent,
         agentForward: source.agentForward, forwards: source.forwards,
         keepaliveInterval: source.keepaliveInterval, keepaliveCountMax: source.keepaliveCountMax,
-        connectTimeout: source.connectTimeout, verifyHostKeys: source.verifyHostKeys)
+        connectTimeout: source.connectTimeout, verifyHostKeys: source.verifyHostKeys,
+        vaultKeyIDs: source.vaultKeyIDs)
       try directory.upsert(copy)
       pushSnapshot()
       complete(true)
