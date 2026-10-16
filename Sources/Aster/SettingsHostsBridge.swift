@@ -80,6 +80,8 @@ final class SettingsHostsBridge {
   private var cancellables: Set<AnyCancellable> = []
   /// 导入进行中。连点只跑一次，避免两次合并基于同一旧列表互相覆盖。
   var isImporting = false
+  /// 「Agent 访问」子页的协作者（agent 远程执行的开关、授权与审计）。
+  lazy var agentAccess = SettingsAgentAccessBridge(owner: self)
 
   /// 快照的输入摘要，用来判断外部通知是否真的改变了页面内容。
   private struct RenderedState: Equatable {
@@ -110,6 +112,7 @@ final class SettingsHostsBridge {
   func start() {
     guard cancellables.isEmpty else { return }
     directory.startWatching()
+    agentAccess.start()
     // @Published 在 willSet 时发出，此刻 `hosts` 还是旧值；切到下一轮主队列再读。
     var changes = directory.$hosts.map { _ in () }
       .merge(with: directory.$loadError.map { _ in () })
@@ -190,6 +193,7 @@ final class SettingsHostsBridge {
       "importedGroup": SSHHostProfile.importedGroup,
       "sshConfigPath": (dependencies.sshConfigURL.path as NSString).abbreviatingWithTildeInPath,
       "loadError": directory.loadError ?? "",
+      "agentAccess": agentAccess.snapshot(),
     ]
   }
 

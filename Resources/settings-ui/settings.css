@@ -734,3 +734,24 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .hosts-forward { display: grid; width: 100%; grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; }
 .hosts-forward .control { width: 100%; min-width: 0; max-width: none; box-sizing: border-box; }
 .settings-dialog .hosts-form-error { min-height: 16px; margin: 8px 0 0; color: var(--danger); font-size: 11.5px; }
+
+/* 「Agent 访问」子页：卡片头部操作、活动记录行与变更列表。 */
+.agent-card-actions { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.agent-audit-row { display: grid; grid-template-columns: 132px 76px minmax(0, 1fr); gap: 4px 12px; padding: 9px 14px; border-top: 1px solid var(--border-subtle); font-size: 11.5px; }
+.agent-audit-row:first-child { border-top: 0; }
+.agent-audit-time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.agent-audit-action { font-weight: 550; }
+.agent-audit-body { display: grid; min-width: 0; gap: 2px; }
+.agent-audit-line { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
+.agent-command { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-mono { font-family: "SF Mono", Menlo, monospace; font-size: 11px; }
+.agent-sub { color: var(--text-secondary); font-size: 10.5px; }
+.agent-changes { display: grid; gap: 2px; margin-top: 2px; }
+.agent-change { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.agent-change-field { color: var(--text-secondary); }
+.agent-change-arrow { color: var(--text-tertiary); }
+.agent-props { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 10px; margin: 2px 0 0; }
+.agent-props dt { color: var(--text-secondary); }
+.agent-props dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-props.is-deleted { opacity: .55; text-decoration: line-through; }
+.agent-audit-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--border-subtle); }

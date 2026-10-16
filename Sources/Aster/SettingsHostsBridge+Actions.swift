@@ -39,6 +39,8 @@ extension SettingsHostsBridge {
     case "hosts.addMachine": addMachine(payload, complete: complete)
     case "hosts.import": importSSHConfig(complete: complete)
     case "hosts.editSSHConfig": editSSHConfig(complete: complete)
+    case _ where SettingsAgentAccessBridge.actions.contains(action):
+      agentAccess.handle(action: action, payload: payload, complete: complete)
     default:
       toast(L("“\(action)”尚无可用的 macOS 操作"), true)
       complete(false)

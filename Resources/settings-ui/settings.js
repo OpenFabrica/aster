@@ -3087,6 +3087,8 @@
         if (snapshot) window.AsterHosts.edit(message.id, hostsContext());
       } else if (message.type === "hostsImportReport") {
         window.AsterHosts.showImportReport(message.report, hostsContext());
+      } else if (message.type === "agentAccessAuditPage") {
+        window.AsterAgentAccess?.receive?.(message);
       } else if (message.type === "toast") {
         showToast(message.message, message.level === "error");
       }
