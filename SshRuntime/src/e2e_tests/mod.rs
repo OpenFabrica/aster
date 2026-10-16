@@ -6,6 +6,7 @@ mod agent_tests;
 mod auth_tests;
 mod known_hosts_tests;
 mod session_tests;
+mod vault_tests;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -30,6 +31,8 @@ pub struct Script {
     pub passwords: VecDeque<Option<String>>,
     pub passphrases: VecDeque<Option<String>>,
     pub kbd: VecDeque<Option<Vec<String>>>,
+    /// 保险库私钥请求的回答（按请求顺序）。
+    pub private_keys: VecDeque<Option<String>>,
     pub host_keys: VecDeque<bool>,
 }
 
@@ -195,6 +198,9 @@ fn answer_for(event: &Value, script: &Mutex<Script>) -> Option<Value> {
             ),
             "passphrase" => Some(
                 json!({"type":"auth.answer","id":id,"secret":script.passphrases.pop_front().flatten(),"responses":null}),
+            ),
+            "privateKey" => Some(
+                json!({"type":"auth.answer","id":id,"secret":script.private_keys.pop_front().flatten(),"responses":null}),
             ),
             _ => Some(
                 json!({"type":"auth.answer","id":id,"secret":null,"responses":script.kbd.pop_front().flatten()}),

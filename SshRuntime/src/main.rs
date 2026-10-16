@@ -1,9 +1,10 @@
 //! aster-ssh：Aster 的原生 SSH 运行时入口。
 //!
 //! 子命令：`broker`（常驻连接持有者）、`client`（替代 /usr/bin/ssh 的薄客户端）、
-//! `config`（解析 ~/.ssh/config）。协议见 `PROTOCOL.md`。
+//! `config`（解析 ~/.ssh/config）、`keys`（保险库私钥解析与生成）。协议见 `PROTOCOL.md`。
 
 mod auth;
+mod auth_vault;
 mod bridge;
 mod broker;
 mod client;
@@ -12,6 +13,7 @@ mod control;
 mod env;
 mod forward;
 mod handler;
+mod keys;
 mod known_hosts;
 mod logging;
 mod pool;
@@ -35,12 +37,13 @@ fn main() -> ExitCode {
         Some("broker") => broker::run_cli(&args[1..]),
         Some("client") => client::run_cli(&args[1..]),
         Some("config") => ssh_config::run_cli(&args[1..]),
+        Some("keys") => keys::run_cli(&args[1..]),
         Some("--version") => {
             println!("aster-ssh {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!("usage: aster-ssh (broker|client|config) ...");
+            eprintln!("usage: aster-ssh (broker|client|config|keys) ...");
             ExitCode::from(2)
         }
     }

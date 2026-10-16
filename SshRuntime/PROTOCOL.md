@@ -11,6 +11,7 @@
 | broker | `aster-ssh broker --socket <path>` | App（`SSHBrokerSupervisor`），每个 App 实例一个 | 持有全部 russh 连接；stdin/stdout 是与 App 的控制通道；stdin EOF 即退出并断开全部连接 |
 | client | `aster-ssh client …` | 替代原来 exec `/usr/bin/ssh` 的所有位置，包括 Ghostty Pane 子进程 | 连到 broker socket，打开一个 channel，转发 stdio、窗口大小与退出码 |
 | config | `aster-ssh config list --json` / `aster-ssh config resolve <alias> --json` | App 按需调用 | 解析 `~/.ssh/config`，不依赖 broker |
+| keys | `aster-ssh keys inspect` / `aster-ssh keys generate` | App 按需调用（`SSHRuntimeTool`） | 解析、规范化或生成保险库私钥；请求走 stdin、结果走 stdout，见 §6 |
 
 broker 不读写钥匙串，不把任何秘密写入文件或日志。秘密只经控制通道（App 与 broker 之间的私有管道）传入内存。
 
@@ -75,15 +76,22 @@ broker 的 stderr 只写脱敏日志。未知 `type` 必须忽略（向前兼容
 ```jsonc
 {"type":"ready","socket":"/…/broker.sock","version":"0.1.0"}
 
-// 需要凭证。kind: password | passphrase | keyboardInteractive
+// 需要凭证。kind: password | passphrase | keyboardInteractive | privateKey
 {"type":"auth.request","id":"a1","endpoint":"deploy@10.0.0.5:22","kind":"password",
  "hostID":"UUID"|null,"keyFile":null,"keyDigest":null,
  "name":"","instruction":"","prompts":[{"text":"Password:","echo":false}],
  "attempt":1,"interactive":true}
 // passphrase 时 keyFile 为展开后的私钥路径，keyDigest 为私钥文件内容 SHA-512 的小写 hex。
 
+// 要一把保险库私钥（vaultKeyID 来自 ResolvedSpec.vaultKeys[].id）。恒为 interactive:false，
+// prompts 为空，attempt 恒为 1；其它 kind 不带 vaultKeyID 键。
+{"type":"auth.request","id":"a3","endpoint":"deploy@10.0.0.5:22","kind":"privateKey",
+ "hostID":"UUID"|null,"keyFile":null,"keyDigest":null,"vaultKeyID":"UUID",
+ "name":"","instruction":"","prompts":[],"attempt":1,"interactive":false}
+
 // 上一次 auth.answer 提供的秘密是否被服务器接受。App 只在 accepted=true 后才写钥匙串；
 // accepted=false 且秘密来自钥匙串时，App 删除该条目。
+// privateKey 的 auth.result 只是告知：服务器拒绝或公钥对不上时 accepted=false，App 不得因此删除保险库密钥。
 {"type":"auth.result","id":"a1","accepted":true}
 
 // 主机密钥需要确认。status: unknown | changed
@@ -105,6 +113,8 @@ broker 的 stderr 只写脱敏日志。未知 `type` 必须忽略（向前兼容
 
 // password / passphrase：secret 为 null 表示取消。
 // keyboardInteractive：secret 恒为 null，按 responses 判断——数组（可为空）是回答，null 是取消。
+// privateKey：secret 为未加密的 OpenSSH 私钥文本；null 表示取不到（不在保险库、钥匙串读取失败），
+// broker 只跳过这一把，继续下一把密钥或下一种方式，不取消整个认证。broker 用完即清零。
 {"type":"auth.answer","id":"a1","secret":"…"|null,"responses":["…"]|null}
 
 // accept=true：unknown 追加到 ~/.ssh/known_hosts；changed 替换旧行。
@@ -115,6 +125,7 @@ broker 的 stderr 只写脱敏日志。未知 `type` 必须忽略（向前兼容
 ```
 
 `interactive:false` 的请求，App 只能从钥匙串作答，不得弹窗；取不到就回 `secret:null`。
+`privateKey` 请求总是 `interactive:false`：App 只为当前保险库目录里存在的 id 读钥匙串作答，未知 id 回 null。
 
 ### 4.3 ResolvedSpec
 
@@ -126,6 +137,7 @@ broker 的 stderr 只写脱敏日志。未知 `type` 必须忽略（向前兼容
   "identitiesOnly":false,              // 可省略，缺省 false。true：只用 identityFiles，见下
   "knownHostsFiles":[],                // 可省略，已展开的路径；见下
   "identityAgent":"~/agent.sock",      // 可省略，IdentityAgent 原文，由 broker 展开；见下
+  "vaultKeys":[{"id":"UUID","publicKey":"ssh-ed25519 AAAA… me@mac"}],  // 可省略，为空时不编码；见下
   "agentForward":false,
   "proxyCommand":null,                 // 字符串，经 /bin/sh -c 执行，%h/%p/%r 由 broker 展开
   "socksProxy":null,"httpProxy":null,  // {"host","port"}
@@ -157,6 +169,15 @@ broker 在连接时解析；`jump` 里的每一跳各带各的，不互相继承
 - `"$VAR"`：socket 路径取自 broker 进程的环境变量 VAR；没设或为空就不用 agent。
 - 其它：socket 路径，broker 展开 `%h/%p/%r/%u/%d/%%`、`${VAR}`（没设就不用 agent）与开头的 `~`。
 
+`vaultKeys`：这一跳可用的保险库密钥，只带 id 与 OpenSSH 公钥行（私钥只在 App 钥匙串里）。
+`jump` 里的每一跳各带各的。认证顺序：
+- `auto`：保险库密钥 → agent → identityFiles → 默认密钥 → password → keyboard-interactive。
+- `publicKey`：保险库密钥 → identityFiles → 默认密钥。
+- 轮到某把密钥时 broker 发 `auth.request kind=privateKey` 要私钥，先核对它与 `publicKey` 是同一把
+  （只比密钥本身，不比注释），不一致就跳过，绝不拿去认证。
+- `vaultKeys` 非空时不再尝试默认密钥（`~/.ssh/id_*`），保险库的意义就是不读明文私钥文件。
+- `identitiesOnly:true` 时，agent 里与 `vaultKeys` 同一把公钥的身份也允许签名。
+
 endpoint 身份（凭证共享、连接复用的键）：`user@host:port`；有跳板时连接复用键再拼上跳板链，
 但凭证键仍是目标自身的 `user@host:port`。
 
@@ -186,3 +207,36 @@ endpoint 身份（凭证共享、连接复用的键）：`user@host:port`；有�
 - `userKnownHostsFiles`、`globalKnownHostsFiles`：路径数组，可多个；`none` 写成 `["none"]`；没写为空数组。
 
 新增字段一律可省略，旧版 JSON 仍能解码。
+
+## 6. keys 子命令
+
+App 导入、生成保险库私钥时调用。请求是 stdin 上的一个 JSON 对象，结果是 stdout 上的一个 JSON 对象；
+私钥与 passphrase 从不进 argv（`ps` 可见），stderr 只写固定用法说明，不含任何密钥内容。stdin 上限 64 KiB。
+
+```jsonc
+// aster-ssh keys inspect   stdin：
+{"privateKey":"-----BEGIN …","passphrase":null|"…","comment":null|"…"}
+// aster-ssh keys generate  stdin（只支持 ed25519，algorithm 可省略）：
+{"algorithm":"ed25519","comment":"…"}
+
+// 成功：退出码 0
+{"privateKey":"-----BEGIN OPENSSH PRIVATE KEY-----\n…","publicKey":"ssh-ed25519 AAAA… me@mac",
+ "algorithm":"ssh-ed25519","fingerprint":"SHA256:…","comment":"me@mac"}
+
+// 可预期的失败：退出码 1
+{"error":"encrypted"|"wrongPassphrase"|"invalid"|"unsupported"}
+```
+
+- `privateKey`：一律是**未加密**的 OpenSSH 格式、LF 换行。加密私钥在导入时用 passphrase 解开一次，
+  之后只以明文形式存进钥匙串（钥匙串负责静态加密）。
+- `publicKey`：OpenSSH 公钥行，注释非空时带注释。`fingerprint`：SHA-256，与 `ssh-keygen -l` 相同。
+- `algorithm`：`ssh-ed25519`、`ecdsa-sha2-nistp256/384/521` 或 `ssh-rsa`。
+- `comment`：请求里非空的 `comment` 覆盖密钥自带注释（去首尾空白，不能含换行等控制字符），否则沿用自带注释（可为空串）。
+- 能识别的输入：OpenSSH（含 bcrypt 加密）、PKCS#1 `RSA PRIVATE KEY`（含 AES-128-CBC 旧式加密）、PKCS#8（含加密）、
+  SEC1 `EC PRIVATE KEY`、PuTTY PPK。
+- 错误码：
+  - `encrypted`：私钥已加密而请求没给 passphrase（空串等同没给）。
+  - `wrongPassphrase`：passphrase 解不开。
+  - `invalid`：不是私钥、请求 JSON 不合法、注释含控制字符或超过 64 KiB。
+  - `unsupported`：能识别但用不了——DSA、安全密钥（`sk-*`）、DES/AES-256 旧式 PEM 加密、generate 指定非 ed25519。
+- 用法错误（未知子命令）：退出码 2，stdout 为空。

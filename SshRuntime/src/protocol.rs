@@ -122,6 +122,10 @@ pub struct ResolvedSpec {
     /// 路径；由 broker 在使用时展开（见 `Env::agent_socket`）。None 表示用 broker 继承到的 `SSH_AUTH_SOCK`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_agent: Option<String>,
+    /// 这一跳可用的保险库密钥（只有 id 与公钥）；私钥由 broker 用到时经 `auth.request kind=privateKey`
+    /// 向 App 要。为空时不编码，旧 App 不发此字段。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vault_keys: Vec<VaultKeyRef>,
     #[serde(default)]
     pub agent_forward: bool,
     #[serde(default)]
@@ -150,6 +154,14 @@ pub struct ResolvedSpec {
     /// 同样只由 `--target` 解析设置，不参与序列化。
     #[serde(skip)]
     pub global_known_hosts_files: Option<Vec<String>>,
+}
+
+/// 保险库密钥引用：App 钥匙串里一把私钥的 id 与对应的 OpenSSH 公钥行。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultKeyRef {
+    pub id: String,
+    pub public_key: String,
 }
 
 /// keepalive 间隔缺省值（秒）。
@@ -193,6 +205,7 @@ impl ResolvedSpec {
             identities_only: false,
             known_hosts_files: Vec::new(),
             identity_agent: None,
+            vault_keys: Vec::new(),
             agent_forward: false,
             proxy_command: None,
             socks_proxy: None,
@@ -398,6 +411,8 @@ pub enum AuthRequestKind {
     Password,
     Passphrase,
     KeyboardInteractive,
+    /// 向 App 要保险库私钥（`vaultKeyID` 指明哪一把），回答是未加密的 OpenSSH 私钥文本。
+    PrivateKey,
 }
 
 /// `auth.request` 的字段。
@@ -413,6 +428,13 @@ pub struct AuthRequest {
     pub key_file: Option<String>,
     #[serde(default)]
     pub key_digest: Option<String>,
+    /// kind=privateKey 时要的保险库密钥 id；其它类型不编码。
+    #[serde(
+        rename = "vaultKeyID",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub vault_key_id: Option<String>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
