@@ -36,6 +36,20 @@
     return /^-?\d+$/.test(value) ? Number(value) : Number.NaN;
   }
 
+  /// 逗号分隔的标签文本拆成数组：去空白、丢空串、不分大小写去重；最终规则由原生侧校验。
+  function parseTags(text) {
+    const seen = new Set();
+    return text.split(/[,，]/).map(tag => tag.trim()).filter(tag => tag && !seen.has(tag.toLocaleLowerCase()) && seen.add(tag.toLocaleLowerCase()));
+  }
+
+  /// 标签候选：保留已输入的部分，把还没用过的已有标签补在最后一个逗号之后。
+  function tagSuggestions(text, known) {
+    const index = Math.max(text.lastIndexOf(","), text.lastIndexOf("，"));
+    const prefix = index < 0 ? "" : `${text.slice(0, index + 1).trimEnd()} `;
+    const used = new Set(parseTags(text.slice(0, index + 1)).map(tag => tag.toLocaleLowerCase()));
+    return known.filter(tag => !used.has(tag.toLocaleLowerCase())).map(tag => `${prefix}${tag}`);
+  }
+
   /// 三态开关（继承 / 开 / 关）与 JSON 值互转。
   const triState = { toValue: text => (text === "" ? null : text === "true"), fromValue: value => (value == null ? "" : String(value)) };
 
@@ -97,6 +111,14 @@
       for (const group of data.groups) list.appendChild(Object.assign(element("option"), { value: group }));
       groupInput.setAttribute("list", list.id);
       common.append(field(t("分组"), groupInput), list);
+      const tagsInput = input("tags", (profile.tags ?? []).join(", "), t("例如：prod, db"));
+      const tagList = element("datalist");
+      tagList.id = `hosts-tags-${profile.id}`;
+      const refreshTags = () => tagList.replaceChildren(...tagSuggestions(tagsInput.value, data.tags ?? []).map(value => Object.assign(element("option"), { value })));
+      tagsInput.addEventListener("input", refreshTags);
+      refreshTags();
+      tagsInput.setAttribute("list", tagList.id);
+      common.append(field(t("标签"), tagsInput, t("用逗号分隔，最多 16 个")), tagList);
       common.appendChild(field(t("主机"), input("host", profile.host, "example.com")));
     }
     common.appendChild(field(t("端口"), input("port", profile.port, inherited("port"), "number")));
@@ -198,6 +220,7 @@
       const text = key => fields[key]?.value.trim() ?? "";
       const next = { id: profile.id, name: isDefaults ? profile.name : text("name"), host: isDefaults ? "" : text("host"), user: text("user") };
       if (!isDefaults && text("group")) next.group = text("group");
+      if (!isDefaults && parseTags(text("tags")).length) next.tags = parseTags(text("tags"));
       for (const key of ["port", "keepaliveInterval", "keepaliveCountMax", "connectTimeout"]) {
         const value = optionalInteger(fields[key].value);
         if (Number.isNaN(value)) errors.push(t("{field} 必须是整数", { field: fields[key].closest(".hosts-field").firstChild.textContent }));
@@ -250,5 +273,5 @@
     (fields.name ?? fields.port).focus();
   }
 
-  window.AsterHostsForm = { open, parseHostPort, formatHostPort };
+  window.AsterHostsForm = { open, parseHostPort, formatHostPort, parseTags };
 })();

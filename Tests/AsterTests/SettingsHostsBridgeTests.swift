@@ -264,3 +264,40 @@ func settingsHostsSaveKeepsIdentityAgent() throws {
   #expect(fixture.perform("hosts.save", ["profile": cleared]) == true)
   #expect(fixture.bridge.directory.host(host.id)?.identityAgent == nil)
 }
+
+@Test("标签随保存落盘、进快照与候选列表；复制带上标签；含逗号或控制字符时被拒")
+@MainActor
+func settingsHostsSaveKeepsTags() throws {
+  let fixture = try HostsBridgeFixture(hosts: [SSHHostProfile(name: "db", host: "10.0.0.2", tags: ["Prod", "db"])])
+  defer { fixture.cleanUp() }
+  let host = SSHHostProfile(name: "web", host: "10.0.0.1", tags: ["prod", "web"])
+  let object = SettingsHostsBridge.profileJSON(host)
+  #expect(object["tags"] as? [String] == ["prod", "web"])
+  #expect(fixture.perform("hosts.save", ["profile": object]) == true)
+  let reloaded = try SSHHostStore(fileURL: fixture.bridge.directory.store.fileURL).load()
+  #expect(reloaded.first { $0.id == host.id }?.tags == ["prod", "web"])
+
+  let snapshot = fixture.bridge.snapshot()
+  // 快照顺序：db 在 web 前；「prod」与「Prod」不分大小写合并，保留先出现的写法。
+  #expect(snapshot["tags"] as? [String] == ["Prod", "db", "web"])
+  #expect(try SettingsHostsBridge.decodeProfile(try row("web", in: snapshot)["profile"]).tags == ["prod", "web"])
+
+  #expect(fixture.perform("hosts.duplicate", ["id": host.id.uuidString]) == true)
+  let copy = try #require(fixture.bridge.directory.savedHosts.first { $0.name.hasPrefix("web") && $0.id != host.id })
+  #expect(copy.tags == ["prod", "web"])
+
+  var comma = object
+  comma["tags"] = ["a,b"]
+  #expect(fixture.perform("hosts.save", ["profile": comma]) == false)
+  var control = object
+  control["tags"] = ["a\u{7}"]
+  #expect(fixture.perform("hosts.save", ["profile": control]) == false)
+  #expect(fixture.bridge.directory.host(host.id)?.tags == ["prod", "web"])
+  #expect(fixture.recorder.toasts.contains { $0.isError })
+
+  // 空标签数组存成 nil。
+  var cleared = object
+  cleared["tags"] = [String]()
+  #expect(fixture.perform("hosts.save", ["profile": cleared]) == true)
+  #expect(fixture.bridge.directory.host(host.id)?.tags == nil)
+}

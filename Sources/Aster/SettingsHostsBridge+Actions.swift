@@ -40,6 +40,8 @@ extension SettingsHostsBridge {
     case "hosts.import": importSSHConfig(complete: complete)
     case "hosts.editSSHConfig": editSSHConfig(complete: complete)
     default:
+      // `hosts.knownHosts.*` 交给「已知主机」协作者；它不认识的才算未知动作。
+      guard !knownHosts.handle(action: action, payload: payload, complete: complete) else { return }
       toast(L("“\(action)”尚无可用的 macOS 操作"), true)
       complete(false)
     }
@@ -94,7 +96,7 @@ extension SettingsHostsBridge {
         profile.name, profile.host, profile.user, profile.group ?? "", profile.proxyCommand ?? "",
         profile.identityAgent ?? "",
       ]
-      + profile.identityFiles + (profile.knownHostsFiles ?? [])
+      + profile.identityFiles + (profile.knownHostsFiles ?? []) + (profile.tags ?? [])
       + [profile.socksProxy?.host ?? "", profile.httpProxy?.host ?? ""]
       + profile.forwards.flatMap { [$0.bind.host, $0.target.host, $0.description] }
     let hasControl = texts.contains { text in
@@ -134,6 +136,7 @@ extension SettingsHostsBridge {
     case "empty host": L("主机不能为空")
     case "newline in host/user": L("主机和用户名不能换行")
     case "invalid group": L("分组名过长或包含换行")
+    case "invalid tags": L("标签过长或包含逗号/换行")
     case "invalid port": L("端口必须在 1–65535 之间")
     case "invalid proxy": L("代理地址不能为空，端口必须在 1–65535 之间")
     case "invalid forward": L("端口转发的端口无效")
@@ -161,7 +164,8 @@ extension SettingsHostsBridge {
         identityAgent: source.identityAgent,
         agentForward: source.agentForward, forwards: source.forwards,
         keepaliveInterval: source.keepaliveInterval, keepaliveCountMax: source.keepaliveCountMax,
-        connectTimeout: source.connectTimeout, verifyHostKeys: source.verifyHostKeys)
+        connectTimeout: source.connectTimeout, verifyHostKeys: source.verifyHostKeys,
+        tags: source.tags)
       try directory.upsert(copy)
       pushSnapshot()
       complete(true)

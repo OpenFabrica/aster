@@ -2896,14 +2896,26 @@
       card.appendChild(empty);
     } else {
       for (const recipe of recipes) {
-        card.appendChild(makeRow({
+        const recipeRow = makeRow({
           label: recipe.name,
           detail: recipe.summary,
           type: "action",
           action: "openRecipeDetail",
           button: recipe.shortcut || t("查看"),
           payload: { id: recipe.id },
-        }));
+        });
+        // 命令片段可在原生表单里编辑，或移到废纸篓；布局 Recipe 只能查看。
+        if (recipe.snippet) {
+          const controls = recipeRow.querySelector(".setting-control") ?? recipeRow;
+          for (const [name, label] of [["editSnippet", t("编辑…")], ["deleteSnippet", t("删除…")]]) {
+            const button = document.createElement("button");
+            button.className = "action-button";
+            button.textContent = label;
+            button.addEventListener("click", () => send("action", { action: name, payload: { id: recipe.id } }));
+            controls.appendChild(button);
+          }
+        }
+        card.appendChild(recipeRow);
       }
     }
     const actions = document.createElement("div");
@@ -2911,7 +2923,7 @@
     actions.appendChild(document.createElement("div"));
     const controls = document.createElement("div");
     controls.className = "setting-control";
-    for (const [name, label] of [["createTextSnippet", t("新建文本片段")], ["openRecipesFolder", t("打开 Recipe 文件夹")]]) {
+    for (const [name, label] of [["createTextSnippet", t("新建命令片段")], ["openRecipesFolder", t("打开 Recipe 文件夹")]]) {
       const button = document.createElement("button");
       button.className = "action-button";
       button.textContent = label;

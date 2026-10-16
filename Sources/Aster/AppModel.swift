@@ -3701,32 +3701,95 @@ final class AppModel: ObservableObject {
     )
   }
 
+  /// Recipe 打开与片段运行共用的授权：来源信任审查（必要时弹出完整命令清单）→ 重放模式确认。
+  /// 用户取消审查时返回 nil；返回值里 `permitsReplay == false` 表示只打开布局、不运行命令。
+  private func authorizeRecipeReplay(
+    _ envelope: WorkflowRecipeEnvelope
+  ) throws -> (permitsReplay: Bool, confirmsEveryCommand: Bool)? {
+    let settings = workflowRecipeReplaySettings
+    let initial = try WorkflowRecipeOpenPlanner.plan(
+      envelope,
+      settings: settings,
+      trustStore: &workflowRecipeTrust
+    )
+    let choice: WorkflowRecipeTrustChoice?
+    if case .reviewRequired(let digest, let commands) = initial {
+      choice = reviewExternalRecipe(digest: digest, commands: commands)
+      guard choice != .cancel else { return nil }
+    } else {
+      choice = nil
+    }
+    let decision = try WorkflowRecipeOpenPlanner.plan(
+      envelope,
+      settings: settings,
+      trustStore: &workflowRecipeTrust,
+      trustChoice: choice
+    )
+    persistWorkflowRecipeTrust()
+    guard case .replay(let replayPlan) = decision else { return nil }
+    return (
+      confirmRecipeReplayIfNeeded(replayPlan, recipe: envelope.recipe),
+      WorkflowRecipeReplayExecutionPolicy.confirmsEveryCommand(replayPlan)
+    )
+  }
+
+  /// 当前活动 Pane 若是原生 SSH 主机，返回该主机的标签；Open Quickly 用它把相关片段排前。
+  var activeNativeSSHHostTags: [String] {
+    guard let hostID = selectedTab?.activeSession?.nativeSSH?.hostID else { return [] }
+    return SSHHostDirectory.shared.host(hostID)?.tags ?? []
+  }
+
+  /// 把命令片段粘贴到当前活动终端 Pane：走 bracketed paste 与粘贴保护，不回车。
+  func pasteSnippetIntoActivePane(_ text: String) {
+    dismissWorkspaceOverlays()
+    guard let session = selectedTab?.activeSession else {
+      notice = L("当前没有可粘贴的终端 Pane")
+      return
+    }
+    // 浮层关闭后焦点回到终端要等下一轮主队列，延后粘贴，保证粘贴确认等 UI 挂在正确的视图上。
+    DispatchQueue.main.async { [weak self, weak session] in
+      guard let session else { return }
+      if !session.pastePromptText(text) {
+        self?.notice = session.promptWriteBlocker ?? L("无法粘贴到当前 Pane")
+      }
+    }
+  }
+
+  /// 在当前活动终端 Pane 运行命令片段。与打开 Recipe 走同一套信任审查与重放确认，
+  /// 命令经 `.recipeReplay` 来源逐条写入，后续命令等上一条结束（OSC 133）后再发。
+  func runSnippet(from url: URL) {
+    dismissWorkspaceOverlays()
+    do {
+      let envelope = try WorkflowRecipeTOML.load(from: url)
+      guard envelope.recipe.scope == .commands else {
+        openWorkflowRecipe(from: url)
+        return
+      }
+      guard let tab = selectedTab, let session = tab.activeSession, session.statusIsRunning else {
+        notice = L("当前没有可运行命令的终端 Pane")
+        return
+      }
+      let paneID = tab.activePaneID
+      // 同一 Pane 上一组 Recipe 命令还没发完时不叠加，否则两组命令会交错写入。
+      guard pendingRecipeCommands[paneID] == nil, !activeRecipeReplayPaneIDs.contains(paneID) else {
+        notice = L("当前 Pane 还有未完成的 Recipe 命令")
+        return
+      }
+      guard let authorization = try authorizeRecipeReplay(envelope), authorization.permitsReplay else { return }
+      pendingRecipeCommands[paneID] = envelope.recipe.commands
+      if authorization.confirmsEveryCommand { recipeCommandConfirmationPaneIDs.insert(paneID) }
+      startPendingRecipeCommands(paneID: paneID)
+    } catch {
+      notice = L("命令片段运行失败：\(error.localizedDescription)")
+    }
+  }
+
   private func openWorkflowRecipe(from url: URL) {
     do {
       let envelope = try WorkflowRecipeTOML.load(from: url)
-      let settings = workflowRecipeReplaySettings
-      let initial = try WorkflowRecipeOpenPlanner.plan(
-        envelope,
-        settings: settings,
-        trustStore: &workflowRecipeTrust
-      )
-      let choice: WorkflowRecipeTrustChoice?
-      if case .reviewRequired(let digest, let commands) = initial {
-        choice = reviewExternalRecipe(digest: digest, commands: commands)
-        guard choice != .cancel else { return }
-      } else {
-        choice = nil
-      }
-      let decision = try WorkflowRecipeOpenPlanner.plan(
-        envelope,
-        settings: settings,
-        trustStore: &workflowRecipeTrust,
-        trustChoice: choice
-      )
-      persistWorkflowRecipeTrust()
-      guard case .replay(let replayPlan) = decision else { return }
-      let permitsReplay = confirmRecipeReplayIfNeeded(replayPlan, recipe: envelope.recipe)
-      let confirmsEveryCommand = WorkflowRecipeReplayExecutionPolicy.confirmsEveryCommand(replayPlan)
+      guard let authorization = try authorizeRecipeReplay(envelope) else { return }
+      let permitsReplay = authorization.permitsReplay
+      let confirmsEveryCommand = authorization.confirmsEveryCommand
       let context = WorkflowPortablePathContext(
         currentFolder: URL(fileURLWithPath: selectedTab?.workingDirectory ?? NSHomeDirectory()),
         homeFolder: FileManager.default.homeDirectoryForCurrentUser,

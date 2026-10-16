@@ -3635,7 +3635,19 @@ extension SettingsViewController: WKNavigationDelegate {
     return urls.filter { $0.pathExtension.lowercased() == WorkflowRecipeTOML.fileExtension }
       .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
       .map { url in
-        [
+        // 命令片段显示片段名、首条命令与标签，并可编辑 / 删除；其它 Recipe 保持文件名与「查看」。
+        if let snippet = try? SnippetRecipeFiles.loadSnippet(at: url) {
+          let tags = snippet.tags.map { "#\($0)" }.joined(separator: " ")
+          return [
+            "id": url.path,
+            "name": snippet.name,
+            "summary": [L("命令片段"), snippet.commands.first ?? "", tags].filter { !$0.isEmpty }
+              .joined(separator: " · "),
+            "shortcut": L("查看"),
+            "snippet": true,
+          ]
+        }
+        return [
           "id": url.path,
           "name": url.deletingPathExtension().lastPathComponent,
           "summary": L("Aster Recipe 文件"),
@@ -4451,6 +4463,8 @@ extension SettingsViewController: WKNavigationDelegate {
       guard let path = payload["id"] as? String, path.hasPrefix(recipesDirectoryURL().path) else { return }
       NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     case "createTextSnippet": createTextSnippetRecipe()
+    case "editSnippet": editSnippetRecipe(path: payload["id"] as? String)
+    case "deleteSnippet": deleteSnippetRecipe(path: payload["id"] as? String)
     case "openConfig":
       do { try writeEditableConfiguration(); NSWorkspace.shared.open(settingsConfigurationURL()) }
       catch { sendWebToast(L("无法打开配置：\(error.localizedDescription)"), level: "error") }
@@ -4981,55 +4995,54 @@ extension SettingsViewController: WKNavigationDelegate {
     )
   }
 
+  /// 新建命令片段：原生表单收集名称、多行命令与标签，保存为 `.commands` scope 的 Recipe。
   private func createTextSnippetRecipe() {
-    let nameAlert = NSAlert()
-    nameAlert.messageText = L("新建文本片段")
-    nameAlert.informativeText = L("片段将保存为命令型 .asterrecipe；打开时仍遵循 Recipe 重放确认策略。")
-    nameAlert.addButton(withTitle: L("下一步"))
-    nameAlert.addButton(withTitle: L("取消"))
-    let nameField = NSTextField(string: "Text Snippet")
-    nameField.frame.size = NSSize(width: 360, height: 24)
-    nameAlert.accessoryView = nameField
-    guard nameAlert.runModal() == .alertFirstButtonReturn else { return }
-
-    let textAlert = NSAlert()
-    textAlert.messageText = L("片段内容")
-    textAlert.informativeText = L("输入要在终端中重放的文本。")
-    textAlert.addButton(withTitle: L("保存"))
-    textAlert.addButton(withTitle: L("取消"))
-    let textField = NSTextField(string: "")
-    textField.frame.size = NSSize(width: 360, height: 24)
-    textAlert.accessoryView = textField
-    guard textAlert.runModal() == .alertFirstButtonReturn else { return }
-
-    let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    let text = textField.stringValue
-    guard !name.isEmpty, name.utf8.count <= 128, !text.isEmpty, text.utf8.count <= 8_192,
-      !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
-    else {
-      sendWebToast(L("片段名称或内容无效"), level: "error")
-      return
-    }
+    guard let recipe = SnippetEditorSheet.prompt(
+      title: L("新建命令片段"), initial: .init(name: L("新片段")), in: view.window)
+    else { return }
     do {
       let directory = recipesDirectoryURL()
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let safeName = name.replacingOccurrences(
-        of: "[^A-Za-z0-9._-]+",
-        with: "-",
-        options: .regularExpression
-      )
-      let url = directory.appendingPathComponent(safeName)
-        .appendingPathExtension(WorkflowRecipeTOML.fileExtension)
-      let recipe = WorkflowRecipe(
-        name: name,
-        scope: .commands,
-        content: .includeCommands,
-        commands: [text]
-      )
-      try WorkflowRecipeTOML.save(recipe, to: url)
-      message = L("文本片段“\(name)”已保存。")
+      try WorkflowRecipeTOML.save(recipe, to: SnippetRecipeFiles.newURL(for: recipe.name, in: directory))
+      message = L("命令片段“\(recipe.name)”已保存。")
     } catch {
-      message = L("文本片段保存失败：\(error.localizedDescription)")
+      message = L("命令片段保存失败：\(error.localizedDescription)")
+    }
+    refresh()
+  }
+
+  /// 编辑已有命令片段：只接受 Recipes 目录里的 `.commands` scope 文件，保存回原文件。
+  private func editSnippetRecipe(path: String?) {
+    do {
+      let url = try SnippetRecipeFiles.validatedURL(path ?? "", in: recipesDirectoryURL())
+      let current = try SnippetRecipeFiles.loadSnippet(at: url)
+      guard let recipe = SnippetEditorSheet.prompt(
+        title: L("编辑命令片段"), initial: .init(recipe: current), in: view.window)
+      else { return }
+      try WorkflowRecipeTOML.save(recipe, to: url)
+      message = L("命令片段“\(recipe.name)”已保存。")
+    } catch {
+      sendWebToast(L("无法编辑命令片段：\(error.localizedDescription)"), level: "error")
+    }
+    refresh()
+  }
+
+  /// 删除命令片段：确认后移到废纸篓（可恢复），只处理 Recipes 目录里的片段文件。
+  private func deleteSnippetRecipe(path: String?) {
+    do {
+      let url = try SnippetRecipeFiles.validatedURL(path ?? "", in: recipesDirectoryURL())
+      let recipe = try SnippetRecipeFiles.loadSnippet(at: url)
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = L("删除命令片段“\(recipe.name)”？")
+      alert.informativeText = L("文件会移到废纸篓。")
+      alert.addButton(withTitle: L("删除"))
+      alert.addButton(withTitle: L("取消"))
+      guard alert.runModal() == .alertFirstButtonReturn else { return }
+      try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+      message = L("命令片段“\(recipe.name)”已删除。")
+    } catch {
+      sendWebToast(L("无法删除命令片段：\(error.localizedDescription)"), level: "error")
     }
     refresh()
   }

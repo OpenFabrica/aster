@@ -101,7 +101,9 @@ enum OpenQuicklyHostCatalog {
     let hostRows = freeHosts.map { host in
       Row(
         kind: .host(host.id), title: host.name.isEmpty ? host.connectString : host.name,
-        detail: [host.connectString, host.group].compactMap { $0 }.filter { !$0.isEmpty }
+        // 标签写成 `#tag` 放在 detail 末尾，模糊搜索能按标签命中。
+        detail: [host.connectString, host.group, host.tags.map { $0.map { "#\($0)" }.joined(separator: " ") }]
+          .compactMap { $0 }.filter { !$0.isEmpty }
           .joined(separator: " · "),
         score: ledger.score(for: .id(host.id), now: now))
     }

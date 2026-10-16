@@ -92,6 +92,9 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
   public var keepaliveCountMax: Int?
   public var connectTimeout: Int?
   public var verifyHostKeys: Bool?
+  /// 主机标签，用于筛选与 Open Quickly 搜索；nil 表示没有标签。默认项不使用此字段。
+  /// 由 `SSHHostStore.normalized` 去空白、不分大小写去重，空列表归一为 nil。
+  public var tags: [String]?
 
   public init(
     id: UUID = UUID(),
@@ -114,7 +117,8 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
     keepaliveInterval: Int? = nil,
     keepaliveCountMax: Int? = nil,
     connectTimeout: Int? = nil,
-    verifyHostKeys: Bool? = nil
+    verifyHostKeys: Bool? = nil,
+    tags: [String]? = nil
   ) {
     self.id = id
     self.name = name
@@ -137,6 +141,7 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
     self.keepaliveCountMax = keepaliveCountMax
     self.connectTimeout = connectTimeout
     self.verifyHostKeys = verifyHostKeys
+    self.tags = tags
   }
 
   /// 空的默认项。首次启动时由存储补上，保证列表顶部总有一条「默认」。
