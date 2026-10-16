@@ -89,8 +89,8 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
   private let agentSetupService: AgentSetupService
   /// 生产环境是 SoftwareUpdateService.shared；开发构建与测试为 nil / stub。
   private let updateController: (any SoftwareUpdateControlling)?
-  /// 「主机」分类的快照与动作协作者；回调在 viewDidLoad 接线，不向它开放本类的 private 成员。
-  private let hostsBridge: SettingsHostsBridge
+  /// 「主机」分类（Agent 访问）的快照与动作协作者；回调在 viewDidLoad 接线，不向它开放本类的 private 成员。
+  private let agentAccessBridge: SettingsAgentAccessBridge
   private var selection: Section = .general
   private var searchText = ""
   private var focusedThemeID: String?
@@ -134,8 +134,6 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
   private var settingsMessageProxy: SettingsScriptMessageProxy?
   private var webRevision = 0
   private var webReady = false
-  /// 等网页就绪后要打开编辑表单的主机（「编辑主机…」深链）。
-  private var pendingHostEditID: UUID?
   /// Session Memory 目录的已用空间文本。目录遍历是磁盘 IO，绝不能落在快照构建里
   /// （每次设置改动都会重建快照）；这里只缓存后台算好的结果。
   private var memoryStoreSizeText = L("计算中…")
@@ -233,13 +231,13 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     panelLayoutBinding: WorkspacePanelSettingsBinding = WorkspacePanelSettingsBinding(),
     agentSetupService: AgentSetupService = AgentSetupService(),
     updateController: (any SoftwareUpdateControlling)? = SoftwareUpdateService.shared,
-    hostsBridge: SettingsHostsBridge? = nil
+    agentAccessBridge: SettingsAgentAccessBridge? = nil
   ) {
     self.preferences = preferences
     self.panelLayoutBinding = panelLayoutBinding
     self.agentSetupService = agentSetupService
     self.updateController = updateController
-    self.hostsBridge = hostsBridge ?? SettingsHostsBridge(dependencies: .live())
+    self.agentAccessBridge = agentAccessBridge ?? SettingsAgentAccessBridge()
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -324,7 +322,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
         self.scheduleRefresh()
       }
       .store(in: &cancellables)
-    connectHostsBridge()
+    connectAgentAccessBridge()
     TerminalNotificationService.shared.refreshAuthorizationStatus()
     refreshMemoryStoreSize()
     refreshMemoryMCPState()
@@ -339,20 +337,6 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
       "type": "selectSection",
       "section": section.webIdentifier,
     ])
-  }
-
-  /// 切到「主机」分类并打开指定主机的编辑表单；网页尚未就绪时等 `ready` 后再发。
-  func showHost(_ id: UUID) {
-    showSection(.hosts)
-    pendingHostEditID = id
-    flushPendingHostEdit()
-  }
-
-  /// 网页就绪后发出待处理的主机编辑请求。快照先于它送达，网页能找到这台主机。
-  private func flushPendingHostEdit() {
-    guard webReady, let id = pendingHostEditID else { return }
-    pendingHostEditID = nil
-    sendWebMessage(["type": "hostsEdit", "id": id.uuidString])
   }
 
   private func scheduleRefresh() {
@@ -1527,26 +1511,26 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
 
   // MARK: - 主机
 
-  /// 把「主机」协作者接到本页的快照推送、toast 与网页消息上，并开始监听主机目录。
-  private func connectHostsBridge() {
-    hostsBridge.pushSnapshot = { [weak self] in self?.pushWebSnapshot() }
-    hostsBridge.scheduleRefresh = { [weak self] in self?.scheduleRefresh() }
-    hostsBridge.toast = { [weak self] text, isError in
+  /// 把「主机」分类（Agent 访问）协作者接到本页的快照推送、toast 与网页消息上，并开始监听运行时。
+  private func connectAgentAccessBridge() {
+    agentAccessBridge.pushSnapshot = { [weak self] in self?.pushWebSnapshot() }
+    agentAccessBridge.scheduleRefresh = { [weak self] in self?.scheduleRefresh() }
+    agentAccessBridge.toast = { [weak self] text, isError in
       self?.sendWebToast(text, level: isError ? "error" : "info")
     }
-    hostsBridge.postMessage = { [weak self] message in self?.sendWebMessage(message) }
-    hostsBridge.window = { [weak self] in self?.view.window }
-    hostsBridge.start()
+    agentAccessBridge.postMessage = { [weak self] message in self?.sendWebMessage(message) }
+    agentAccessBridge.start()
   }
 
-  /// 原生回退页只做说明：主机列表与编辑表单只在网页设置页中提供。
+  /// 原生回退页只做说明：Agent 访问只在网页设置页中提供；主机管理在侧栏「主机」页。
   private func hostViews() -> [NSView] {
     [
       sectionTitle(L("主机")),
       card([
-        infoRow(
-          L("已保存的 SSH 主机"), L("主机列表与编辑表单只在网页设置页中提供"),
-          "\(hostsBridge.directory.savedHosts.count)")
+        actionRow(
+          L("主机、密钥与已知主机"), L("主机、密钥与已知主机已移到侧栏「主机」页。"),
+          title: L("打开主机页")
+        ) { [weak self] in self?.agentAccessBridge.openHostsPage() }
       ]),
     ]
   }
@@ -3214,7 +3198,6 @@ extension SettingsViewController: WKNavigationDelegate {
     case "ready":
       webReady = true
       pushWebSnapshot()
-      flushPendingHostEdit()
     case "set":
       handleWebSet(message)
     case "action":
@@ -3505,7 +3488,7 @@ extension SettingsViewController: WKNavigationDelegate {
       "agentControl": agentControlStatus.jsonValue,
       "recipes": makeWebRecipes(),
       "shortcuts": makeWebShortcuts(),
-      "hosts": hostsBridge.snapshot(),
+      "hosts": agentAccessBridge.snapshot(),
     ]
   }
 
@@ -4486,8 +4469,8 @@ extension SettingsViewController: WKNavigationDelegate {
     case "uninstallAgentSkill": uninstallAgentSkill(providerRawValue: payload["provider"] as? String)
     case "clearWebPaneData": clearWebPaneBrowsingData()
     case _ where action.hasPrefix("hosts."):
-      // 主机动作可能异步完成（导入、打开编辑器），回执由协作者在真正结束时触发。
-      hostsBridge.handle(action: action, payload: payload) { [weak self] succeeded in
+      // Agent 访问动作可能异步完成（审计分页、安装 MCP），回执由协作者在真正结束时触发。
+      agentAccessBridge.handle(action: action, payload: payload) { [weak self] succeeded in
         self?.completeWebMutation(request, succeeded: succeeded)
       }
     case "resetAdvanced":

@@ -15,6 +15,14 @@ final class VaultActionsRecorder {
   var chooserGate: CheckedContinuation<URL?, Never>?
   var holdsChooser = false
   var confirmsDeleteOriginal = true
+  /// 依次回答 passphrase 询问；用完后返回 nil（等同取消）。
+  var passphrases: [String?] = []
+  /// 每次询问 passphrase 时的 isRetry。
+  var passphrasePrompts: [Bool] = []
+  /// 每次「删除原文件」确认框的内容。
+  var deletePrompts: [SSHVaultDeleteOriginalPrompt] = []
+  /// 确认框弹出时执行（模拟用户犹豫期间文件被替换）。
+  var onConfirmDelete: (() throws -> Void)?
 
   /// 放行挂起的文件选择。
   func releaseChooser() {
@@ -34,7 +42,8 @@ struct VaultActionsFixture {
   var hosts: SSHHostDirectory { actions.hosts }
 
   init(
-    hosts: [SSHHostProfile] = [], tool: FakeVaultKeyTool = FakeVaultKeyTool(), engine: SSHEngine = .native
+    hosts: [SSHHostProfile] = [], tool: FakeVaultKeyTool = FakeVaultKeyTool(), engine: SSHEngine = .native,
+    listing: SSHConfigListing = SSHConfigListing()
   ) throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "AsterVaultActions-\(UUID().uuidString)", isDirectory: true)
@@ -55,10 +64,17 @@ struct VaultActionsFixture {
           return await withCheckedContinuation { recorder.chooserGate = $0 }
         },
         readKeyFile: SSHVaultKeyActions.readKeyFile,
-        promptPassphrase: { _, _ in nil },
+        promptPassphrase: { _, isRetry in
+          recorder.passphrasePrompts.append(isRetry)
+          return recorder.passphrases.isEmpty ? nil : recorder.passphrases.removeFirst()
+        },
         copyToPasteboard: { recorder.pasteboard.append($0) },
-        confirmDeleteOriginal: { _, _ in recorder.confirmsDeleteOriginal },
-        configListing: { SSHConfigListing() },
+        confirmDeleteOriginal: { prompt, _ in
+          recorder.deletePrompts.append(prompt)
+          try? recorder.onConfirmDelete?()
+          return recorder.confirmsDeleteOriginal
+        },
+        configListing: { listing },
         engine: { engine },
         homeDirectory: root.path,
         localUser: "tester"),

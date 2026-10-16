@@ -1,8 +1,8 @@
 import AsterCore
 import Foundation
 
-// 私钥保险库动作的错误与错误文案。`SSHVaultKeyActions` 与「主机 → 密钥」页、设置页桥接共用，
-// 同一种失败在两处给出同一句话。
+// 私钥保险库动作的错误与错误文案。`SSHVaultKeyActions` 与「主机 → 密钥」页共用，
+// 同一种失败只有一句话。
 
 /// 密钥动作失败的原因。文案直接给用户看。
 enum SSHVaultKeyActionError: Error, Equatable {
@@ -60,7 +60,7 @@ extension SSHVaultKeyActions {
       return L("密钥信息无效：\(reasons.joined(separator: "；"))")
     case SSHVaultKeyDirectoryError.store(let error): return L("读写 ssh-keys.json 失败：\(String(describing: error))")
     case SSHCredentialStoreError.keychain(let status): return L("钥匙串操作失败（\(String(status))）")
-    default: return SettingsHostsBridge.describe(error)
+    default: return SSHHostEditing.describe(error)
     }
   }
 }

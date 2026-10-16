@@ -3,7 +3,7 @@ import AsterCore
 import Foundation
 
 // 「保存为主机…」表单：Open Quickly 快连行、ssh alias 行与手敲 ssh 的标签菜单共用。
-// 只收集名称、分组与 `user@host:port`；认证、跳板等进阶字段仍在设置 ▸ 主机里编辑。
+// 只收集名称、分组与 `user@host:port`；认证、跳板等进阶字段在侧栏「主机」页的编辑面板里编辑。
 // 风格与 `MachineSetupSheet` 一致：NSAlert + accessoryView，真实可点。
 
 /// 保存为主机的表单与纯转换逻辑。
@@ -125,7 +125,7 @@ enum SaveSSHHostSheet {
     if case SaveError.invalidTarget(let text) = error {
       return L("无法识别「\(text)」。请填写 user@host、user@host:port 或 [IPv6]:port。")
     }
-    return SettingsHostsBridge.describe(error)
+    return SSHHostEditing.describe(error)
   }
 
   /// 手敲 ssh 命令不能保存时的用户文案。

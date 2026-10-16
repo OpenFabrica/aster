@@ -695,72 +695,11 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .setting-copy.clickable { cursor: pointer; }
 .toggle-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 
-/* 「主机」分类：工具栏、分组列表、行菜单与编辑表单。 */
-.hosts-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
-.hosts-search { flex: 1 1 200px; min-width: 160px; }
-.hosts-row { min-height: 46px; cursor: pointer; }
-.hosts-row:focus-visible, .hosts-group-header:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.hosts-row .setting-label, .hosts-row .setting-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hosts-defaults { background: var(--accent-muted); }
-.hosts-chevron { color: var(--text-tertiary); font-size: 16px; }
-.hosts-group-header { display: flex; width: 100%; align-items: center; gap: 6px; padding: 7px 14px; color: var(--text-tertiary); background: transparent; border: 0; border-top: 1px solid var(--border-subtle); font-size: 10.5px; font-weight: 650; letter-spacing: .03em; text-align: left; cursor: pointer; }
-.hosts-group-header:hover { color: var(--text-secondary); background: var(--bg-hover); }
-.hosts-group-chevron { width: 10px; }
-.hosts-group-count { font-weight: 500; }
+/* 「主机」分类：顶部迁移指引；下方是「Agent 访问」子页（沿用 empty / badge 样式）。 */
+.hosts-moved-note { min-height: 46px; }
+.hosts-page > .card { margin-bottom: 14px; }
 .hosts-empty { min-height: 40px; }
 .hosts-badge { padding: 1px 7px; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 10px; white-space: nowrap; }
-.hosts-more { min-width: 28px; padding: 0 6px; }
-.hosts-tag-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 10px; }
-.hosts-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.hosts-tag { padding: 0 7px; color: var(--text-secondary); background: var(--bg-hover); border: 1px solid transparent; border-radius: 999px; font-size: 10.5px; line-height: 17px; white-space: nowrap; }
-.action-button.hosts-tag { min-height: 0; cursor: pointer; }
-/* 「主机 → 已知主机」：按文件分组的 known_hosts 记录与行内删除确认。 */
-.known-hosts-file { margin-bottom: 14px; }
-.known-hosts-file-header { display: flex; align-items: center; gap: 6px; margin: 0 2px 6px; color: var(--text-secondary); font-size: 11.5px; }
-.known-hosts-path { overflow: hidden; font-family: "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.known-hosts-row { cursor: default; }
-.known-hosts-fingerprint { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; }
-.known-hosts-revoked { color: var(--danger); border-color: var(--danger); }
-.known-hosts-skipped .setting-detail { color: var(--text-tertiary); }
-.known-hosts-confirm { padding: 4px 14px 12px; border-top: 1px dashed var(--border-subtle); font-size: 12px; }
-.known-hosts-confirm p { margin: 6px 0; color: var(--text-secondary); }
-.known-hosts-confirm ul { max-height: 120px; margin: 0; padding-left: 18px; overflow: auto; font-family: "SF Mono", Menlo, monospace; font-size: 11px; }
-.known-hosts-confirm .settings-dialog-actions { flex-wrap: wrap; margin-top: 10px; }
-.action-button.hosts-tag.selected { color: var(--accent); background: var(--accent-muted); border-color: var(--accent); }
-.hosts-menu { position: fixed; z-index: 1100; min-width: 168px; padding: 4px; background: var(--bg-card); border: 1px solid var(--border-active); border-radius: var(--radius-control); box-shadow: 0 10px 30px rgb(0 0 0 / 22%); }
-.hosts-menu-item { display: block; width: 100%; padding: 6px 9px; color: var(--text-primary); background: transparent; border: 0; border-radius: 5px; text-align: left; cursor: pointer; }
-.hosts-menu-item:hover, .hosts-menu-item:focus-visible { background: var(--bg-hover); outline: none; }
-.hosts-menu-item.danger { color: var(--danger); }
-.hosts-menu-separator { height: 1px; margin: 4px 2px; background: var(--border-subtle); }
-.hosts-confirm-list { margin: 0 0 12px; font-size: 12px; }
-.hosts-confirm-list ul { max-height: 140px; margin: 4px 0 0; padding-left: 18px; overflow: auto; color: var(--text-secondary); }
-.hosts-report-list li { font-family: "SF Mono", Menlo, monospace; font-size: 11px; }
-.settings-dialog.hosts-dialog { max-height: 86vh; }
-.hosts-form { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
-.hosts-form-grid { display: grid; gap: 8px; margin-bottom: 8px; }
-.hosts-field { display: grid; grid-template-columns: 132px minmax(0, 1fr); align-items: start; gap: 12px; }
-.hosts-field-label { padding-top: 6px; color: var(--text-secondary); font-size: 12px; }
-.hosts-field-body { display: grid; gap: 3px; min-width: 0; }
-.hosts-field-body .control, .hosts-field-body input.control[type] { width: 100%; max-width: none; box-sizing: border-box; }
-.hosts-field-hint { color: var(--text-tertiary); font-size: 10.5px; }
-.settings-dialog p.hosts-field-hint { margin: 0 0 6px; color: var(--text-tertiary); font-size: 10.5px; }
-.hosts-identity { min-height: 48px; padding: 6px 10px; resize: vertical; font-family: "SF Mono", Menlo, monospace; font-size: 11.5px; }
-.hosts-section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
-.hosts-section summary { margin-bottom: 8px; color: var(--text-primary); font-weight: 600; cursor: pointer; }
-.hosts-forwards { display: grid; gap: 6px; justify-items: start; }
-.hosts-forward { display: grid; width: 100%; grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; }
-.hosts-forward .control { width: 100%; min-width: 0; max-width: none; box-sizing: border-box; }
-.settings-dialog .hosts-form-error { min-height: 16px; margin: 8px 0 0; color: var(--danger); font-size: 11.5px; }
-/* 「主机」分类的子标签（主机 | 密钥 | 已知主机 | Agent 访问）与密钥保险库。 */
-.hosts-tabs { margin-bottom: 12px; }
-.hosts-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.hosts-toolbar-note { flex: 1 1 200px; color: var(--text-tertiary); font-size: 10.5px; }
-.ssh-key-row { min-height: 46px; }
-.ssh-key-row .setting-label, .ssh-key-row .setting-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hosts-badge.danger { color: var(--danger); border-color: var(--danger); }
-.hosts-vault-keys { display: grid; gap: 4px; max-height: 132px; overflow: auto; padding: 4px 0; }
-.hosts-vault-key { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
-.hosts-vault-key small { margin-left: auto; font-family: "SF Mono", Menlo, monospace; }
 
 /* 「Agent 访问」子页：卡片头部操作、活动记录行与变更列表。 */
 .agent-card-actions { display: flex; justify-content: flex-end; margin: 0 0 8px; }

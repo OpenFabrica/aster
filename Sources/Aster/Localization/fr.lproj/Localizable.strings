@@ -276,7 +276,8 @@
 "主机不存在。" = "L'hôte n'existe pas.";
 "主机不存在，可能已被删除" = "L'hôte n'existe pas ; il a peut-être été supprimé";
 "主机不能为空" = "L'hôte ne peut pas être vide";
-"主机列表与编辑表单只在网页设置页中提供" = "La liste des hôtes et le formulaire d'édition ne sont disponibles que dans la page de réglages web";
+"主机、密钥与已知主机" = "Hôtes, clés et hôtes connus";
+"主机、密钥与已知主机已移到侧栏「主机」页。" = "Les hôtes, les clés et les hôtes connus se trouvent désormais dans la page « Hôtes » de la barre latérale.";
 "主机参数无效" = "Paramètres d'hôte non valides";
 "主机和用户名不能换行" = "L'hôte et le nom d'utilisateur ne doivent pas contenir de saut de ligne";
 "主机已删除，但没能从钥匙串删除口令：%@" = "L'hôte a été supprimé, mais son mot de passe n'a pas pu être retiré du trousseau : %@";
@@ -407,7 +408,7 @@
 "名称 A–Z" = "Nom A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Le nom ne peut pas être vide, dépasser 64 octets ni contenir de saut de ligne";
 "在 Aster 中生成" = "Générée dans Aster";
-"在设置中管理主机…" = "Gérer les hôtes dans les réglages…";
+"打开主机页" = "Ouvrir la page Hôtes";
 "复制 SSH 命令" = "Copier la commande SSH";
 "复制公钥" = "Copier la clé publique";
 "密钥" = "Clés";
@@ -877,7 +878,6 @@
 "已从 Ghostty 导入 %@ 项；%@ 项当前无法映射。" = "%@ éléments importés depuis Ghostty ; %@ éléments ne peuvent pas être mappés actuellement.";
 "已从该项目的 .mcp.json 移除 aster-memory。" = "aster-memory a été supprimé du fichier .mcp.json de ce projet.";
 "已保存主机" = "Hôtes enregistrés";
-"已保存的 SSH 主机" = "Hôtes SSH enregistrés";
 "已保存诊断包。" = "Paquet de diagnostic enregistré.";
 "已允许" = "Autorisé";
 "已允许，但横幅样式设为“无”——横幅不会显示" = "Autorisé, mais le style de bannière est réglé sur « Aucun » — les bannières ne s’afficheront pas";

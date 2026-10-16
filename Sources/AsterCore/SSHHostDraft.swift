@@ -2,7 +2,7 @@ import Foundation
 
 // 主机编辑表单的草稿：把 `SSHHostProfile` 拆成表单里的文本与选项，再按同一套规则组装回去。
 //
-// 原生编辑面板直接使用；格式规则与网页表单（`hosts-form.js`）一致：空字段表示继承默认项，
+// 原生编辑面板直接使用。格式规则：空字段表示继承默认项，
 // `主机:端口` 可省略主机（转发规则按 ssh 习惯补 127.0.0.1 / localhost）。这里只做格式解析，
 // 是否合法仍由 `SSHHostStore.validate` 与解析器最终判定。
 // 每个 `SSHHostProfile` 字段都必须在 `init(profile:)` 与 `makeProfile()` 之间原样往返，
@@ -96,7 +96,7 @@ public struct SSHHostDraft: Equatable, Sendable {
 
   /// 把草稿组装成主机配置；格式错误时一次报告全部问题。
   ///
-  /// 与网页表单的 `collect()` 同语义：空文本存成 nil（继承），默认项不写名称以外的身份字段。
+  /// 空文本存成 nil（继承），默认项不写名称以外的身份字段。
   public func makeProfile() throws(SSHHostDraftError) -> SSHHostProfile {
     var issues: [SSHHostDraftIssue] = []
     /// 可空整数字段：空串为 nil，非整数记一条问题。
@@ -262,7 +262,7 @@ public enum SSHHostDraftIssue: Equatable, Sendable {
   /// 第 `index` 条（从 1 开始）转发规则的地址格式不对。
   case forwardAddress(index: Int)
 
-  /// 给用户看的一句话，与网页表单的提示一致。
+  /// 给用户看的一句话。
   public var message: String {
     switch self {
     case .notInteger(let field): L("\(field.label) 必须是整数")

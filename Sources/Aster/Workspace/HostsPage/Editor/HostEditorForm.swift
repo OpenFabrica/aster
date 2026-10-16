@@ -1,5 +1,5 @@
 // 编辑面板的表单：按「基本 / 认证 / 跳板与代理 / 端口转发 / 高级」分区摆放全部主机字段，
-// 并在保存时把控件内容收回成 `SSHHostDraft`。字段、占位符与继承文案与网页表单（`hosts-form.js`）一致：
+// 并在保存时把控件内容收回成 `SSHHostDraft`。字段、占位符与继承文案遵循同一约定：
 // 空字段表示继承默认项，占位符写出将要生效的值。
 import AppKit
 import AsterCore
@@ -169,7 +169,7 @@ final class HostEditorForm: NSObject, NSTokenFieldDelegate {
     context.draft.isDefaults ? L("内置默认（\(text)）") : L("继承默认（\(text)）")
   }
 
-  /// 认证方式的显示文案（与网页表单一致）。
+  /// 认证方式的显示文案。
   static func authLabel(_ mode: SSHAuthMode) -> String {
     switch mode {
     case .auto: L("自动")

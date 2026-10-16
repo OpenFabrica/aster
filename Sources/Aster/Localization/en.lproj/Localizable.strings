@@ -276,7 +276,8 @@
 "主机不存在。" = "The host does not exist.";
 "主机不存在，可能已被删除" = "The host does not exist; it may have been deleted";
 "主机不能为空" = "Host cannot be empty";
-"主机列表与编辑表单只在网页设置页中提供" = "The host list and editor are only available on the web settings page";
+"主机、密钥与已知主机" = "Hosts, Keys, and Known Hosts";
+"主机、密钥与已知主机已移到侧栏「主机」页。" = "Hosts, keys, and known hosts have moved to the Hosts page in the sidebar.";
 "主机参数无效" = "Invalid host parameters";
 "主机和用户名不能换行" = "Host and username must not contain line breaks";
 "主机已删除，但没能从钥匙串删除口令：%@" = "The host was deleted, but its password could not be removed from the Keychain: %@";
@@ -407,7 +408,7 @@
 "名称 A–Z" = "Name A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "The name must not be empty, longer than 64 bytes, or contain line breaks";
 "在 Aster 中生成" = "Generated in Aster";
-"在设置中管理主机…" = "Manage Hosts in Settings…";
+"打开主机页" = "Open Hosts Page";
 "复制 SSH 命令" = "Copy SSH Command";
 "复制公钥" = "Copy Public Key";
 "密钥" = "Keys";
@@ -877,7 +878,6 @@
 "已从 Ghostty 导入 %@ 项；%@ 项当前无法映射。" = "Imported %@ items from Ghostty; %@ items currently cannot be mapped.";
 "已从该项目的 .mcp.json 移除 aster-memory。" = "aster-memory has been removed from this project's .mcp.json.";
 "已保存主机" = "Saved Hosts";
-"已保存的 SSH 主机" = "Saved SSH Hosts";
 "已保存诊断包。" = "Diagnostic package saved.";
 "已允许" = "Allowed";
 "已允许，但横幅样式设为“无”——横幅不会显示" = "Allowed, but banner style is set to \"None\" — banners will not appear";

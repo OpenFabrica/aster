@@ -5,7 +5,7 @@ import Foundation
 //
 // known_hosts 的解析与改写只在 aster-ssh 里做；这里只决定问哪些文件和主机、缓存最近一次列表，
 // 确认删除请求来自上一次列表里的可写文件，并在记录已变化（stale）时提示用户、重新列出。
-// 原生「主机 → 已知主机」页与设置页桥接 `SettingsKnownHostsBridge` 共用这一份逻辑。
+// 原生「主机 → 已知主机」页使用这一份逻辑。
 
 /// 「已知主机」的状态与动作。
 @MainActor
@@ -44,7 +44,7 @@ final class SSHKnownHostsService {
   private let hosts: @MainActor () -> [SSHHostProfile]
   private let machineTargets: @MainActor () -> [String]
 
-  /// 状态或列表变化后调用（界面重绘、桥接推快照）。
+  /// 状态或列表变化后调用（界面重绘）。
   var didChange: () -> Void = {}
   /// 显示一条提示；第二个参数为 true 表示错误。
   var toast: (String, Bool) -> Void = { _, _ in }

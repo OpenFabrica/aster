@@ -1,5 +1,5 @@
 // 保险库动作服务 `SSHVaultKeyActions`：展示行、互斥、校验、未知密钥与钥匙串 I/O 不占主线程。
-// 不经设置页桥接，直接调用服务；全部用临时文件、内存钥匙串与假 `aster-ssh keys`。
+// 直接调用服务，不经界面；全部用临时文件、内存钥匙串与假 `aster-ssh keys`。
 import AppKit
 import Foundation
 import Testing

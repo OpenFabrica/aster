@@ -5,7 +5,7 @@ import Testing
 @testable import Aster
 
 // 「已知主机」App 侧服务：加载代次、删除校验、同一时刻只删一次、结果提示与删除后重新列出。
-// 网页快照形状见 `SettingsKnownHostsBridgeTests`，原生页面见 `KnownHostsPageViewControllerTests`。
+// 原生页面见 `KnownHostsPageViewControllerTests`，与真实 aster-ssh 的 JSON 契约见 `SSHKnownHostsToolTests`。
 
 /// 可控的假 aster-ssh：列表可以挂起，便于验证较早的结果不会覆盖较新的结果。
 actor KnownHostsServiceFakeTool {
@@ -115,6 +115,10 @@ func knownHostsServiceValidatesRemoval() async throws {
   }
   #expect(throws: SSHKnownHostsError.unknownEntry) {
     try service.validated(.init(file: "/tmp/kh/known_hosts", line: 1, lineDigest: "stale"))
+  }
+  // 不在上一次列表里的文件按不可写处理。
+  #expect(throws: SSHKnownHostsError.notWritable) {
+    try service.validated(.init(file: "/tmp/other", line: 1, lineDigest: "d1"))
   }
 }
 

@@ -276,7 +276,8 @@
 "主机不存在。" = "Der Host existiert nicht.";
 "主机不存在，可能已被删除" = "Der Host existiert nicht; er wurde möglicherweise gelöscht";
 "主机不能为空" = "Der Host darf nicht leer sein";
-"主机列表与编辑表单只在网页设置页中提供" = "Hostliste und Bearbeitungsformular gibt es nur auf der Web-Einstellungsseite";
+"主机、密钥与已知主机" = "Hosts, Schlüssel und bekannte Hosts";
+"主机、密钥与已知主机已移到侧栏「主机」页。" = "Hosts, Schlüssel und bekannte Hosts befinden sich jetzt auf der Seite „Hosts“ in der Seitenleiste.";
 "主机参数无效" = "Ungültige Hostparameter";
 "主机和用户名不能换行" = "Host und Benutzername dürfen keine Zeilenumbrüche enthalten";
 "主机已删除，但没能从钥匙串删除口令：%@" = "Der Host wurde gelöscht, aber das Passwort konnte nicht aus dem Schlüsselbund entfernt werden: %@";
@@ -407,7 +408,7 @@
 "名称 A–Z" = "Name A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Der Name darf nicht leer sein, höchstens 64 Byte lang sein und keine Zeilenumbrüche enthalten";
 "在 Aster 中生成" = "In Aster erzeugt";
-"在设置中管理主机…" = "Hosts in den Einstellungen verwalten…";
+"打开主机页" = "Hosts-Seite öffnen";
 "复制 SSH 命令" = "SSH-Befehl kopieren";
 "复制公钥" = "Öffentlichen Schlüssel kopieren";
 "密钥" = "Schlüssel";
@@ -877,7 +878,6 @@
 "已从 Ghostty 导入 %@ 项；%@ 项当前无法映射。" = "%@ Elemente von Ghostty importiert; %@ Elemente können derzeit nicht zugeordnet werden.";
 "已从该项目的 .mcp.json 移除 aster-memory。" = "aster-memory wurde aus der .mcp.json dieses Projekts entfernt.";
 "已保存主机" = "Gespeicherte Hosts";
-"已保存的 SSH 主机" = "Gespeicherte SSH-Hosts";
 "已保存诊断包。" = "Diagnosepaket gespeichert.";
 "已允许" = "Erlaubt";
 "已允许，但横幅样式设为“无”——横幅不会显示" = "Erlaubt, aber der Bannerstil ist auf „Keine“ eingestellt — Banner werden nicht angezeigt";

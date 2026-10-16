@@ -298,7 +298,7 @@
         action("previewExtractionPayload", t("查看将发送的内容"), t("预览提炼时会离开本机的会话摘要"), t("查看…")),
       ]},
     ]},
-    { id: "hosts", title: t("主机"), description: t("保存 SSH 主机、跳板、端口转发与认证方式，供远程机器和原生 SSH 使用。"), special: "hosts", groups: [] },
+    { id: "hosts", title: t("主机"), description: t("控制 Agent 是否能在已保存的主机上远程执行命令，并查看授权与活动记录。"), special: "hosts", groups: [] },
     { id: "view", title: t("视图"), description: t("标签页标题与图标规则、角标、网页窗格和详情面板。"), special: "view", groups: [
       { title: t("标签页与标题定制"), rows: [
         row("view.tabRules.alias", t("项目别名"), t("项目的简称，也可以在标题模板中用 ${alias} 引用。"), "rules", { field: "alias" }),
@@ -3094,11 +3094,6 @@
         reply?.(message.succeeded === true);
       } else if (message.type === "selectSection") {
         setSection(message.section);
-      } else if (message.type === "hostsEdit") {
-        setSection("hosts");
-        if (snapshot) window.AsterHosts.edit(message.id, hostsContext());
-      } else if (message.type === "hostsImportReport") {
-        window.AsterHosts.showImportReport(message.report, hostsContext());
       } else if (message.type === "agentAccessAuditPage") {
         window.AsterAgentAccess?.receive?.(message);
       } else if (message.type === "toast") {

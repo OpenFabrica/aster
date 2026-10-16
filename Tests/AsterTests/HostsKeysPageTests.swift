@@ -100,7 +100,7 @@ private func seedDemoKeys(_ fixture: KeysPageFixture) async throws -> [SSHVaultK
   return [laptop, deploy, legacy]
 }
 
-@Test("密钥页：卡片带类型、短指纹与徽标；搜索过滤；选中打开详情；菜单与网页版一致",
+@Test("密钥页：卡片带类型、短指纹与徽标；搜索过滤；选中打开详情；菜单按密钥来源列出动作",
   arguments: [NSAppearance.Name.aqua, .darkAqua])
 @MainActor
 func hostsKeysPageRendersCardsAndDetail(appearance: NSAppearance.Name) async throws {
@@ -128,7 +128,7 @@ func hostsKeysPageRendersCardsAndDetail(appearance: NSAppearance.Name) async thr
   #expect(badgeTexts(fixture.cards[2]) == [L("原文件仍在")])
   try await captureKeysPage(fixture.window, name: "list")
 
-  // 选中导入的密钥：详情面板列出迁移与删除原文件；菜单项与网页版顺序一致。
+  // 选中导入的密钥：详情面板列出迁移与删除原文件；菜单项顺序与详情面板一致。
   fixture.page.select(keys[0].id)
   fixture.window.contentView?.layoutSubtreeIfNeeded()
   #expect(!fixture.page.detailView.isHidden)
