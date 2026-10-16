@@ -169,7 +169,7 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 规范化（`SSHHostStore.normalizedTags`）：去首尾空白、丢弃空串、不分大小写去重并保留第一次出现的写法，结果为空时存成 nil。
 - 校验（`SSHHostStore.tagsAreValid`）：最多 16 个，每个不超过 32 个 UTF-8 字节，不含逗号、换行和控制字符；违反时原因是 `invalid tags`，设置页显示「标签过长或包含逗号/换行」。
 - 兼容：`hosts.json` 版本号仍是 1，新字段是增量加的，旧文件没有 `tags` 键也能读。降级到旧版后再保存会丢掉标签。
-- 字段同步：设置页桥接按字段手写，`SettingsHostsBridge.profileJSON`、`SSHHostProfile.duplicated(name:)`（设置页与主机页的「复制」共用）和 `decodeProfile`（控制字符扫描）都带上了 `tags`；以后加字段也要同时改这三处，否则从网页保存会悄悄丢字段。
+- 字段同步：按字段手写的地方有 `SettingsHostsBridge.profileJSON`、`SSHHostProfile.duplicated(name:)`（设置页与主机页的「复制」共用）、`SSHHostEditRules.sanitized`（控制字符扫描）和 `SSHHostDraft` 的 `init(profile:)` / `makeProfile()`（原生编辑面板）；以后加字段要同时改这几处，否则从网页或编辑面板保存会悄悄丢字段。`SSHHostDraftTests` 的往返测试覆盖每个字段。
 - 使用方：设置页筛选与 chip、Open Quickly 主机行的 detail（`connectString · group · #tag1 #tag2`，模糊搜索能命中标签）、`host.list` 的 `tags` 输出与 `{tags:[…]}` 筛选（AND、不分大小写；CLI 为 `aster-cli host list --tag X`，可重复）。
 ## 侧栏主机页
 
@@ -178,8 +178,21 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 状态：`AppModel.isHostsPagePresented`，只属于本窗口、不持久化。`selectedTabID` 的 `didSet` 在任何选中标签的入口（侧栏、Open Quickly、开 SSH 标签、CLI）都把它关掉；点当前工作区也会先关它（`selectWorkspaceGroupItem`）。命令面板有 `hosts` 命令，横向标签栏布局用它打开。
 - 视图：`WorkspaceViewController.hostsPageController` 懒建并跨整树 `refresh()` 复用，搜索词、钻取的分组和滚动位置不丢；显示时终端视图不在树里，`refresh()` 不回焦终端，详情面板按钮隐藏。代码在 `Sources/Aster/Workspace/HostsPage/`，侧栏行在 `Workspace/Sidebar/HostsSidebarRowView.swift`（行自己订阅主机目录原地更新数量）。
 - 规则：搜索、分组、标签筛选、排序与回车意图都在 `HostBrowserCatalog`（AsterCore，纯函数）。顶层不过滤时只列分组和未分组主机；过滤时平铺所有分组的匹配主机，分组只留名称命中的。回车顺序：名称或连接串完全相同的已保存主机 → 像地址的输入走 `QuickConnectTarget` 临时连接 → 只剩一台可见主机。「最近使用」排序用 `HostUsageLedger.lastUsedByID`。
-- 真值与动作：主机只从 `SSHHostDirectory` 读；复制用 `SSHHostProfile.duplicated(name:)`，删除用 `SSHHostRemoval.remove`（与设置页同一份口令清理规则），导入用 `SSHHostDirectory.mergeSSHConfig`，连接走 `openNativeSSH(hostID:)` / `openNativeSSH(target:)`，编辑跳到 `showHostSettings(hostID:)`，新建复用 `SaveSSHHostSheet`。
+- 真值与动作：主机只从 `SSHHostDirectory` 读；复制用 `SSHHostProfile.duplicated(name:)`，删除用 `SSHHostRemoval.remove`（与设置页同一份口令清理规则），导入用 `SSHHostDirectory.mergeSSHConfig`，连接走 `openNativeSSH(hostID:)` / `openNativeSSH(target:)`，编辑、新建与默认设置都在页内的编辑面板（见下一节）。
 - 图标：代码库没有按主机持久化的远端系统识别结果，卡片统一用通用服务器图标，不为识别系统发起连接。
+
+## 主机编辑面板
+
+主机页右侧滑出的原生编辑面板（AppKit，无 WebView），覆盖新建主机、编辑主机与「默认」项，字段与设置页网页表单（`hosts-form.js`）一一对应。
+
+- 分层：
+  - `SSHHostDraft`（AsterCore）：表单草稿。`init(profile:)` 把主机拆成文本与选项，`makeProfile()` 按网页表单同样的规则组装（空文本存 nil 表示继承；转发规则只写端口时绑定补 `127.0.0.1`、目标补 `localhost`；动态转发目标固定为 `{"", 0}`），格式问题收集成 `SSHHostDraftError`。保险库密钥按原顺序保留，勾选追加末尾，找不到的 ID 原样带回。
+  - `SSHHostEditRules`（AsterCore）：`sanitized` 是保存前的边界清理（空列表与空白归一成 nil，超量条目、控制字符拒绝），网页 payload 与面板共用；`jumpCandidates` 沿跳板链（含默认项跳板）标出会成环的候选；`SSHHostInheritedValues` 计算占位符用的继承值，`SSHHostBuiltinDefaults` 是内置缺省值（与解析器的兜底一致）。
+  - `SSHHostEditing`（App，`Sources/Aster/SSH/`）：`save`（清理 → `SSHHostStore.validate` + 解析器查环 → `upsert`；`requireExisting` 防止编辑期间被删的主机被保存加回来）、`duplicate`、`forgetPassword`、`deletionImpact`、`friendlyReason`、`describe` 与 `~/.ssh/config` 的建档和打开。`SettingsHostsBridge` 的同名静态方法转调这里，行为不变。
+  - 视图在 `Sources/Aster/Workspace/HostsPage/Editor/`：`HostEditorPanelController`（标题带、滚动表单、操作区、底栏；Esc 关闭，回车保存）、`HostEditorForm`（+`Sections`，控件与草稿互转）、`HostEditorForwardsView`、`HostEditorVaultKeysView`、`HostEditorControls`（填充底色的输入框、下拉、按钮与可折叠分区，全部动态色）。开合与宿主回调在 `HostsPageViewController+Editor.swift`，删除确认、忘记口令、添加为机器与编辑 `~/.ssh/config` 在 `HostsPageHostActions.swift`。
+- 依赖：`HostsPageEditorServices` 注入保险库密钥、钥匙串、机器列表、「添加机器」流程与文本编辑器；测试用临时 hosts.json 与内存钥匙串。
+- 线程：口令是否存在（决定是否显示「忘记保存的口令…」、删除确认里的口令去留）在后台查钥匙串；结果回到主线程时面板若已换成别的主机就丢弃。
+- 未保存修改：面板记住打开时的草稿，切换到另一台主机或在面板里「创建副本」前若有修改，先确认是否放弃。
 
 ## Agent 主机终端
 
