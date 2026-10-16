@@ -44,7 +44,7 @@ struct HostControlSnapshot: Sendable {
   /// 含默认项的全部主机；默认项只用于合并字段，不出现在输出里。
   var hosts: [SSHHostProfile]
   var loadError: String?
-  /// 有「一直允许」agent 授权的主机。
+  /// 有「一直允许」agent 授权、且授权指纹与当前目标一致的主机。
   var alwaysGrantedHostIDs: Set<UUID> = []
 
   /// 从主机目录取当前快照。
@@ -52,7 +52,7 @@ struct HostControlSnapshot: Sendable {
   static func live(_ directory: SSHHostDirectory = .shared) -> HostControlSnapshot {
     HostControlSnapshot(
       hosts: directory.hosts, loadError: directory.loadError,
-      alwaysGrantedHostIDs: AgentHostService.shared?.grants.alwaysGrantedHostIDs ?? [])
+      alwaysGrantedHostIDs: AgentHostService.shared?.alwaysGrantedHostIDs() ?? [])
   }
 }
 

@@ -4,7 +4,7 @@ import Foundation
 
 /// 授权范围。
 public enum AgentHostGrantScope: String, Codable, CaseIterable, Sendable {
-  /// 只放行一次。批准时原请求已超时，才会作为「一次性授权」留在簿里等下一次执行消耗。
+  /// 只放行一次。批准时原请求已超时，才会作为「一次性授权」留在簿里，只给同一条命令的下一次执行消耗。
   case once
   /// 本 agent 会话内有效；退出 App 或 12 小时不活动即失效。
   case session
@@ -26,12 +26,15 @@ public struct AgentHostGrant: Codable, Equatable, Sendable, Identifiable {
   public var grantedBy: String
   /// 最近一次放行时间；session 授权按它判断 12 小时不活动。
   public var lastUsedAt: Date?
+  /// once 授权批准的那条命令（nil 表示 `host.open`）；只放行内容完全相同的请求。
+  /// session / always 不绑定命令，恒为 nil。只有 always 会落钥匙串，旧数据没有这个键也能解码。
+  public var command: String?
 
   public var id: UUID { grantID }
 
   public init(
     grantID: UUID = UUID(), hostID: UUID, scope: AgentHostGrantScope, sessionKey: String?,
-    targetFingerprint: String, grantedAt: Date, grantedBy: String, lastUsedAt: Date? = nil
+    targetFingerprint: String, grantedAt: Date, grantedBy: String, lastUsedAt: Date? = nil, command: String? = nil
   ) {
     self.grantID = grantID
     self.hostID = hostID
@@ -41,6 +44,7 @@ public struct AgentHostGrant: Codable, Equatable, Sendable, Identifiable {
     self.grantedAt = grantedAt
     self.grantedBy = grantedBy
     self.lastUsedAt = lastUsedAt
+    self.command = scope == .once ? command : nil
   }
 }
 
@@ -55,14 +59,15 @@ public enum AgentHostTargetFingerprint {
 
 /// 授权簿：判断、记录、撤销与过期清理。值类型，调用方负责持久化 always 部分。
 public struct AgentHostGrantBook: Equatable, Sendable {
-  /// 拒绝后的冷却期：同一会话对同一主机 10 分钟内直接 `approval_denied`，不再弹窗。
+  /// 拒绝后的冷却期：这台主机 10 分钟内对所有会话直接 `approval_denied`，不再弹窗。
+  /// 按主机而不按会话：会话键由调用方自报，换个 session 名就能绕开按会话的冷却继续刷面板。
   public static let denialCooldown: TimeInterval = 10 * 60
   /// session 授权的不活动上限。
   public static let sessionInactivityLimit: TimeInterval = 12 * 60 * 60
   /// 一次性授权（批准时原请求已超时）的有效期。
   public static let pendingOnceLifetime: TimeInterval = 5 * 60
 
-  /// 一次拒绝记录。
+  /// 一次拒绝记录。`sessionKey` 只说明是谁的请求被拒，冷却对这台主机的所有会话生效。
   public struct Denial: Equatable, Sendable {
     public var sessionKey: String
     public var hostID: UUID
@@ -90,17 +95,16 @@ public struct AgentHostGrantBook: Equatable, Sendable {
 
   public init(grants: [AgentHostGrant] = []) { self.grants = grants }
 
-  /// 判断一次执行能否放行。
+  /// 判断一次执行能否放行。`command` 为 nil 表示 `host.open`。
   ///
   /// 顺序：先清理过期，再作废指纹不符的授权；然后 always → session → 拒绝冷却 → once。
-  /// 授权先于拒绝：用户后来明确「一直允许」时，不该被另一个会话更早的拒绝挡住。
-  /// once 授权在放行时被消耗；session 授权刷新最近使用时间。
+  /// 授权先于拒绝：用户后来明确「一直允许」时，不该被更早的拒绝挡住。
+  /// once 授权只匹配同一条命令，放行时被消耗；session 授权刷新最近使用时间。
   public mutating func evaluate(
-    hostID: UUID, sessionKey: String, fingerprint: String, now: Date
+    hostID: UUID, sessionKey: String, fingerprint: String, command: String?, now: Date
   ) -> Evaluation {
     let expired = prune(now: now)
-    let invalidated = grants.filter { $0.hostID == hostID && $0.targetFingerprint != fingerprint }
-    grants.removeAll { $0.hostID == hostID && $0.targetFingerprint != fingerprint }
+    let invalidated = invalidate(hostID: hostID, keeping: fingerprint)
 
     if let grant = grants.first(where: { $0.hostID == hostID && $0.scope == .always }) {
       return Evaluation(decision: .allowed(grant), invalidated: invalidated, expired: expired)
@@ -111,11 +115,11 @@ public struct AgentHostGrantBook: Equatable, Sendable {
       grants[index].lastUsedAt = now
       return Evaluation(decision: .allowed(grants[index]), invalidated: invalidated, expired: expired)
     }
-    if let denial = denials.first(where: { $0.hostID == hostID && $0.sessionKey == sessionKey }) {
+    if let denial = denials.first(where: { $0.hostID == hostID }) {
       return Evaluation(decision: .deniedRecently(until: denial.until), invalidated: invalidated, expired: expired)
     }
     if let index = grants.firstIndex(where: {
-      $0.hostID == hostID && $0.scope == .once && $0.sessionKey == sessionKey
+      $0.hostID == hostID && $0.scope == .once && $0.sessionKey == sessionKey && $0.command == command
     }) {
       let grant = grants.remove(at: index)
       return Evaluation(decision: .allowed(grant), invalidated: invalidated, expired: expired)
@@ -133,19 +137,31 @@ public struct AgentHostGrantBook: Equatable, Sendable {
       replaced = grants.remove(at: index)
     }
     grants.append(grant)
-    // 新的授权意味着用户改了主意，同一会话对这台主机的拒绝冷却随之解除。
-    if let sessionKey = grant.sessionKey {
-      denials.removeAll { $0.hostID == grant.hostID && $0.sessionKey == sessionKey }
-    } else {
-      denials.removeAll { $0.hostID == grant.hostID }
-    }
+    // 新的授权意味着用户对这台主机改了主意；冷却按主机计，随之整体解除。
+    denials.removeAll { $0.hostID == grant.hostID }
     return replaced
   }
 
-  /// 记一次拒绝，开始冷却。
+  /// 退还一条被消耗但没用上的 once 授权（命令最终没敲进终端）。
+  /// 原样放回、不动拒绝冷却：它不是用户新的决定，只是撤销一次未生效的消耗。
+  public mutating func restore(_ grant: AgentHostGrant) {
+    guard grant.scope == .once, !grants.contains(where: { $0.grantID == grant.grantID }) else { return }
+    grants.append(grant)
+  }
+
+  /// 记一次拒绝，开始这台主机的冷却（覆盖之前的冷却）。
   public mutating func recordDenial(sessionKey: String, hostID: UUID, now: Date) {
-    denials.removeAll { $0.hostID == hostID && $0.sessionKey == sessionKey }
+    denials.removeAll { $0.hostID == hostID }
     denials.append(Denial(sessionKey: sessionKey, hostID: hostID, until: now.addingTimeInterval(Self.denialCooldown)))
+  }
+
+  /// 作废某台主机上指纹不是 `fingerprint` 的授权（nil 表示主机已不存在，全部作废）；返回被作废的条目。
+  @discardableResult
+  public mutating func invalidate(hostID: UUID, keeping fingerprint: String?) -> [AgentHostGrant] {
+    let stale: (AgentHostGrant) -> Bool = { $0.hostID == hostID && $0.targetFingerprint != fingerprint }
+    let removed = grants.filter(stale)
+    grants.removeAll(where: stale)
+    return removed
   }
 
   /// 撤销一条授权；不存在返回 nil。

@@ -19,16 +19,16 @@ struct AgentHostGrantTests {
   @Test("没有授权需要批准；always 对任意会话生效；session 只对本会话")
   func scopes() {
     var book = AgentHostGrantBook()
-    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: start).decision == .needsApproval)
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: start).decision == .needsApproval)
     book.add(grant(.session))
-    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: start).decision else {
+    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: start).decision else {
       Issue.record("session 授权应放行本会话")
       return
     }
-    #expect(book.evaluate(hostID: host, sessionKey: "s2", fingerprint: fingerprint, now: start).decision == .needsApproval)
+    #expect(book.evaluate(hostID: host, sessionKey: "s2", fingerprint: fingerprint, command: nil, now: start).decision == .needsApproval)
     book.add(grant(.always, session: "ignored"))
     #expect(book.grants.first { $0.scope == .always }?.sessionKey == nil)
-    guard case .allowed(let always) = book.evaluate(hostID: host, sessionKey: "s2", fingerprint: fingerprint, now: start).decision
+    guard case .allowed(let always) = book.evaluate(hostID: host, sessionKey: "s2", fingerprint: fingerprint, command: nil, now: start).decision
     else {
       Issue.record("always 授权应放行任意会话")
       return
@@ -40,18 +40,41 @@ struct AgentHostGrantTests {
   func onceConsumedAndExpires() {
     var book = AgentHostGrantBook()
     book.add(grant(.once))
-    guard case .allowed(let used) = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: start).decision
+    guard case .allowed(let used) = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: start).decision
     else {
       Issue.record("一次性授权应放行一次")
       return
     }
     #expect(used.scope == .once)
-    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: start).decision == .needsApproval)
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: start).decision == .needsApproval)
     book.add(grant(.once))
     let later = start.addingTimeInterval(AgentHostGrantBook.pendingOnceLifetime + 1)
-    let evaluation = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: later)
+    let evaluation = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: later)
     #expect(evaluation.decision == .needsApproval)
     #expect(evaluation.expired.map(\.scope) == [.once])
+  }
+
+  @Test("once 授权只放行批准时的那条命令；session / always 不记命令")
+  func onceBoundToCommand() {
+    var book = AgentHostGrantBook()
+    book.add(
+      AgentHostGrant(
+        hostID: host, scope: .once, sessionKey: "s1", targetFingerprint: fingerprint, grantedAt: start,
+        grantedBy: "mike", command: "uptime"))
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: "rm -rf /", now: start).decision
+      == .needsApproval)
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: start).decision
+      == .needsApproval)
+    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: "uptime", now: start).decision
+    else {
+      Issue.record("同一条命令应放行")
+      return
+    }
+    #expect(
+      AgentHostGrant(
+        hostID: host, scope: .session, sessionKey: "s1", targetFingerprint: fingerprint, grantedAt: start,
+        grantedBy: "mike", command: "uptime"
+      ).command == nil)
   }
 
   @Test("session 授权 12 小时不活动过期，使用会续期")
@@ -59,14 +82,14 @@ struct AgentHostGrantTests {
     var book = AgentHostGrantBook()
     book.add(grant(.session))
     let almost = start.addingTimeInterval(AgentHostGrantBook.sessionInactivityLimit - 10)
-    _ = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: almost)
+    _ = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: almost)
     let renewed = almost.addingTimeInterval(AgentHostGrantBook.sessionInactivityLimit - 10)
-    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: renewed).decision else {
+    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: renewed).decision else {
       Issue.record("使用后应续期")
       return
     }
     let expired = renewed.addingTimeInterval(AgentHostGrantBook.sessionInactivityLimit + 1)
-    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: expired).decision == .needsApproval)
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: expired).decision == .needsApproval)
   }
 
   @Test("目标指纹变了（改地址、用户、端口、跳板）授权作废")
@@ -74,7 +97,7 @@ struct AgentHostGrantTests {
     var book = AgentHostGrantBook()
     book.add(grant(.always))
     let moved = AgentHostTargetFingerprint.make(host: "10.0.0.6", user: "deploy", port: 22, jumpChain: [])
-    let evaluation = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: moved, now: start)
+    let evaluation = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: moved, command: nil, now: start)
     #expect(evaluation.decision == .needsApproval)
     #expect(evaluation.invalidated.count == 1)
     #expect(book.grants.isEmpty)
@@ -83,22 +106,43 @@ struct AgentHostGrantTests {
         != AgentHostTargetFingerprint.make(host: "h", user: "u", port: 22, jumpChain: []))
   }
 
-  @Test("拒绝冷却 10 分钟；新授权解除冷却；授权优先于其它会话的拒绝")
+  @Test("拒绝冷却 10 分钟且按主机对所有会话生效；新授权解除冷却")
   func denialCooldown() {
     var book = AgentHostGrantBook()
     book.recordDenial(sessionKey: "s1", hostID: host, now: start)
     let soon = start.addingTimeInterval(60)
-    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: soon).decision
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: soon).decision
       == .deniedRecently(until: start.addingTimeInterval(AgentHostGrantBook.denialCooldown)))
-    #expect(book.evaluate(hostID: host, sessionKey: "s2", fingerprint: fingerprint, now: soon).decision == .needsApproval)
+    // 换一个自报的会话键绕不开冷却。
+    #expect(book.evaluate(hostID: host, sessionKey: "s2", fingerprint: fingerprint, command: nil, now: soon).decision
+      == .deniedRecently(until: start.addingTimeInterval(AgentHostGrantBook.denialCooldown)))
+    #expect(book.evaluate(hostID: UUID(), sessionKey: "s1", fingerprint: fingerprint, command: nil, now: soon).decision == .needsApproval)
     let after = start.addingTimeInterval(AgentHostGrantBook.denialCooldown + 1)
-    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: after).decision == .needsApproval)
+    #expect(book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: after).decision == .needsApproval)
     book.recordDenial(sessionKey: "s1", hostID: host, now: after)
     book.add(grant(.session, at: after))
-    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, now: after).decision else {
+    guard case .allowed = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: after).decision else {
       Issue.record("新授权应解除冷却")
       return
     }
+    #expect(book.evaluate(hostID: host, sessionKey: "s3", fingerprint: fingerprint, command: nil, now: after).decision == .needsApproval)
+  }
+
+  @Test("退还 once 授权：原样放回且不重复；非 once 不退还")
+  func restoreOnce() {
+    var book = AgentHostGrantBook()
+    book.add(grant(.once))
+    guard case .allowed(let consumed) = book.evaluate(hostID: host, sessionKey: "s1", fingerprint: fingerprint, command: nil, now: start).decision
+    else {
+      Issue.record("once 授权应放行")
+      return
+    }
+    #expect(book.grants.isEmpty)
+    book.restore(consumed)
+    book.restore(consumed)
+    #expect(book.grants == [consumed])
+    book.restore(grant(.session))
+    #expect(book.grants.count == 1)
   }
 
   @Test("撤销单条、按主机、全部；同范围重复授权替换旧条目")

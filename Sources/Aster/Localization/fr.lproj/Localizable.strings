@@ -1996,7 +1996,7 @@
 "允许这个 agent 在下面的主机上执行命令吗？" = "Autoriser cet agent à exécuter des commandes sur l’hôte ci-dessous ?";
 "关闭终端" = "Fermer le terminal";
 "参数无效" = "Paramètres non valides";
-"同一会话共有 %@ 条请求在等待；批准对这台主机生效。" = "%@ demandes sont en attente dans cette session ; l’approbation s’applique à cet hôte.";
+"这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ demandes identiques attendent pour cette commande ; « Autoriser une fois » n’en laisse passer qu’une.";
 "命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "La commande s’exécute dans un terminal flottant. Vous pouvez à tout moment prendre la main, l’interrompre ou mettre l’agent en pause.";
 "已把 Aster 主机访问注册到 %@。" = "L’accès aux hôtes d’Aster a été enregistré auprès de %@.";
 "已撤销 %@ 条授权" = "%@ autorisations révoquées";

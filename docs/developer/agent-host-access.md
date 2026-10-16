@@ -16,6 +16,16 @@
 ssh-agent、模拟点击。这不是沙箱。目标是：agent 拿不到秘密；每次远程访问都经按主机的批准并留痕；
 明显的绕路被堵上；用户能接手。broker 票据与原生 SSH Pane 的敏感判定见 [原生 SSH](native-ssh.md)。
 
+在这个模型下仍要明确的几点：
+
+- **会话键是调用方自报的**。控制 socket 只对本人开放，但任何同用户进程都能连上并自称任意 `session`。
+  因此会话键当凭据用的前提是它不外泄：任何协议结果与 CLI 输出都不回显会话键（`host.terminals`
+  只列调用方自己的终端，`HostTerminalInfo` 不含 session），拒绝冷却按主机而不按会话计，
+  挂起的批准请求有全局上限。
+- **always 授权的钥匙串条目可能被预埋**：同用户进程能新建同名条目。读取前核对条目 ACL，见「批准与授权」。
+- **批准看到的就是要执行的**：只合并内容完全相同的请求，批准按钮在面板出现或内容变化后延迟 1 秒启用，
+  授权绑定请求发起时的目标指纹。
+
 ## 组成
 
 | 位置 | 职责 |
@@ -50,7 +60,10 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 | `host.read` | host 或 terminal_id, lines?（≤500，默认 100） | `{terminal_id, text}`（活动屏幕） |
 | `host.interrupt` | command_id 或 host | `HostExecResult(interrupted)` |
 | `host.close` | host 或 terminal_id | OK |
-| `host.terminals` | agent? | `{terminals: [HostTerminalInfo]}`；带 agent 时只列本会话 |
+| `host.terminals` | agent（必填） | `{terminals: [HostTerminalInfo]}`；只列调用方本会话的终端 |
+
+`HostTerminalInfo`：`terminal_id`、`host_id`、`host_name`、`target`、`state`、`running_command_id`；
+**不含会话键**（会话键是授权凭据，回显出去就能被别的进程冒充）。
 
 `HostExecResult`：`command_id`（`c-` + 12 位十六进制）、`terminal_id`（`t-…`）、`host_id`、
 `host_name`、`status`（`completed | running | needs_input | interrupted | ended`）、`exit_code`
@@ -67,11 +80,18 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 
 ## 执行流程
 
-`host.exec`：参数校验 → 解析主机 → 总开关关着则 `agent_access_disabled` → 授权簿判断（见下）→
-需要批准时弹面板，最多等 `min(剩余期限, 50 s)`，超时 `approval_pending`（面板保留）→ 终端被用户
-暂停则 `agent_paused` → 取或建终端并显示面板 → 期限内没就绪 `host_not_ready` → 排队、必要时
-重新同步、敲入命令、写 `exec.started` → 轮询 → 完成写 `exec.finished`；返回时仍在跑写一次
-`exec.pending`，之后真正结束时（无论有没有人 `host.wait`）补写 `exec.finished`。
+`host.exec`：参数校验 → 解析主机 → 总开关关着则 `agent_access_disabled` → 终端被用户暂停则
+`agent_paused`（在授权簿之前查，暂停时不消耗一次性授权）→ 授权簿判断（见下）→ 需要批准时弹面板，
+最多等 `min(剩余期限, 50 s)`，超时 `approval_pending`（面板保留）→ 批准后复核目标指纹，等待期间
+主机被删或目标变了则这次批准作废（`grant.invalidated`）并报 `host_not_ready` → 再查一次暂停 →
+取或建终端并显示面板 → 期限内没就绪 `host_not_ready` → 排队、必要时重新同步、敲入命令、写
+`exec.started` → 轮询 → 完成写 `exec.finished`；返回时仍在跑写一次 `exec.pending`，之后真正
+结束时（无论有没有人 `host.wait`）补写 `exec.finished`。
+
+等过用户批准后，连接与执行改用新期限：剩余不足 30 秒时补足，但最多比原期限多 10 秒（CLI 与 MCP
+客户端只比 `timeout_ms` 多等 15 秒），也不超过从批准时起的请求超时。命令最终没敲进终端（连接失败、
+排队超时、暂停、前台未确认）时退还 once 授权：从授权簿消耗的原样放回；当场「允许一次」的落成一条
+绑定该命令的一次性授权（写 `grant.created`），重试同一条命令不用再问。
 
 50 秒是因为 Codex 的工具调用默认 60 秒超时；MCP 工具把 `timeout_seconds` 限在 1–50。等待类方法
 （exec / wait / open / interrupt）占用每连接 4 个等待名额；等待只是挂起的 Task，同一连接上的其它
@@ -88,7 +108,12 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 - **回显免疫**：`<` `>` 写成八进制、nonce 作独立参数，回显的命令行里永远不会出现 `<aster:Nb>` 原文。
 - **eval 在当前 Shell**：`cd`、`export` 跨命令保留；语法错误时 eval 返回非零，结束标记照样打印，不会卡在 PS2。
 - **多行**：换行留在单引号里，Shell 进 PS2 续读；PS2 噪声落在开始标记之前，不进输出。
-- **Tab**：直接敲进行编辑器会触发补全，改成在引号外拼 `$(printf '\011')`。
+- **Tab 与非 ASCII**：注入行只含可打印 ASCII 与换行。命令中每个不属于 0x20–0x7E 的字节（Tab、
+  UTF-8 多字节字符等）都移到单引号外，写成 `'"$(printf '\ooo…')"'`，连续字节合成一组。Tab 直接敲
+  会触发补全；远端在 C / POSIX locale 下，bash readline 把 0x80 以上的字节当成 Meta 键（例如 0xAE
+  是 M-.，会插入上一条命令的最后一个参数），中文或 emoji 原样敲入会变成一串编辑命令。`$(…)` 只去掉
+  结尾换行，而换行始终留在引号内，所以 `eval` 收到的字节与原命令完全一致。代价是非 ASCII 字节转义后
+  约为原长的 4 倍；单行上限（4000 字节）按每行转义后的长度计算，纯 ASCII 行与原字节数一致。
 - **行首**：Ctrl-U 清掉提示符上用户没提交的半行；行首空格配合下面的历史设置不进远端历史。
 - 只用 POSIX `printf`。
 
@@ -109,8 +134,10 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 - 下一条命令前，若上次结束后活动屏幕变过（用户打字、程序输出）或刚中断过，先发探针（3 秒）；
   不回应即 `pane_busy`。处在**备用屏**（vim、less、top）时什么都不敲，直接 `pane_busy`，否则
   探针会被当成 vim 普通模式命令执行。
-- 连接前确认 PTY 前台进程是 `aster-ssh`（`proc_pidpath`）。引擎不可用时 `TerminalSession` 会回退成
-  「本地 Shell 里预填 ssh」，此时立即结束该终端并报 `host_not_ready`：agent 命令绝不在本机执行。
+- 发首个探针前、以及之后每次敲命令或探针前，都确认 PTY 前台进程是 `aster-ssh`（`proc_pidpath`）。
+  引擎不可用时 `TerminalSession` 会回退成「本地 Shell 里预填 ssh」，此时立即结束该终端并报
+  `host_not_ready`：agent 命令绝不在本机执行。判断不了（pid 未知或 `proc_pidpath` 失败）也按未确认
+  处理：什么都不敲，继续等，到期限报 `host_not_ready`。
 
 ### 等输入、超时、中断
 
@@ -146,22 +173,40 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
 ## 批准与授权
 
 - `AgentHostApprovalCoordinator` + `AgentHostApprovalPanel`：非模态浮动面板，绝不 `runModal` / sheet。
-  同一（会话、主机）的并发请求合并成一个面板。显示 agent（provider / 客户端 / Pane）、主机与
-  `user@host:port`、理由、**完整原始命令**（只读等宽滚动文本）。按钮：拒绝 / 允许一次 / 本会话允许 /
-  一直允许此主机；默认按钮是拒绝，回车只会拒绝；关掉面板按拒绝处理。新面板出现时发系统通知（命令先脱敏，
-  通知中心会长期留存）并 `requestUserAttention`。
-- 回答先生效（授权或冷却），再唤醒等待方。所有等待方都已超时时，「允许一次」落成一次性授权：
-  5 分钟内被该会话对该主机的下一次执行消耗。拒绝：该会话对该主机 10 分钟内直接 `approval_denied`。
+  显示 agent（provider / 客户端 / Pane）、主机与 `user@host:port`、理由、**完整原始命令**（只读等宽
+  滚动文本）。按钮：拒绝 / 允许一次 / 本会话允许 / 一直允许此主机；默认按钮是拒绝，回车只会拒绝；
+  关掉面板按拒绝处理。面板出现时发系统通知（命令先脱敏，通知中心会长期留存）并 `requestUserAttention`。
+- **合并与排队**：只有内容完全相同的请求（会话、主机、目标指纹、理由、命令都相同）合并成一个面板。
+  不同请求各自排队，一次只显示一个面板，回答只作用于显示中的那一条，答完再显示下一条。全局最多
+  挂起 4 个不同请求，再来的直接 `limit_exceeded`。
+- **防误点**：面板出现或内容变化（合并进新的相同请求）后，三个批准按钮禁用 1 秒；「拒绝」始终可点。
+  避免用户正要点别处时面板恰好弹出，一次误点就批准了没看过的命令。
+- 回答先生效（授权或冷却），再唤醒等待方。「允许一次」只放行最早的一个等待方，其余相同请求重新出面板。
+  所有等待方都已超时时，「允许一次」落成一次性授权：5 分钟内只给该会话对该主机的**同一条命令**消耗。
+  拒绝：这台主机 10 分钟内对**所有会话**直接 `approval_denied`（会话键自报，按会话计会被换名绕开）；
+  任何新授权都解除这台主机的冷却。
+- 授权绑定**请求发起时**的目标指纹，不在回答时重新解析：面板挂着期间主机被改，用户批准的仍是面板上的
+  目标；等待方拿到批准后再复核一次，不符即作废。主机被删或目标变化时，针对旧目标的挂起面板被撤掉。
 - 授权范围：once / session（只在内存，退出 App 或 12 小时不活动失效）/ always（任意会话，存钥匙串）。
   判断顺序 always → session → 拒绝冷却 → once。
 - 目标指纹 `host|user|port|跳板链`（跳板按 `user@host:port`）：地址、用户、端口或跳板变了，旧授权作废、
   重新询问；只改主机名称不影响。
+- `host.list` 的 `agentAccess` 只在 always 授权的指纹与主机当前目标一致时报 `always`。
 - always 授权：一个钥匙串 generic password 条目，service `io.aster.agent-host-grants`、account `always`，
   值是授权数组 JSON；读写放后台（securityd 可能弹授权框）。放钥匙串而不是 defaults / 文件：agent 能改
-  defaults 和用户文件，却不能静默改钥匙串条目，也就没法给自己加授权。读失败按「没有 always 授权」处理
-  （只会多问，不会多放行）。
+  defaults 和用户文件。但同一用户下的任何进程都能新建同名条目（如 `security add-generic-password -A`），
+  所以读明文之前先用 SecKeychain ACL API（`SecKeychainItemCopyAccess` 等，已弃用但文件钥匙串的 ACL
+  没有别的读法，集中在 `AgentHostKeychainAccessCheck`）核对访问控制：只要有一条管解密（Decrypt 或 Any）
+  的 ACL 信任「任何 App」，或没有 ACL，就判定不是 Aster 用默认 ACL 建的——按「没有 always 授权」处理，
+  记诊断事件 `agent_hosts.grants_untrusted` 与一条 `grant.invalidated` 审计，**不删除**条目，留给用户排查。
+  Aster 写入时不带 `kSecAttrAccess`，默认 ACL 的解密项只信任 Aster 自身；发现已有条目不可信时先删再建。
+  剩余限制：用显式受信任列表建的条目（如 `-T /Applications/Aster.app`）与 Aster 自己建的分不出来，
+  这类预埋只能靠审计和设置页的授权列表发现。读失败同样按「没有 always 授权」处理（只会多问，不会多放行）。
 - 总开关「允许编程 agent 申请主机访问」默认关（`aster.agent-hosts.enabled.v1`）。它在 defaults 里，
   agent 改得到它，但改了也只是能**申请**，每台主机仍要批准。改动写 `setting.changed` 审计。
+  关掉时撤掉全部挂起的批准面板并关闭全部 agent 终端；`host.read` 也要求开关开着。
+- 用户撤销授权时关掉失去依据的终端：撤销 always 关这台主机的全部 agent 终端，撤销 session / once
+  只关该会话在这台主机上的终端；「全部撤销」按每条撤销处理。
 
 ## 审计
 
@@ -180,7 +225,7 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
 | `host` | `{id, name, target}` |
 | `commandID`、`terminalID`、`command`、`commandRedacted`、`reason` | 命令先脱敏 |
 | `result` | `{status, exitCode, durationMs, outputBytes}`——**从不记录输出内容** |
-| `changes` | `[{field, before, after}]`：新建 before 固定 `（新建）`、删除 after 固定 `（已删除）`，都记授权的完整快照（grantID、scope、hostID、hostName、targetFingerprint、grantedAt、grantedBy、session） |
+| `changes` | `[{field, before, after}]`：新建 before 固定 `（新建）`、删除 after 固定 `（已删除）`，都记授权的完整快照（grantID、scope、hostID、hostName、targetFingerprint、grantedAt、grantedBy、session，once 授权另有脱敏后的 command） |
 
 脱敏（`AgentHostCommandRedactor`）：`--password/--token/--secret/--api-key…` 的值、`NAME=value`
 （名字含 PASSWORD / PASSWD / TOKEN / SECRET / CREDENTIAL / API_KEY，或有一段恰好是 `KEY`）、
@@ -225,8 +270,9 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
 
 - `./scripts/test.sh --filter AgentHost`：AsterCore（标记符——对真实 sh / bash / zsh 执行注入行、
   授权簿、脱敏、审计、跟踪器、MCP、协议）与 AsterTests（替身终端上的批准 / 拒绝 / 超时重试 /
-  暂停 / 排队 / 等输入 / 中断 / 结束 / 会话隔离 / 回退拒绝，批准合并与存储，`pane.*` 隔离，以及在真实
-  Ghostty surface 上对本地 sh / bash / zsh 跑的端到端）。端到端测试把 `HISTCONTROL`、`HISTFILE`、`ZDOTDIR`
+  暂停 / 排队 / 等输入 / 中断 / 结束 / 会话隔离 / 回退拒绝，批准合并、排队与按钮延迟，目标绑定与
+  once 退还，开关与撤销关终端，钥匙串 ACL 核对，`pane.*` 隔离，以及在真实 Ghostty surface 上对本地
+  sh / bash / zsh 跑的端到端，含 `LC_ALL=C` 下的 UTF-8 命令）。端到端测试把 `HISTCONTROL`、`HISTFILE`、`ZDOTDIR`
   指到无害值，不污染开发者的 Shell 历史。
 - 手工验收按 [远程工作验收](remote-work-acceptance.md) 的主机准备：口令主机、sudo 提示（needs_input →
   面板里输入 → `host_wait`）、命令中途接手、中断、撤销授权；审计文件里应能看到真实的 exec 与撤销记录。

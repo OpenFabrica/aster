@@ -95,7 +95,7 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
 
   // MARK: - 主机同步
 
-  /// 主机删除：关终端、作废授权、撤掉挂起的批准面板；主机改名：同步终端标题。
+  /// 主机删除：关终端、作废授权；主机删除或目标变化：撤掉挂起的批准面板；主机改名：同步终端标题。
   private func synchronizeHosts() {
     let hosts = SSHHostDirectory.shared.savedHosts
     let ids = Set(hosts.map(\.id))
@@ -104,15 +104,15 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
     let staleHostIDs = Set(service.grants.grants.map(\.hostID)).subtracting(ids)
     for hostID in staleHostIDs {
       service.grants.removeGrants(forHost: hostID, hostName: "（主机已删除）")
-      service.dependencies.approvals.dismissAll(hostID: hostID)
     }
+    service.handleHostsChanged()
   }
 
   // MARK: - 设置
 
   var isEnabled: Bool { preferences.agentHostAccessEnabled }
 
-  /// 设置页开关：写偏好并记一条 `setting.changed` 审计（前后值）。
+  /// 设置页开关：写偏好并记一条 `setting.changed` 审计（前后值）；关闭时撤掉批准面板并关掉全部 agent 终端。
   func setEnabled(_ enabled: Bool) {
     let previous = preferences.agentHostAccessEnabled
     guard previous != enabled else { return }
@@ -122,7 +122,7 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
       AgentHostAuditRecord(
         time: Date(), action: .settingChanged, actor: .user(account: user.account, name: user.name),
         changes: [.init(field: "agentHostAccessEnabled", before: Self.onOff(previous), after: Self.onOff(enabled))]))
-    if !enabled { service.dependencies.approvals.dismissAll(hostID: nil) }
+    if !enabled { service.handleAccessDisabled() }
     onChange?()
   }
 

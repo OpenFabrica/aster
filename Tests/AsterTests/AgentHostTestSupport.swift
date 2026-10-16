@@ -124,10 +124,15 @@ final class FakeApprovals: AgentHostApprovalPresenting {
   var onAnswer: ((AgentHostApprovalRequest, AgentHostApprovalAnswer, Bool) -> Void)?
   /// 预设回答；nil 表示不回答（等超时）。
   var nextAnswer: AgentHostApprovalAnswer?
+  /// 回答前执行（模拟用户在面板挂着时改了主机等）。
+  var beforeAnswer: () -> Void = {}
   private(set) var requests: [AgentHostApprovalRequest] = []
+  /// 被 `dismiss` 撤掉的请求。
+  private(set) var dismissed: [AgentHostApprovalRequest] = []
 
-  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async -> AgentHostApprovalAnswer? {
+  func requestApproval(_ request: AgentHostApprovalRequest, timeout: Duration) async throws -> AgentHostApprovalAnswer? {
     requests.append(request)
+    beforeAnswer()
     guard let answer = nextAnswer else {
       do { try await Task.sleep(for: timeout) } catch {}
       return nil
@@ -141,7 +146,10 @@ final class FakeApprovals: AgentHostApprovalPresenting {
     onAnswer?(request, answer, false)
   }
 
-  func dismissAll(hostID: UUID?) {}
+  /// 记录被撤掉的请求（只看已登记过的）。
+  func dismiss(where shouldDismiss: (AgentHostApprovalRequest) -> Bool) {
+    dismissed += requests.filter(shouldDismiss)
+  }
 }
 
 /// 内存审计。
@@ -171,6 +179,8 @@ struct AgentHostFixture {
     var presenters: [UUID: FakeTerminalPresenter] = [:]
     var configure: (FakeShellSurface) -> Void = { _ in }
     var enabled = true
+    /// 当前主机列表；测试可改地址或删主机。
+    var hosts: [SSHHostProfile] = []
   }
 
   init(hostNames: [String] = ["prod-db"], configure: @escaping (FakeShellSurface) -> Void = { _ in }) {
@@ -192,13 +202,13 @@ struct AgentHostFixture {
         sessionKey: spec.caller.key, caller: spec.caller, surface: surface, timing: timing)
       return (terminal, presenter)
     }
-    let allHosts = hosts
+    box.hosts = hosts
     let grants = AgentHostGrantStore(
       persistence: InMemoryAgentHostGrantPersistence(), audit: audit,
-      hostLookup: { id in allHosts.first { $0.id == id }.map { .init(id: id.uuidString, name: $0.name, target: $0.host) } })
+      hostLookup: { id in box.hosts.first { $0.id == id }.map { .init(id: id.uuidString, name: $0.name, target: $0.host) } })
     service = AgentHostService(
       dependencies: .init(
-        hosts: { allHosts }, isEnabled: { box.enabled }, grants: grants, approvals: approvals, registry: registry,
+        hosts: { box.hosts }, isEnabled: { box.enabled }, grants: grants, approvals: approvals, registry: registry,
         audit: audit, user: AgentHostLocalUser(account: "tester", name: "Tester"), approvalTimeout: .milliseconds(200)))
     let bridge = AsterControlBridge(socketPath: "/tmp/test.sock", binaryPath: "/tmp/aster-cli")
     dispatcher = AsterControlDispatcher(bridge: bridge, version: "9.9.9") {
@@ -218,5 +228,14 @@ struct AgentHostFixture {
   ) -> JSONValue {
     ["host": .string(host), "command": .string(command), "agent": ["session": .string(session), "client": "test"],
      "timeout_ms": .number(Double(timeoutMs))]
+  }
+}
+
+/// 轮询等条件成立（最多 `timeout`）。测试并行时主线程可能很忙，固定时长的睡眠不可靠。
+@MainActor
+func pollUntil(timeout: Duration = .seconds(3), _ condition: () -> Bool) async {
+  let deadline = ContinuousClock.now + timeout
+  while !condition(), ContinuousClock.now < deadline {
+    do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
   }
 }

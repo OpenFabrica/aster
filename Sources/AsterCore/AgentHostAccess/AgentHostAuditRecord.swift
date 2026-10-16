@@ -187,6 +187,8 @@ public struct AgentHostAuditRecord: Codable, Equatable, Sendable {
       ("grantedBy", grant.grantedBy),
     ]
     if let sessionKey = grant.sessionKey { fields.append(("session", sessionKey)) }
+    // once 授权绑定的命令同样先脱敏：审计长期留存。
+    if let command = grant.command { fields.append(("command", AgentHostCommandRedactor.redact(command).text)) }
     return fields
   }
 

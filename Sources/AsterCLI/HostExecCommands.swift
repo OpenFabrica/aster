@@ -118,10 +118,10 @@ enum HostExecCommands {
         subcommand: subcommand, method: .hostOpen, params: try encode(params),
         timeout: waitingTimeout(timeoutMs), wantsJSON: wantsJSON)
     default:
-      // terminals：列出全部 agent 终端（不按会话过滤），所以不带 agent。
+      // terminals：只列本会话（`--session` 等同上解析）的 agent 终端；服务端不提供跨会话列表。
       try options.expectNoPositionals("host terminals 不接受位置参数")
       invocation = Invocation(
-        subcommand: subcommand, method: .hostTerminals, params: try encode(HostTerminalsParams()),
+        subcommand: subcommand, method: .hostTerminals, params: try encode(HostTerminalsParams(agent: caller)),
         timeout: ControlClient.defaultTimeout, wantsJSON: wantsJSON)
     }
     try options.expectConsumed()
@@ -250,10 +250,10 @@ extension HostExecCommands {
     return pendingExitCode
   }
 
-  /// 终端一行：id、主机名、目标、状态、会话、运行中的命令（无则 `-`），制表符分隔。
+  /// 终端一行：id、主机名、目标、状态、运行中的命令（无则 `-`），制表符分隔。不输出会话键。
   private static func terminalLine(_ terminal: HostTerminalInfo) -> String {
     [
-      terminal.terminalID, terminal.hostName, terminal.target, terminal.state.rawValue, terminal.session,
+      terminal.terminalID, terminal.hostName, terminal.target, terminal.state.rawValue,
       terminal.runningCommandID ?? "-",
     ].joined(separator: "\t")
   }

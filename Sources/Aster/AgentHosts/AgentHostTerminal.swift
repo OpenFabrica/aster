@@ -109,7 +109,7 @@ final class AgentHostTerminal {
   var info: HostTerminalInfo {
     HostTerminalInfo(
       terminalID: terminalID, hostID: hostID.uuidString, hostName: hostName, target: target,
-      session: sessionKey, state: state, runningCommandID: tracker.running?.id)
+      state: state, runningCommandID: tracker.running?.id)
   }
 
   // MARK: - 轮询
@@ -128,6 +128,10 @@ final class AgentHostTerminal {
     case .ready, .ended: break
     }
   }
+
+  /// 前台进程已确认是原生 SSH 客户端。判断不了（nil）一律当作没确认：
+  /// 宁可等到期限报 `host_not_ready`，也不往可能是本地 Shell 的 PTY 里敲字。
+  private var isVerifiedNativeSSH: Bool { surface.isNativeSSHClient == true }
 
   /// 连接阶段：确认是原生 SSH 客户端，等首次输出静默后发探针，探针回应即就绪。
   private func connectStep() {
@@ -152,12 +156,18 @@ final class AgentHostTerminal {
       return
     }
     guard !screen.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-    if surface.isNativeSSHClient == false {
+    switch surface.isNativeSSHClient {
+    case false?:
       // 引擎不可用时会回退成本地 Shell：命令会在本机执行，必须拒绝并立即结束这个终端，
       // 连预填好的 `ssh …` 也不留给任何人回车。下一次请求会新建终端重试。
       connectionError = "原生 SSH 引擎不可用，agent 命令不会在本地 Shell 中执行。"
       close()
       return
+    case nil:
+      // 还确认不了前台进程（pid 未知或 proc_pidpath 失败）：不发探针，继续等。
+      return
+    case true?:
+      break
     }
     if screen != connectScreen {
       connectScreen = screen
@@ -169,11 +179,11 @@ final class AgentHostTerminal {
     }
   }
 
-  /// 发一次就绪探针。
+  /// 发一次就绪探针；前台未确认是原生 SSH 客户端时不发。
   @discardableResult
   private func sendProbe(configureEnvironment: Bool, at time: Date) -> String? {
     let nonce = AgentHostCommandFraming.makeNonce()
-    guard surface.send(AgentHostCommandFraming.probeLine(nonce: nonce, configureEnvironment: configureEnvironment))
+    guard isVerifiedNativeSSH, surface.send(AgentHostCommandFraming.probeLine(nonce: nonce, configureEnvironment: configureEnvironment))
     else { return nil }
     probe = (nonce, time)
     return nonce
@@ -268,7 +278,9 @@ final class AgentHostTerminal {
     guard !isPaused else {
       throw AsterControlError(code: .agentPaused, message: "用户已在 Aster 窗口里暂停 agent")
     }
+    try ensureVerifiedNativeSSH()
     try await resynchronizeIfNeeded(deadline: deadline)
+    try ensureVerifiedNativeSSH()
     let nonce = AgentHostCommandFraming.makeNonce()
     guard surface.send(AgentHostCommandFraming.commandLine(command: command, nonce: nonce)) else {
       throw AsterControlError(code: .paneBusy, message: "终端当前不接受输入（只读或本地导航模式）")
@@ -280,6 +292,14 @@ final class AgentHostTerminal {
     onStarted()
     return try await wait(
       commandID: commandID, deadline: deadline, maximumOutputBytes: maximumOutputBytes, sinceEpisode: 0)
+  }
+
+  /// 每次往 PTY 敲命令前复核前台进程：连接中途回退或进程被换掉时绝不敲进去。
+  private func ensureVerifiedNativeSSH() throws {
+    guard isVerifiedNativeSSH else {
+      throw AsterControlError(
+        code: .hostNotReady, message: "无法确认终端前台是原生 SSH 客户端，agent 命令不会敲进去，稍后重试")
+    }
   }
 
   /// 上次命令结束后屏幕被动过（用户打字、程序输出）或刚中断过：先发探针确认回到了提示符。
@@ -341,6 +361,7 @@ final class AgentHostTerminal {
     guard let running = tracker.running else {
       throw AsterControlError(code: .notFound, message: "该终端没有运行中的命令")
     }
+    try ensureVerifiedNativeSSH()
     guard surface.send("\u{03}") else {
       throw AsterControlError(code: .writeRejected, message: "终端当前不接受输入（只读或本地导航模式）")
     }
