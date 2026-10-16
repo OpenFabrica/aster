@@ -64,7 +64,7 @@
 - 先检查 `git worktree list` 与 `git status --short`，确认当前任务归属并保留其他改动；提交前核对暂存差异、忽略规则和敏感信息边界。
 - 开发环境要求 macOS 14+、Swift 6.2、Zig 0.15.2、Rust 工具链（cargo）与 Xcode Metal Toolchain。原生 SSH 运行时在 `SshRuntime/`，改动后运行 `cd SshRuntime && cargo test`，Swift 与 Rust 两侧的契约以 `SshRuntime/PROTOCOL.md` 为准；见 [原生 SSH](developer/native-ssh.md)。Ghostty 依赖通过 `./scripts/setup-ghostty.sh` 准备，使用 `swift build` 验证构建。
 - 测试使用 Swift Testing（`import Testing`、`@Test`、`#expect`），不新增 XCTest 用例。AppKit 测试通常标记 `@MainActor`；偏好设置测试使用独立 `UserDefaults` suite。
-- 代码改动先运行 `./scripts/test.sh --filter <name>` 定向验证，提交前运行 `./scripts/test.sh --no-parallel` 全量检查。必须使用封装脚本，以提供 Sparkle 动态库路径与 AppKit 测试宿主；检查最终测试汇总，不能只看退出码。详见 [测试执行与完整性审计](developer/testing.md)。
+- 代码改动只运行 `./scripts/test.sh --filter <name>` 定向验证受影响的用例。**全量 `./scripts/test.sh --no-parallel` 只在用户明确要求时运行**（2700+ 用例要 15–20 分钟），开发过程中、子 agent 里、修完 review 问题后都不要自行跑全量。必须使用封装脚本，以提供 Sparkle 动态库路径与 AppKit 测试宿主；检查最终测试汇总，不能只看退出码。详见 [测试执行与完整性审计](developer/testing.md)。
 - 纯文档改动检查链接、命令与 `git diff --check`，不为文案新增测试或运行无关应用构建。其他改动按影响执行静态检查、资源检查与实际环境验收；跳过或未运行的检查必须说明。
 - 打包相关改动运行 `./scripts/build-app.sh`，必要时运行 `./scripts/build-dmg.sh`。图标栅格化依赖 `rsvg-convert`（`brew install librsvg`），不使用会引入不透明背景的替代输出。
 - UI 变更提供适用的截图或录屏；单元测试通过、应用已安装与真实交互验收是不同状态，分别报告。

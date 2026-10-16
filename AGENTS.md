@@ -15,7 +15,7 @@ The project requires macOS 14+, Swift 6.2, Zig 0.15.2, a Rust toolchain (cargo),
 - `./scripts/setup-ghostty.sh` builds the pinned Ghostty XCFramework and resources; `build-app.sh` also runs it.
 - `swift build` creates a debug build.
 - `./scripts/build-ssh-runtime.sh .build/debug` builds the native SSH runtime `aster-ssh` (Rust, `SshRuntime/`) next to the debug app; `build-app.sh` runs it for packaging. Its broker protocol is `SshRuntime/PROTOCOL.md`; run `cd SshRuntime && cargo test` after Rust changes.
-- `./scripts/test.sh --no-parallel` runs the full suite safely; PTY lifecycle tests are concurrency-sensitive.
+- `./scripts/test.sh --no-parallel` runs the full suite safely; PTY lifecycle tests are concurrency-sensitive. Only run it when the user explicitly asks; it takes 15–20 minutes.
   Use this wrapper instead of bare `swift test`: the xctest host lives outside the `.app` layout, so it needs
   `DYLD_FRAMEWORK_PATH` injected to load the Sparkle framework.
 - `./scripts/test.sh --filter <name>` runs a focused `@Test` function.
@@ -33,7 +33,7 @@ Follow existing Swift style: two-space indentation, `UpperCamelCase` types, `low
 
 ## Testing Guidelines
 
-Tests use `swift-testing` (`import Testing`, `@Test`, and `#expect`), not XCTest. Name files `*Tests.swift` and give tests behavior-focused names. AppKit tests normally require `@MainActor`; preferences tests must use isolated `UserDefaults` suites. Add focused coverage for meaningful logic and failure paths, then run the full non-parallel suite before submission. Update the relevant `docs/developer/` page and `docs/user/help.md` for user-visible behavior changes.
+Tests use `swift-testing` (`import Testing`, `@Test`, and `#expect`), not XCTest. Name files `*Tests.swift` and give tests behavior-focused names. AppKit tests normally require `@MainActor`; preferences tests must use isolated `UserDefaults` suites. Add focused coverage for meaningful logic and failure paths and verify with `./scripts/test.sh --filter <name>` only. Never run the full suite (`./scripts/test.sh --no-parallel`, 15–20 minutes) on your own: run it only when the user explicitly asks for it. Update the relevant `docs/developer/` page and `docs/user/help.md` for user-visible behavior changes.
 
 ## Commit & Pull Request Guidelines
 
