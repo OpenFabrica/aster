@@ -5,7 +5,8 @@
   // 网页只收集输入并提交结构化意图；校验、钥匙串与文件操作都在原生层（SettingsHostsBridge）。
   // 设置页每收到一份快照就整页重绘，所以编辑表单与菜单挂在 body 上，不随列表重建而丢失输入。
 
-  const state = { query: "", collapsed: new Set(), menu: null, tags: new Set() };
+  // tab 是页内子标签（hosts / keys / knownHosts / agentAccess），挂在模块级，快照重绘后保持。
+  const state = { query: "", collapsed: new Set(), menu: null, tags: new Set(), tab: "hosts", rerender: null };
   const AUTH_MODES = ["auto", "password", "publicKey", "agent", "keyboardInteractive"];
   const FORWARD_KINDS = ["local", "remote", "dynamic"];
 
@@ -83,10 +84,86 @@
   document.addEventListener("keydown", event => { if (event.key === "Escape" && state.menu) { event.stopPropagation(); closeMenu(); } }, true);
   window.addEventListener("resize", closeMenu);
 
+  // MARK: - 子标签
+
+  /// 子标签：键与非「主机」页委托给哪个全局模块（按需在渲染时查找，脚本加载顺序无关）。
+  const SUB_TABS = [
+    ["hosts", null],
+    ["keys", "AsterSSHKeys"],
+    ["knownHosts", "AsterKnownHosts"],
+    ["agentAccess", "AsterAgentAccess"],
+  ];
+
+  /// 子标签的显示文案；每个都写成字面量调用，本地化检查脚本才扫描得到。
+  function subTabLabels(t) {
+    return { hosts: t("主机"), keys: t("密钥"), knownHosts: t("已知主机"), agentAccess: t("Agent 访问") };
+  }
+
+  /// 渲染整个「主机」分类：顶部子标签 + 当前子页。ctx 由 settings.js 提供（快照、t、mutate、对话框工具）。
+  function render(ctx) {
+    const page = element("div", "hosts-page");
+    const show = () => {
+      closeMenu();
+      page.replaceChildren(subTabs(ctx, show), state.tab === "hosts" ? renderHostsTab(ctx) : renderSubpage(ctx));
+    };
+    state.rerender = show;
+    show();
+    return page;
+  }
+
+  /// 分段控件形式的子标签栏；左右方向键切换并移动焦点。
+  function subTabs(ctx, show) {
+    const bar = element("div", "segmented hosts-tabs");
+    bar.setAttribute("role", "tablist");
+    const { t } = ctx;
+    const tabLabels = subTabLabels(t);
+    bar.setAttribute("aria-label", t("主机设置"));
+    const select = key => {
+      if (state.tab === key) return;
+      state.tab = key;
+      show();
+      document.querySelector(`.hosts-tabs [data-tab="${key}"]`)?.focus();
+    };
+    SUB_TABS.forEach(([key], index) => {
+      const tab = element("button", state.tab === key ? "active" : "", tabLabels[key]);
+      tab.type = "button";
+      tab.dataset.tab = key;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(state.tab === key));
+      tab.tabIndex = state.tab === key ? 0 : -1;
+      tab.addEventListener("click", () => select(key));
+      tab.addEventListener("keydown", event => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const next = (index + (event.key === "ArrowRight" ? 1 : SUB_TABS.length - 1)) % SUB_TABS.length;
+        select(SUB_TABS[next][0]);
+      });
+      bar.appendChild(tab);
+    });
+    return bar;
+  }
+
+  /// 非「主机」子页：交给对应模块的 `render(container, hostsSnapshot, send, ui)`；模块缺失时显示占位。
+  ///
+  /// `send(action, payload)` 提交 `hosts.` 前缀的原生动作，返回 Promise：原生回执成功时 resolve，
+  /// 失败或超时时 reject（原生已 toast 说明原因，调用方不关心结果时要 `.catch(() => {})`）。
+  function renderSubpage(ctx) {
+    const container = element("div", "hosts-subpage");
+    container.setAttribute("role", "tabpanel");
+    const entry = SUB_TABS.find(([key]) => key === state.tab);
+    const module = entry && entry[1] ? window[entry[1]] : null;
+    const send = (action, payload = {}) => ctx.mutate("action", { action, payload });
+    const { t } = ctx;
+    const ui = { t, makeDialog: ctx.makeDialog, showToast: ctx.showToast, element, button };
+    if (module && typeof module.render === "function") module.render(container, ctx.data, send, ui);
+    else container.appendChild(element("div", "card")).appendChild(emptyRow(t("这一页暂不可用。")));
+    return container;
+  }
+
   // MARK: - 列表
 
-  /// 渲染整个「主机」页面主体。ctx 由 settings.js 提供（快照、t、mutate、对话框工具）。
-  function render(ctx) {
+  /// 渲染「主机」子页：搜索、工具栏与主机列表。
+  function renderHostsTab(ctx) {
     const { t, data } = ctx;
     const fragment = document.createDocumentFragment();
     if (data.loadError) fragment.appendChild(element("div", "message-banner", t("hosts.json 无法读取，正在显示最后一次有效内容：{detail}", { detail: data.loadError })));
@@ -370,6 +447,11 @@
 
   /// 打开指定主机的编辑表单（原生「编辑主机…」深链）；找不到时只停在列表。
   function edit(id, ctx) {
+    // 深链总落在「主机」子页，先切回来再打开表单。
+    if (state.tab !== "hosts") {
+      state.tab = "hosts";
+      state.rerender?.();
+    }
     const wanted = String(id || "").toUpperCase();
     const row = ctx.data.hosts.find(item => String(item.profile.id).toUpperCase() === wanted);
     if (row) openEditor(ctx, row.profile, {});

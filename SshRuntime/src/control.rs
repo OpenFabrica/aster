@@ -214,6 +214,7 @@ mod tests {
             host_id: None,
             key_file: None,
             key_digest: None,
+            vault_key_id: None,
             name: String::new(),
             instruction: String::new(),
             prompts: vec![],

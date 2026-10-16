@@ -1,6 +1,7 @@
 //! 用户认证。
 //!
-//! auto 的顺序：agent → identityFiles → 默认密钥 → password → keyboard-interactive。
+//! auto 的顺序：保险库密钥 → agent → identityFiles → 默认密钥 → password → keyboard-interactive。
+//! 有保险库密钥时不再试 `~/.ssh/id_*` 默认密钥（保险库的意义就是不读明文私钥文件）。
 //! 缺秘密时经控制通道发 `auth.request` 向 App 要；每次把秘密交给服务器（或用 passphrase 解密）
 //! 之后发 `auth.result`，App 据此决定是否写入或删除钥匙串。
 //! 流程参考 tty7 `daemon/ssh/auth.rs`@458c923（Apache-2.0）：用户关掉口令 / 键盘交互的表单
@@ -41,7 +42,7 @@ pub struct AuthContext<'a> {
 }
 
 /// 一步认证的结果。
-enum Outcome {
+pub(crate) enum Outcome {
     Authenticated,
     /// 用户关掉了口令 / 键盘交互表单：整个认证结束，不再换方式追问。
     Cancelled,
@@ -54,6 +55,7 @@ enum Outcome {
 /// 认证步骤。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
+    VaultKeys,
     Agent,
     IdentityFiles,
     DefaultKeys,
@@ -65,7 +67,9 @@ impl Step {
     /// 这一步属于哪种 SSH 认证方式。
     fn method(self) -> MethodKind {
         match self {
-            Step::Agent | Step::IdentityFiles | Step::DefaultKeys => MethodKind::PublicKey,
+            Step::VaultKeys | Step::Agent | Step::IdentityFiles | Step::DefaultKeys => {
+                MethodKind::PublicKey
+            }
             Step::Password => MethodKind::Password,
             Step::KeyboardInteractive => MethodKind::KeyboardInteractive,
         }
@@ -85,13 +89,14 @@ impl Step {
 fn steps(mode: AuthMode) -> &'static [Step] {
     match mode {
         AuthMode::Auto => &[
+            Step::VaultKeys,
             Step::Agent,
             Step::IdentityFiles,
             Step::DefaultKeys,
             Step::Password,
             Step::KeyboardInteractive,
         ],
-        AuthMode::PublicKey => &[Step::IdentityFiles, Step::DefaultKeys],
+        AuthMode::PublicKey => &[Step::VaultKeys, Step::IdentityFiles, Step::DefaultKeys],
         AuthMode::Agent => &[Step::Agent],
         AuthMode::Password => &[Step::Password],
         AuthMode::KeyboardInteractive => &[Step::KeyboardInteractive],
@@ -99,7 +104,7 @@ fn steps(mode: AuthMode) -> &'static [Step] {
 }
 
 /// russh 通信错误统一归为 transportFailure。
-fn transport(e: russh::Error) -> SshFailure {
+pub(crate) fn transport(e: russh::Error) -> SshFailure {
     SshFailure::new(
         FailureKind::TransportFailure,
         format!("authentication: {e}"),
@@ -129,10 +134,14 @@ pub async fn authenticate(
         if !remaining.is_empty() && !remaining.contains(&step.method()) {
             continue;
         }
-        if step == Step::DefaultKeys && !ctx.spec.identity_files.is_empty() {
+        // 显式配置了 identityFiles 或保险库密钥时，不再去碰 `~/.ssh/id_*`。
+        if step == Step::DefaultKeys
+            && (!ctx.spec.identity_files.is_empty() || !ctx.spec.vault_keys.is_empty())
+        {
             continue;
         }
         let outcome = match step {
+            Step::VaultKeys => crate::auth_vault::try_vault_keys(handle, ctx).await?,
             Step::Agent => try_agent(handle, ctx).await?,
             Step::IdentityFiles => {
                 let files: Vec<PathBuf> = ctx
@@ -197,7 +206,7 @@ fn expand_identity(raw: &str, ctx: &AuthContext<'_>) -> PathBuf {
 }
 
 /// 发一条凭证请求。
-async fn ask(
+pub(crate) async fn ask(
     ctx: &AuthContext<'_>,
     kind: AuthRequestKind,
     attempt: u32,
@@ -210,6 +219,7 @@ async fn ask(
         host_id: ctx.host_id.clone(),
         key_file: None,
         key_digest: None,
+        vault_key_id: None,
         name: String::new(),
         instruction: String::new(),
         prompts: Vec::new(),
@@ -221,7 +231,7 @@ async fn ask(
 }
 
 /// RSA 签名用的哈希：优先服务器声明支持的，缺省 SHA-256。
-async fn rsa_hash(handle: &Handle<ClientHandler>, key_is_rsa: bool) -> Option<HashAlg> {
+pub(crate) async fn rsa_hash(handle: &Handle<ClientHandler>, key_is_rsa: bool) -> Option<HashAlg> {
     if !key_is_rsa {
         return None;
     }
@@ -254,13 +264,19 @@ async fn try_agent(
             return Ok(Outcome::Skipped);
         }
     };
-    // IdentitiesOnly：agent 只能为 identityFiles 里的密钥签名，不能把 agent 里其它密钥逐个试一遍
+    // IdentitiesOnly：agent 只能为 identityFiles 与保险库里的密钥签名，不能把 agent 里其它密钥逐个试一遍
     // （服务器的 MaxAuthTries 可能因此在轮到正确密钥前就断开）。
     let allowed: Option<Vec<PublicKey>> = ctx.spec.identities_only.then(|| {
         ctx.spec
             .identity_files
             .iter()
             .filter_map(|f| identity_public_key(&expand_identity(f, ctx)))
+            .chain(
+                ctx.spec
+                    .vault_keys
+                    .iter()
+                    .filter_map(|v| crate::auth_vault::parse_public_key(&v.public_key)),
+            )
             .collect()
     });
     let mut outcome = Outcome::Skipped;
@@ -268,7 +284,11 @@ async fn try_agent(
         let AgentIdentity::PublicKey { key, .. } = identity else {
             continue;
         };
-        if allowed.as_ref().is_some_and(|keys| !keys.contains(&key)) {
+        // 只比密钥数据：`.pub` / 保险库公钥行里的注释与 agent 报的注释可能不同。
+        if allowed
+            .as_ref()
+            .is_some_and(|keys| !keys.iter().any(|k| k.key_data() == key.key_data()))
+        {
             continue;
         }
         let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
@@ -577,16 +597,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_order_is_agent_files_defaults_password_ki() {
+    fn auto_order_is_vault_agent_files_defaults_password_ki() {
         assert_eq!(
             steps(AuthMode::Auto),
             &[
+                Step::VaultKeys,
                 Step::Agent,
                 Step::IdentityFiles,
                 Step::DefaultKeys,
                 Step::Password,
                 Step::KeyboardInteractive
             ]
+        );
+        assert_eq!(
+            steps(AuthMode::PublicKey),
+            &[Step::VaultKeys, Step::IdentityFiles, Step::DefaultKeys]
         );
         assert_eq!(steps(AuthMode::Agent), &[Step::Agent]);
         assert_eq!(steps(AuthMode::Password), &[Step::Password]);

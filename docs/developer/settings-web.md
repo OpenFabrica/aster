@@ -92,3 +92,40 @@ scripts/build-app.sh
 - 主机标签：表单是逗号分隔的输入框（`parseTags` 同时接受全角逗号），候选来自快照 `tags`；列表行显示 `#tag` chip，标签筛选行按「全部选中标签都要有」过滤，搜索框也匹配标签。规范化与校验只在 `SSHHostStore`，网页只做拆分。
 - 「高级 → SSH → SSH 引擎」（`shell.sshEngine`）走普通 set 管线。**重启后生效**。
 - 验证：`SettingsHostsBridgeTests`、`SettingsHostsBridgeActionTests`、`SettingsHostsPageTests`（真实 WKWebView）、`SSHConfigImportTests`。
+
+### 子标签与扩展契约
+
+「主机」页顶部是分段控件形式的子标签：主机 | 密钥 | 已知主机 | Agent 访问，键依次为 `hosts`、`keys`、`knownHosts`、`agentAccess`。当前子标签记在 `hosts.js` 的模块级 `state.tab`，快照整页重绘后保持；原生「编辑主机…」深链（`hostsEdit`）总是切回 `hosts` 再打开表单。左右方向键在子标签间切换。
+
+`hosts` 子页就是上面的主机列表。其余子页由 `hosts.js` 建一个空容器 `div.hosts-subpage`（`role="tabpanel"`），再交给对应的全局模块：
+
+| 子标签 | 模块 | 脚本 |
+| --- | --- | --- |
+| `keys` | `window.AsterSSHKeys` | `ssh-keys.js` |
+| `knownHosts` | `window.AsterKnownHosts` | 由已知主机功能提供 |
+| `agentAccess` | `window.AsterAgentAccess` | 由 Agent 远程主机访问功能提供 |
+
+模块只需实现 `render(container, hostsSnapshot, send, ui)`：
+
+- `container`：空的 `div.hosts-subpage`，模块往里追加内容。每次快照或切换子标签都会传入新容器，模块不要缓存旧节点。
+- `hostsSnapshot`：快照里的 `hosts` 对象（即 `snapshot.hosts`），各模块的数据都挂在这里，键名各自约定。
+- `send(action, payload = {})`：等价于 `mutate("action", { action, payload })`，提交 `hosts.` 前缀的原生动作。返回 Promise：原生回执成功时 resolve；失败、桥不可用或 5 秒内没有回执时 reject。失败原因原生侧已经用 toast 说明，不关心结果的调用方要写 `.catch(() => {})`。原生动作若要等用户操作（文件面板、确认框），回执可能晚于 5 秒，此时 Promise 已经 reject，原生侧要自己防重入。
+- `ui`：`{ t, makeDialog, showToast, element, button }`，即设置页的翻译函数、模态框骨架、toast 与 `hosts.js` 的节点工具。
+
+模块按需在渲染时查找，脚本加载顺序无关；模块未加载时子页显示占位文字。新模块的脚本要加进 `index.html`，`t("…")` 文案要补进 `i18n.js` 五种语言。
+
+### 密钥保险库
+
+`ssh-keys.js`（`window.AsterSSHKeys`）只展示密钥元数据并提交意图，私钥从不进入网页。
+
+- 快照：`hosts.vaultKeys` 按名称排序，每项为 `{id, label, algorithm, fingerprint, publicKey, comment, createdAt, origin: "generated"|"imported", importedFrom, usedBy: [主机名], migratableHosts: [主机名], originalExists, keychainMissing}`。`importedFrom` 用 `~` 缩写，`migratableHosts` 是 `identityFiles` 仍指向原文件的主机。另有 `hosts.vaultKeysError`（`ssh-keys.json` 读取失败的原因，正常为空串）与 `hosts.sshEngine`（`native` 或 `openssh`；后者时页顶提示保险库密钥不生效）。
+- 主机对象可带 `vaultKeyIDs`（大写 UUID 数组）；缺省表示继承默认项，原生侧把空数组规范成缺省。主机表单的「保险库密钥」是勾选列表，保存时按保险库顺序写入勾选项，并原样保留快照里找不到的 ID，避免从网页保存时悄悄丢掉引用。
+- 动作：
+  - `hosts.keys.import {}`：原生 `NSOpenPanel` 读取文件，加密私钥再询问 passphrase；网页不传任何内容。
+  - `hosts.keys.generate {label, comment}`：生成 Ed25519 密钥。
+  - `hosts.keys.rename {id, label}`。名称不超过 64 字节、不含控制字符，由原生校验。
+  - `hosts.keys.copyPublicKey {id}`：原生写入剪贴板。
+  - `hosts.keys.delete {id}`：网页先列出 `usedBy` 确认；删除同时清掉主机引用和钥匙串条目。
+  - `hosts.keys.migrateReferences {id}`：网页先列出 `migratableHosts` 确认，再把这些主机里的原文件路径换成该密钥。
+  - `hosts.keys.deleteOriginal {id}`：原生弹出自己的确认框说明全部后果，网页不再重复确认。
+- 不提供私钥导出。

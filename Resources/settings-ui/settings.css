@@ -751,3 +751,13 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .hosts-forward { display: grid; width: 100%; grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; }
 .hosts-forward .control { width: 100%; min-width: 0; max-width: none; box-sizing: border-box; }
 .settings-dialog .hosts-form-error { min-height: 16px; margin: 8px 0 0; color: var(--danger); font-size: 11.5px; }
+/* 「主机」分类的子标签（主机 | 密钥 | 已知主机 | Agent 访问）与密钥保险库。 */
+.hosts-tabs { margin-bottom: 12px; }
+.hosts-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hosts-toolbar-note { flex: 1 1 200px; color: var(--text-tertiary); font-size: 10.5px; }
+.ssh-key-row { min-height: 46px; }
+.ssh-key-row .setting-label, .ssh-key-row .setting-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hosts-badge.danger { color: var(--danger); border-color: var(--danger); }
+.hosts-vault-keys { display: grid; gap: 4px; max-height: 132px; overflow: auto; padding: 4px 0; }
+.hosts-vault-key { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.hosts-vault-key small { margin-left: auto; font-family: "SF Mono", Menlo, monospace; }

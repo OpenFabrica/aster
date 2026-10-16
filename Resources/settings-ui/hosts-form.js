@@ -101,6 +101,48 @@
     const inheritLabel = text => (isDefaults ? t("内置默认（{value}）", { value: text }) : t("继承默认（{value}）", { value: text }));
     const onOff = value => (value ? t("开") : t("关"));
 
+    // 保险库密钥：勾选列表。保存时只写勾选项（按保险库顺序），再原样带上快照里找不到的 ID，
+    // 否则从网页保存会悄悄丢掉引用。用 div 而不是 field() 的 label，避免复选框嵌套在 label 里。
+    const vaultKeys = data.vaultKeys ?? [];
+    const knownVaultIDs = new Set(vaultKeys.map(key => String(key.id).toUpperCase()));
+    const danglingVaultIDs = (profile.vaultKeyIDs ?? []).filter(id => !knownVaultIDs.has(String(id).toUpperCase()));
+    const selectedVaultIDs = new Set((profile.vaultKeyIDs ?? []).map(id => String(id).toUpperCase()));
+    const vaultChecks = [];
+    /// 「保险库密钥」一行：复选框列表加随勾选变化的继承提示。
+    const vaultKeyField = () => {
+      const row = element("div", "hosts-field");
+      row.appendChild(element("span", "hosts-field-label", t("保险库密钥")));
+      const body = element("span", "hosts-field-body");
+      const list = element("div", "hosts-vault-keys");
+      for (const key of vaultKeys) {
+        const option = element("label", "hosts-vault-key");
+        const check = element("input");
+        check.type = "checkbox";
+        check.value = key.id;
+        check.checked = selectedVaultIDs.has(String(key.id).toUpperCase());
+        vaultChecks.push(check);
+        const fingerprint = window.AsterSSHKeys?.shortFingerprint?.(key.fingerprint) ?? key.fingerprint;
+        option.append(check, element("span", "", key.label), element("small", "hosts-field-hint", fingerprint));
+        list.appendChild(option);
+      }
+      const hint = element("small", "hosts-field-hint");
+      const defaultNames = (defaults.vaultKeyIDs ?? [])
+        .map(id => vaultKeys.find(key => String(key.id).toUpperCase() === String(id).toUpperCase())?.label)
+        .filter(Boolean);
+      // 提示随勾选刷新：没勾选时说明会继承默认项的哪几把。
+      const updateHint = () => {
+        if (!vaultKeys.length) hint.textContent = t("还没有保险库密钥，可在「密钥」标签页导入或生成");
+        else if (!isDefaults && defaultNames.length && !vaultChecks.some(check => check.checked)) hint.textContent = t("未选择时继承默认：{names}", { names: defaultNames.join("、") });
+        else hint.textContent = t("勾选的密钥先于私钥文件尝试；私钥只保存在钥匙串里");
+      };
+      for (const check of vaultChecks) check.addEventListener("change", updateHint);
+      updateHint();
+      if (vaultKeys.length) body.appendChild(list);
+      body.appendChild(hint);
+      row.appendChild(body);
+      return row;
+    };
+
     // 常用字段。
     const common = element("div", "hosts-form-grid");
     if (!isDefaults) {
@@ -132,6 +174,7 @@
     identity.placeholder = (!isDefaults && defaults.identityFiles?.length ? defaults.identityFiles.join("\n") : "~/.ssh/id_ed25519");
     fields.identityFiles = identity;
     common.appendChild(field(t("私钥文件"), identity, t("每行一个；可用 ~、%h（主机）、%r（用户）")));
+    common.appendChild(vaultKeyField());
     form.appendChild(common);
 
     /// 可折叠区域；有内容时默认展开。
@@ -228,6 +271,9 @@
       }
       if (fields.auth.value) next.auth = fields.auth.value;
       next.identityFiles = identity.value.split("\n").map(line => line.trim()).filter(Boolean);
+      // 空列表表示继承默认项，不写字段；快照里找不到的 ID 原样保留。
+      const vaultKeyIDs = [...vaultChecks.filter(check => check.checked).map(check => check.value), ...danglingVaultIDs];
+      if (vaultKeyIDs.length) next.vaultKeyIDs = vaultKeyIDs;
       if (fields.jumpHostID.value) next.jumpHostID = fields.jumpHostID.value;
       if (text("proxyCommand")) next.proxyCommand = text("proxyCommand");
       if (text("identityAgent")) next.identityAgent = text("identityAgent");

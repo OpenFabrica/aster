@@ -17,7 +17,7 @@ public struct SSHHostPort: Codable, Equatable, Hashable, Sendable {
   }
 }
 
-/// 认证方式。`auto` 依次尝试 agent → 密钥文件 → 口令 / 键盘交互。
+/// 认证方式。`auto` 依次尝试保险库密钥 → agent → 密钥文件 → 口令 / 键盘交互。
 public enum SSHAuthMode: String, Codable, CaseIterable, Sendable {
   case auto
   case password
@@ -83,6 +83,9 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
   /// 认证用的 ssh-agent（OpenSSH `IdentityAgent`）原文：socket 路径（可含 `~`、`%h` 等记号、`${VAR}`）、
   /// `$VAR`、`SSH_AUTH_SOCK` 或 `none`；nil 或空白表示继承默认项，再缺省为 App 继承到的 `SSH_AUTH_SOCK`。
   public var identityAgent: String?
+  /// 引用的私钥保险库密钥（`SSHVaultKey.id`），按顺序尝试；nil 表示继承默认项。
+  /// 空数组与 nil 同义，存储时统一成 nil。找不到的 ID 在解析时跳过。
+  public var vaultKeyIDs: [UUID]?
   public var agentForward: Bool?
 
   /// 静态转发规则。与默认项的规则合并（默认项在前）。
@@ -118,7 +121,8 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
     keepaliveCountMax: Int? = nil,
     connectTimeout: Int? = nil,
     verifyHostKeys: Bool? = nil,
-    tags: [String]? = nil
+    tags: [String]? = nil,
+    vaultKeyIDs: [UUID]? = nil
   ) {
     self.id = id
     self.name = name
@@ -142,6 +146,7 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
     self.connectTimeout = connectTimeout
     self.verifyHostKeys = verifyHostKeys
     self.tags = tags
+    self.vaultKeyIDs = vaultKeyIDs
   }
 
   /// 空的默认项。首次启动时由存储补上，保证列表顶部总有一条「默认」。
@@ -186,6 +191,9 @@ public struct SSHResolvedSpec: Codable, Equatable, Sendable {
   public var keepaliveCountMax: Int
   public var connectTimeout: Int
   public var verifyHostKeys: Bool
+  /// 按顺序尝试的保险库密钥（只含 ID 与公钥）；nil 表示没有，编码时省略。
+  /// 解析器从不产生空数组，保证旧 broker 收到的 JSON 与改造前一致。
+  public var vaultKeys: [SSHVaultKeyReference]? = nil
 
   /// 凭证在钥匙串里的账户键：`user@host:port`。跳板不参与，因为口令属于目标自身。
   public var credentialEndpoint: String {
@@ -231,18 +239,21 @@ public enum SSHHostResolver {
   ///   - profiles: 全部配置，含默认项；缺默认项时按空默认处理。
   ///   - homeDirectory: 用于展开 `~`，测试可注入。
   ///   - localUser: 用户名缺省值。
+  ///   - vaultKeys: 保险库目录，用来把 `vaultKeyIDs` 换成公钥引用；找不到的 ID 跳过。
   /// - Throws: 主机不存在、主机名为空、跳板成环或过深。
   public static func resolve(
     _ id: UUID,
     in profiles: [SSHHostProfile],
     homeDirectory: String = NSHomeDirectory(),
-    localUser: String = NSUserName()
+    localUser: String = NSUserName(),
+    vaultKeys: [SSHVaultKey] = []
   ) throws -> SSHResolvedSpec {
     let byID = Dictionary(profiles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let defaults = byID[SSHHostProfile.defaultsProfileID] ?? .emptyDefaults()
+    let keysByID = Dictionary(vaultKeys.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     return try resolve(
       id, byID: byID, defaults: defaults, visited: [], homeDirectory: homeDirectory,
-      localUser: localUser)
+      localUser: localUser, vaultKeys: keysByID)
   }
 
   /// 递归解析；`visited` 用于检测跳板成环。
@@ -252,7 +263,8 @@ public enum SSHHostResolver {
     defaults: SSHHostProfile,
     visited: [UUID],
     homeDirectory: String,
-    localUser: String
+    localUser: String,
+    vaultKeys: [UUID: SSHVaultKey]
   ) throws -> SSHResolvedSpec {
     guard !visited.contains(id) else { throw SSHHostResolutionError.jumpCycle(id) }
     guard visited.count <= maximumJumpDepth else { throw SSHHostResolutionError.jumpTooDeep }
@@ -281,8 +293,13 @@ public enum SSHHostResolver {
           : SSHResolvedSpecBox(
             try resolve(
               jumpID, byID: byID, defaults: defaults, visited: visited + [id],
-              homeDirectory: homeDirectory, localUser: localUser))
+              homeDirectory: homeDirectory, localUser: localUser, vaultKeys: vaultKeys))
       }
+
+    // 每一跳按自己的配置解析密钥；已删除的保险库密钥直接跳过，不让整台主机解析失败。
+    let vaultKeyIDs =
+      (profile.vaultKeyIDs?.isEmpty == false ? profile.vaultKeyIDs : defaults.vaultKeyIDs) ?? []
+    let vaultReferences = vaultKeyIDs.compactMap { vaultKeys[$0]?.reference }
 
     return SSHResolvedSpec(
       host: host,
@@ -303,21 +320,24 @@ public enum SSHHostResolver {
       keepaliveInterval: profile.keepaliveInterval ?? defaults.keepaliveInterval ?? 15,
       keepaliveCountMax: profile.keepaliveCountMax ?? defaults.keepaliveCountMax ?? 3,
       connectTimeout: profile.connectTimeout ?? defaults.connectTimeout ?? 10,
-      verifyHostKeys: profile.verifyHostKeys ?? defaults.verifyHostKeys ?? true)
+      verifyHostKeys: profile.verifyHostKeys ?? defaults.verifyHostKeys ?? true,
+      vaultKeys: vaultReferences.isEmpty ? nil : vaultReferences)
   }
 
   /// 解析全部可解析的主机，供 `profiles.sync` 使用；解析失败的条目跳过并返回原因。
   public static func resolveAll(
     _ profiles: [SSHHostProfile],
     homeDirectory: String = NSHomeDirectory(),
-    localUser: String = NSUserName()
+    localUser: String = NSUserName(),
+    vaultKeys: [SSHVaultKey] = []
   ) -> (specs: [UUID: SSHResolvedSpec], failures: [UUID: SSHHostResolutionError]) {
     var specs: [UUID: SSHResolvedSpec] = [:]
     var failures: [UUID: SSHHostResolutionError] = [:]
     for profile in profiles where !profile.isDefaults {
       do {
         specs[profile.id] = try resolve(
-          profile.id, in: profiles, homeDirectory: homeDirectory, localUser: localUser)
+          profile.id, in: profiles, homeDirectory: homeDirectory, localUser: localUser,
+          vaultKeys: vaultKeys)
       } catch let error as SSHHostResolutionError {
         failures[profile.id] = error
       } catch {

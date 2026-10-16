@@ -38,6 +38,7 @@ final class SSHBrokerSupervisor {
   static let shared = SSHBrokerSupervisor(
     routing: .shared,
     hostDirectory: { SSHHostDirectory.shared },
+    vaultKeyDirectory: { SSHVaultKeyDirectory.shared },
     linkStateHandler: { MachineFleetModel.shared.handleLinkState($0) })
 
   /// 当前生效引擎：native 表示 broker 已拉起、传输走 aster-ssh；openssh 是改造前的路径。
@@ -60,6 +61,8 @@ final class SSHBrokerSupervisor {
 
   private let routing: SSHEngineRouting?
   private let hostDirectory: () -> SSHHostDirectory
+  /// 保险库目录；nil 表示不提供保险库密钥（测试默认）。
+  private let vaultKeyDirectory: (() -> SSHVaultKeyDirectory)?
   private let tuning: Tuning
   private let environment: [String: String]
   private let locateExecutable: () -> URL?
@@ -82,12 +85,14 @@ final class SSHBrokerSupervisor {
   /// - Parameters:
   ///   - routing: 发布原生端点的位置；测试传独立实例或 nil，避免影响全局传输选择。
   ///   - hostDirectory: 主机目录（profiles.sync 的来源），首次需要时才取。
+  ///   - vaultKeyDirectory: 保险库目录，把主机引用的密钥换成公钥随 profiles.sync 下发；nil 表示没有。
   ///   - linkStateHandler: `link.state` 的接收者。
   ///   - environment: 读取 `ASTER_SSH_ENGINE`、`ASTER_SSH_BINARY`，并作为 broker 的环境。
   ///   - locateExecutable: 定位 aster-ssh；缺省按 `executableURL(environment:bundle:)`。
   init(
     routing: SSHEngineRouting?,
     hostDirectory: @escaping () -> SSHHostDirectory,
+    vaultKeyDirectory: (() -> SSHVaultKeyDirectory)? = nil,
     linkStateHandler: ((SSHLinkStateEvent) -> Void)? = nil,
     environment: [String: String] = ProcessInfo.processInfo.environment,
     tuning: Tuning = Tuning(),
@@ -95,6 +100,7 @@ final class SSHBrokerSupervisor {
   ) {
     self.routing = routing
     self.hostDirectory = hostDirectory
+    self.vaultKeyDirectory = vaultKeyDirectory
     self.linkStateHandler = linkStateHandler
     self.environment = environment
     self.tuning = tuning
@@ -420,22 +426,27 @@ final class SSHBrokerSupervisor {
   /// 把最新主机规格推给 broker（`profiles.sync`）。broker 未就绪时忽略，ready 后会自动补发。
   func syncProfiles() {
     guard isReady else { return }
-    sync(hosts: hostDirectory().hosts)
+    sync(hosts: hostDirectory().hosts, vaultKeys: vaultKeyDirectory?().keys ?? [])
   }
 
-  /// 订阅主机目录变化。`@Published` 在赋值前发出新值，所以直接用发出的值，不回读属性。
+  /// 订阅主机目录与保险库目录变化。`@Published` 在赋值前发出新值，所以直接用发出的值，不回读属性。
+  /// 两者任一变化都要重新解析：删掉一把密钥会改变引用它的主机规格。
   private func subscribeToHosts() {
+    let vaultKeys: AnyPublisher<[SSHVaultKey], Never> =
+      vaultKeyDirectory.map { $0().$keys.eraseToAnyPublisher() }
+      ?? Just([]).eraseToAnyPublisher()
     hostsSubscription = hostDirectory().$hosts
+      .combineLatest(vaultKeys)
       .dropFirst()
-      .sink { [weak self] hosts in
-        MainActor.assumeIsolated { self?.sync(hosts: hosts) }
+      .sink { [weak self] hosts, keys in
+        MainActor.assumeIsolated { self?.sync(hosts: hosts, vaultKeys: keys) }
       }
   }
 
   /// 解析并发送；与上次发给同一实例的内容相同则跳过。
-  private func sync(hosts: [SSHHostProfile]) {
+  private func sync(hosts: [SSHHostProfile], vaultKeys: [SSHVaultKey]) {
     guard isReady, let channel else { return }
-    let resolved = SSHHostResolver.resolveAll(hosts)
+    let resolved = SSHHostResolver.resolveAll(hosts, vaultKeys: vaultKeys)
     if !resolved.failures.isEmpty {
       note("ssh.hosts.unresolved", "count=\(resolved.failures.count)", level: .warning)
     }

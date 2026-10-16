@@ -238,3 +238,50 @@ fn resolved_spec_identity_agent_is_optional_and_per_hop() {
     assert_eq!(back["identityAgent"], "~/agent.sock");
     assert_eq!(back["jump"]["identityAgent"], "none");
 }
+
+#[test]
+fn private_key_request_carries_vault_key_id() {
+    round_trip_event(json!({
+        "type":"auth.request","id":"a3","endpoint":"deploy@10.0.0.5:22","kind":"privateKey",
+        "hostID":"U","keyFile":null,"keyDigest":null,
+        "vaultKeyID":"0B5E1C7A-3F7D-4A51-9B0E-6C1D2E3F4A5B",
+        "name":"","instruction":"","prompts":[],"attempt":1,"interactive":false
+    }));
+    // 其它类型不带 vaultKeyID 键。
+    let event: BrokerEvent = serde_json::from_value(json!({
+        "type":"auth.request","id":"a1","endpoint":"u@h:22","kind":"password",
+        "prompts":[],"attempt":1,"interactive":true
+    }))
+    .unwrap();
+    let back = serde_json::to_value(&event).unwrap();
+    assert!(back.get("vaultKeyID").is_none());
+}
+
+#[test]
+fn resolved_spec_vault_keys_are_optional_and_per_hop() {
+    // 旧版 App 不发 vaultKeys：解码成空数组，编码时也不多出这个键。
+    let plain: ResolvedSpec =
+        serde_json::from_value(json!({"host":"h","port":22,"user":"u"})).unwrap();
+    assert!(plain.vault_keys.is_empty());
+    assert!(serde_json::to_value(&plain)
+        .unwrap()
+        .get("vaultKeys")
+        .is_none());
+    let spec: ResolvedSpec = serde_json::from_value(json!({
+        "host":"h","port":22,"user":"u",
+        "vaultKeys":[{"id":"K1","publicKey":"ssh-ed25519 AAAA k1"}],
+        "jump":{"host":"j","port":22,"user":"u","vaultKeys":[{"id":"K2","publicKey":"ssh-ed25519 BBBB"}]}
+    }))
+    .unwrap();
+    assert_eq!(
+        spec.vault_keys,
+        vec![VaultKeyRef {
+            id: "K1".into(),
+            public_key: "ssh-ed25519 AAAA k1".into()
+        }]
+    );
+    assert_eq!(spec.jump.as_ref().unwrap().vault_keys[0].id, "K2");
+    let back = serde_json::to_value(&spec).unwrap();
+    assert_eq!(back["vaultKeys"][0]["publicKey"], "ssh-ed25519 AAAA k1");
+    assert_eq!(back["jump"]["vaultKeys"][0]["id"], "K2");
+}

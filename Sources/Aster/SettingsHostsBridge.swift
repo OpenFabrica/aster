@@ -43,6 +43,8 @@ final class SettingsHostsBridge {
     var localUser: String
     /// 「已知主机」页运行 `aster-ssh known-hosts` 的方式；测试注入假实现。
     var knownHosts: SettingsKnownHostsBridge.Dependencies = .live()
+    /// 「密钥」子页（私钥保险库）的依赖；nil 表示不提供该子页（测试默认）。
+    var vaultKeys: SettingsSSHKeysBridge.Dependencies? = nil
 
     /// 生产依赖：共享主机目录、真实钥匙串、机器编队与 aster-ssh。
     @MainActor static func live() -> Dependencies {
@@ -59,12 +61,15 @@ final class SettingsHostsBridge {
             _ = await MachineSetupFlow.presentAddMachine(prefill: prefill, in: window)
           }
         },
-        localUser: NSUserName())
+        localUser: NSUserName(),
+        vaultKeys: .live())
     }
   }
 
   let dependencies: Dependencies
   var directory: SSHHostDirectory { dependencies.directory }
+  /// 「密钥」子页的协作者；`hosts.keys.*` 动作转给它，快照字段由它补充。
+  let keysBridge: SettingsSSHKeysBridge?
 
   /// 立即推送一份新快照。动作成功后先推快照再发回执，网页拿到回执时列表已是新值。
   var pushSnapshot: () -> Void = {}
@@ -91,6 +96,9 @@ final class SettingsHostsBridge {
     var loadError: String?
     /// 机器对主机的引用（hostID 与标签）；连接状态变化不影响本页。
     var machineReferences: [MachineReference]
+    /// 保险库密钥与其加载错误；「密钥」子页也随快照重绘。
+    var vaultKeys: [SSHVaultKey]
+    var vaultKeysError: String?
   }
 
   /// 一台机器对主机的引用。
@@ -101,6 +109,13 @@ final class SettingsHostsBridge {
 
   init(dependencies: Dependencies) {
     self.dependencies = dependencies
+    keysBridge = dependencies.vaultKeys.map {
+      SettingsSSHKeysBridge(dependencies: $0, hosts: dependencies.directory)
+    }
+    // 闭包由 SettingsViewController 在 init 之后才赋值，这里转发而不是拷贝当前值。
+    keysBridge?.pushSnapshot = { [weak self] in self?.pushSnapshot() }
+    keysBridge?.toast = { [weak self] text, isError in self?.toast(text, isError) }
+    keysBridge?.window = { [weak self] in self?.window() }
   }
 
   /// 建「已知主机」协作者；推快照与 toast 在调用时才转给本对象，晚于构造设置的闭包也能生效。
@@ -120,7 +135,8 @@ final class SettingsHostsBridge {
   private func currentState(machines: [MachineProfile]) -> RenderedState {
     RenderedState(
       hosts: directory.hosts, loadError: directory.loadError,
-      machineReferences: machines.map { MachineReference(hostID: $0.hostID, label: $0.label) })
+      machineReferences: machines.map { MachineReference(hostID: $0.hostID, label: $0.label) },
+      vaultKeys: keysBridge?.directory.keys ?? [], vaultKeysError: keysBridge?.directory.loadError)
   }
 
   /// 开始监听主机目录。重复调用无副作用。
@@ -132,6 +148,11 @@ final class SettingsHostsBridge {
       .merge(with: directory.$loadError.map { _ in () })
       .eraseToAnyPublisher()
     if let machines = dependencies.machinesDidChange { changes = changes.merge(with: machines).eraseToAnyPublisher() }
+    if let keys = keysBridge?.directory {
+      keys.startWatching()
+      changes = changes.merge(with: keys.$keys.map { _ in () }, keys.$loadError.map { _ in () })
+        .eraseToAnyPublisher()
+    }
     changes
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
@@ -211,7 +232,7 @@ final class SettingsHostsBridge {
       "sshConfigPath": (dependencies.sshConfigURL.path as NSString).abbreviatingWithTildeInPath,
       "loadError": directory.loadError ?? "",
       "knownHosts": knownHosts.snapshot(),
-    ]
+    ].merging(keysBridge?.snapshot(hosts: hosts) ?? [:]) { current, _ in current }
   }
 
   /// 列表顺序：`~/.ssh/config` 导入组在前，其它分组按名称，最后是未分组；组内按名称。
@@ -285,6 +306,7 @@ final class SettingsHostsBridge {
     object["knownHostsFiles"] = profile.knownHostsFiles
     object["identityAgent"] = profile.identityAgent
     object["tags"] = profile.tags
+    object["vaultKeyIDs"] = profile.vaultKeyIDs?.map(\.uuidString)
     return object
   }
 
