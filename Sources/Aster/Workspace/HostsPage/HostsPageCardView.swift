@@ -10,6 +10,8 @@ struct HostsPageCardContent {
   var subtitle: String
   /// 图标块里的 SF Symbol。
   var symbol: String
+  /// 发行版标志；非 nil 时图标块改用自绘标志与品牌底色，`symbol` 不再使用。
+  var brand: SSHHostOSBrand? = nil
   /// 标题右侧的小标签（例如「远程机器」）；nil 不显示。
   var badge: String?
   /// 列表模式下卡片右侧的补充文字（连接串）；网格模式不显示。
@@ -31,7 +33,7 @@ final class HostsPageCardView: NSView {
   private let menuProvider: (() -> NSMenu)?
   private let editButton: IconHoverButton?
   private let detailLabel: NSTextField?
-  /// 左侧圆角图标块；底色是强调色，外观切换时要重新解析。
+  /// 左侧圆角图标块；底色是强调色（有发行版标志时是品牌色），外观切换时要重新解析。
   private let tile = NSView()
   private var tracking: NSTrackingArea?
   private var pressedInside = false
@@ -80,8 +82,12 @@ final class HostsPageCardView: NSView {
     tile.translatesAutoresizingMaskIntoConstraints = false
     addSubview(tile)
     let icon = NSImageView()
-    icon.image = NSImage(systemSymbolName: content.symbol, accessibilityDescription: nil)?
-      .withSymbolConfiguration(.init(pointSize: InterfaceScale.font(15), weight: .semibold))
+    if let brand = content.brand {
+      icon.image = brand.image(size: InterfaceScale.length(22))
+    } else {
+      icon.image = NSImage(systemSymbolName: content.symbol, accessibilityDescription: nil)?
+        .withSymbolConfiguration(.init(pointSize: InterfaceScale.font(15), weight: .semibold))
+    }
     icon.contentTintColor = .white
     icon.translatesAutoresizingMaskIntoConstraints = false
     tile.addSubview(icon)
@@ -230,7 +236,7 @@ final class HostsPageCardView: NSView {
     effectiveAppearance.performAsCurrentDrawingAppearance {
       let active = hovered || pressedInside
       layer?.backgroundColor = (active ? HostsPagePalette.cardHover : HostsPagePalette.card).cgColor
-      tile.layer?.backgroundColor = AsterTheme.accent.cgColor
+      tile.layer?.backgroundColor = (content.brand?.tileColor ?? AsterTheme.accent).cgColor
     }
     editButton?.isHidden = !hovered
   }

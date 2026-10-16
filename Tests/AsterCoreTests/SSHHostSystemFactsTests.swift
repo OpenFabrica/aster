@@ -28,6 +28,7 @@ func hostFactsParseLinux() throws {
   #expect(facts.family == .linux)
   #expect(facts.osName == "Ubuntu 24.04.1 LTS")
   #expect(facts.distroID == "ubuntu")
+  #expect(facts.brand == .ubuntu)
   #expect(facts.kernel == "6.8.0-45-generic")
   #expect(facts.architecture == "x86_64")
   #expect(facts.hostname == "web-01")
@@ -61,6 +62,7 @@ func hostFactsParseMacOSAndFailures() throws {
   #expect(facts.family == .macOS)
   #expect(facts.osName == "macOS 14.5")
   #expect(facts.distroID == nil)
+  #expect(facts.brand == nil)
   #expect(facts.memoryBytes == 68_719_476_736)
   #expect(facts.diskTotalBytes == nil)
   #expect(facts.family.symbolName == "apple.logo")
@@ -100,6 +102,8 @@ func hostFactsStoreRoundTrip() throws {
     family: .linux, osName: "Debian GNU/Linux 12 (bookworm)", distroID: "debian", kernel: "6.1.0",
     architecture: "aarch64", hostname: "pi", cpuCount: 4, memoryBytes: 4_000_000_000,
     collectedAt: Date(timeIntervalSince1970: 1_700_000_000))
+  // 没有自绘标志的发行版走通用图标。
+  #expect(facts.brand == nil)
   try store.save([id: facts])
   #expect(SSHHostFactsStore(fileURL: url).load() == [id: facts])
   try Data("{broken".utf8).write(to: url)

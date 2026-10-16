@@ -32,7 +32,7 @@ extension HostsPageViewController {
       menuProvider: { [weak self] in self?.makeGroupMenu(name) ?? NSMenu() })
   }
 
-  /// 主机卡片：双击连接，悬停铅笔编辑，右键菜单。采集过系统信息的主机按系统显示图标，
+  /// 主机卡片：双击连接，悬停铅笔编辑，右键菜单。采集过系统信息的主机按系统显示图标（Ubuntu 等有自绘标志），
   /// 副标题追加「系统 · 核数 · 内存」，工具提示给完整配置。
   private func makeHostCard(_ host: SSHHostProfile, listMode: Bool) -> HostsPageCardView {
     let id = host.id
@@ -53,6 +53,7 @@ extension HostsPageViewController {
       title: HostBrowserCatalog.title(for: host),
       subtitle: subtitle,
       symbol: facts?.family.symbolName ?? SSHHostOSFamily.other.symbolName,
+      brand: facts?.brand,
       badge: machines.isEmpty ? nil : L("远程机器"),
       trailingDetail: host.connectString,
       toolTip: toolTip)

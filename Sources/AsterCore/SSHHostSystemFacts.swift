@@ -37,6 +37,11 @@ public enum SSHHostOSFamily: String, Codable, Equatable, Sendable {
   }
 }
 
+/// 有自绘标志的发行版。SF Symbols 没有发行版标志，这些由应用层自己画；不在表里的走 `SSHHostOSFamily` 的通用图标。
+public enum SSHHostOSBrand: String, Equatable, Sendable {
+  case ubuntu
+}
+
 /// 一台主机的系统与硬件信息快照。字段缺失表示脚本在该系统上取不到，不是错误。
 public struct SSHHostSystemFacts: Codable, Equatable, Sendable {
   public var family: SSHHostOSFamily
@@ -72,6 +77,11 @@ public struct SSHHostSystemFacts: Codable, Equatable, Sendable {
     self.diskTotalBytes = diskTotalBytes
     self.diskUsedBytes = diskUsedBytes
     self.collectedAt = collectedAt
+  }
+
+  /// 按 os-release 的 `ID` 认出的发行版标志；没有专用标志时为 nil。
+  public var brand: SSHHostOSBrand? {
+    distroID.flatMap { SSHHostOSBrand(rawValue: $0.lowercased()) }
   }
 
   /// 卡片副标题用的一行摘要：「Ubuntu 22.04 · 4 核 · 7.8 GB」；取不到的部分省略。
