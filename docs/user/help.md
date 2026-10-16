@@ -393,7 +393,7 @@ aster pane run -- npm test
 aster pane exec --format json -- git status --short
 ```
 
-`open/view/edit/jump/learn/ignore/capture` 是只读或工作区动作；`pane send/run/exec` 必须先在“设置 → 控制 → IPC”开启“允许发送输入”，SSH 或 sudo 等敏感会话还需单独开启“允许敏感会话”。`aster://learn?...` 深链只处理有界目录学习请求；`ssh://` 只预填命令，不自动执行。
+`open/view/edit/jump/learn/ignore/capture` 是只读或工作区动作；`pane send/run/exec` 必须先在“设置 → 控制 → IPC”开启“允许发送输入”，SSH 或 sudo 等敏感会话还需单独开启“允许敏感会话”；原生 SSH 标签和远程机器上的终端从连接开始就算敏感会话。`aster://learn?...` 深链只处理有界目录学习请求；`ssh://` 只预填命令，不自动执行。
 
 安装的 `aster` 是指向 Aster.app 内 `aster-cli` 的符号链接：优先放在 `/usr/local/bin`，不可写时放 `~/.local/bin`（请确认它在 PATH 里）。旧版本写入的 sh 脚本会被自动替换；如果那个位置已经有一个不是 Aster 安装的 `aster`，安装会拒绝覆盖并提示。CLI 通过当前用户专属的本地 socket（默认 `~/Library/Application Support/Aster/Control/aster.sock`，仅本人可连；HOME 路径过长时回退到 `$TMPDIR/aster-control.sock`）与应用通信，不监听网络端口。Aster 的终端里会注入 `ASTER_SOCKET_PATH` 指向实际路径；要让应用监听别处，可在启动 Aster 前设置 `ASTER_CONTROL_SOCKET_PATH`（绝对路径），CLI 侧也可用 `--socket <path>` 或 `ASTER_SOCKET_PATH` 显式指定；Aster 没有运行时它会在后台拉起应用并等待最多 5 秒，仍连不上则以退出码 69 结束。运行 `aster --help` 查看完整语法，`aster --version` 查看版本。
 

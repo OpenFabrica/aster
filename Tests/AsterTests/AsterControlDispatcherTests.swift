@@ -176,6 +176,20 @@ struct AsterControlDispatcherTests {
     #expect(await fixture.call("pane.send_text", ["pane": "w1:p1", "text": "\u{1B}[A"]).error?.code == .invalidParams)
   }
 
+  @Test("原生 SSH Pane 一开始就是敏感会话：未开 Allow Sensitive Sessions 时 send_text 被拒")
+  func nativeSSHPaneIsSensitiveFromTheStart() async throws {
+    let (fixture, box) = try makeFixture()
+    defer { fixture.workspace.tearDown() }
+    let (session, _) = try fixture.workspace.makeActiveTerminalView()
+    // 还没有任何 OSC 7 或 ssh 命令上报：只因为它是原生 SSH Pane。
+    session.bindNativeSSH(.host(UUID()))
+    #expect(session.currentWorkingDirectoryIsLocal)
+    let blocked = await fixture.call("pane.send_text", ["pane": "w1:p1", "text": "ls"])
+    #expect(blocked.error?.code == .sensitiveSessionNotAllowed)
+    box.policy.allowSensitiveSessions = true
+    #expect(await fixture.call("pane.send_text", ["pane": "w1:p1", "text": "ls"]).error == nil)
+  }
+
   @Test("pane.send_text 真实 PTY 回显，pane.read / wait_for_output 能读到")
   func sendTextAndReadEcho() async throws {
     let (fixture, _) = try makeFixture()

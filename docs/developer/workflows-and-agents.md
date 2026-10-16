@@ -155,7 +155,8 @@ Pane 描述符 UUID，跨 App 重启稳定——后台保活的受管 shell 在�
 
 **安全门禁**（`AsterControlWriteGate`，与旧 CLI 的 `permitsWorkflowCLIWrite` 同源）：写方法需
 「设置 → 控制 → IPC 允许发送输入」，否则 `write_not_allowed`；SSH/sudo 等敏感会话还需
-「允许敏感会话」，否则 `sensitive_session_not_allowed`；只读模式等阻断返回 `write_rejected`。
+「允许敏感会话」，否则 `sensitive_session_not_allowed`（原生 SSH Pane 与远端受管终端不等 OSC 7，
+从一开始就算敏感，见 `TerminalSession.isSensitiveAutomationSession`）；只读模式等阻断返回 `write_rejected`。
 `agent.prompt` 对 `blocked` 的 agent 不写入（`agent_blocked`）；`agent.start` 要求 pane 没有前台
 命令且没有 agent，否则 `pane_busy`；`name` 与某个存活 agent 重名则 `agent_name_taken`（换个名字重试，
 不会启动第二份）。`events.wait` 的 `after_sequence` 早于 512 条回放环的最旧一条时返回 `replay_gap`：

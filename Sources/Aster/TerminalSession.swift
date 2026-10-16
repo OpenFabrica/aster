@@ -2583,9 +2583,12 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     return process.shellPid
   }
 
-  /// CLI 写入 SSH/sudo/su Pane 需要第二个显式权限。判断只使用当前 Shell Integration
-  /// 命令首 token 与远端 OSC 7 状态，不扫描终端输出，避免提示文字造成误判。
+  /// CLI 写入 SSH/sudo/su Pane 需要第二个显式权限。原生 SSH Pane 与远端受管终端从一开始
+  /// 就算敏感：不等 OSC 7 上报远端目录，否则连接建立到首次上报之间的空窗里 `pane.send_text`
+  /// 能绕过这道开关。其余 Pane 只看当前 Shell Integration 命令首 token 与远端 OSC 7 状态，
+  /// 不扫描终端输出，避免提示文字造成误判。
   var isSensitiveAutomationSession: Bool {
+    if nativeSSH != nil || remoteManagedMachineLabel != nil { return true }
     if !currentWorkingDirectoryIsLocal { return true }
     guard let command = submittedCommand else { return false }
     let executable = ShellCommandTokenizer.tokenize(command).tokens.first.map {
