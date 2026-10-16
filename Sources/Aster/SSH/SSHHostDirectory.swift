@@ -76,6 +76,20 @@ final class SSHHostDirectory: ObservableObject {
     try commit(next)
   }
 
+  /// 把 `~/.ssh/config` 的解析结果合并进导入组并落盘；内容没变时不写文件。
+  ///
+  /// 合并基于调用这一刻的列表：调用方在 `await` 解析完成后才调用，等待期间其它窗口的
+  /// 修改不会被覆盖。设置页与主机页的「导入」共用这里。
+  func mergeSSHConfig(_ listing: SSHConfigListing) throws -> SSHConfigImportResult {
+    let current = hosts
+    let result = SSHConfigImport.merge(listing, into: current)
+    if result.hosts != current {
+      try store.save(result.hosts)
+      reload()
+    }
+    return result
+  }
+
   /// 只改分组。
   func setGroup(_ id: UUID, group: String?) throws {
     guard var profile = host(id) else { return }

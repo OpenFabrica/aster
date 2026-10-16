@@ -156,6 +156,24 @@ public struct SSHHostProfile: Codable, Equatable, Identifiable, Sendable {
 
   public var isDefaults: Bool { id == Self.defaultsProfileID }
 
+  /// 复制出一台新主机：新 ID、给定名称，其余连接参数原样保留。
+  ///
+  /// 导入组归 `~/.ssh/config` 管（下次导入会按 alias 覆盖），副本若留在里面会被当成
+  /// 无主条目，所以放到未分组。设置页与主机页的「复制」共用这条规则。
+  public func duplicated(name: String, id: UUID = UUID()) -> SSHHostProfile {
+    // `id` 是 let，只能逐字段构造新值。
+    SSHHostProfile(
+      id: id, name: name, group: group == Self.importedGroup ? nil : group,
+      host: host, port: port, user: user, jumpHostID: jumpHostID,
+      proxyCommand: proxyCommand, socksProxy: socksProxy, httpProxy: httpProxy,
+      auth: auth, identityFiles: identityFiles, identitiesOnly: identitiesOnly,
+      knownHostsFiles: knownHostsFiles, identityAgent: identityAgent,
+      agentForward: agentForward, forwards: forwards,
+      keepaliveInterval: keepaliveInterval, keepaliveCountMax: keepaliveCountMax,
+      connectTimeout: connectTimeout, verifyHostKeys: verifyHostKeys,
+      tags: tags, vaultKeyIDs: vaultKeyIDs)
+  }
+
   /// 用于显示与快连的 `user@host:port` 文本；端口为 22 或未设置时省略。
   public var connectString: String {
     let hostText = host.contains(":") ? "[\(host)]" : host
