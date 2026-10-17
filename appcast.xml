@@ -3,6 +3,25 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.21</title>
+            <pubDate>Sat, 17 Oct 2026 09:32:11 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>40</sparkle:version>
+            <sparkle:shortVersionString>0.6.21</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 修复
+
+- **受管终端里 Claude Code 输入框不再闪烁**：开了「本机后台保活」的 Pane 里，Claude Code 反复查询终端背景色，每次都让整屏重画，输入框不停闪烁。现在这些查询由后台服务直接回答，不再触发重画。
+- **受管终端里 Claude Code 跟随浅色主题**：后台服务以前不回答背景色查询，Claude Code 拿不到颜色，总是按深色主题显示。现在后台服务按 Aster 当前的终端主题回答，切换主题后也会跟着变。远程机器上的受管终端暂时仍按深色显示。
+- **更新后自动换掉旧的后台服务**：本机后台服务会活过 Aster 更新，以前更新后仍在运行旧版本，新的修复不生效。现在 Aster 打开时会检查：没有终端在运行就自动换成新版本；有终端在运行，会弹窗说明重启会结束几个终端，由你选「现在重启」或「以后再说」。
+
+  从 0.6.20 及更早版本更新时，后台服务一定是旧版本。如果有受管终端在运行，第一次打开会看到这个提示。选「现在重启」后，在各个 Pane 上点「重新启动 Shell」即可。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.21/Aster-0.6.21.dmg" length="42264521" type="application/octet-stream" sparkle:edSignature="rP/5DQ1ufnJzk+gO/+a3hkvzK2gEBug7xei23ezV6cr0KY7zcTmjcNvK0FDpfI/YrJXcmUF7E0ZuvHhHj3XyDA=="/>
+        </item>
+        <item>
             <title>0.6.20</title>
             <pubDate>Fri, 16 Oct 2026 23:26:55 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -99,36 +118,6 @@
 - 修复「设置 ▸ 外观」里看不到「界面文字」分组的问题。0.6.16 加的「界面字号」和「加深界面文字」现在能在设置里找到了。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.17/Aster-0.6.17.dmg" length="50343404" type="application/octet-stream" sparkle:edSignature="IQ8Yxcuh7KL13P7Ozql8HtSAa1KXxVsPfRpRu6HCkxJyo4/sWuvKvRdoQI8gA/9004hwSPv0uGYyY2h5MTVBBQ=="/>
-        </item>
-        <item>
-            <title>0.6.16</title>
-            <pubDate>Mon, 05 Oct 2026 12:55:32 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>35</sparkle:version>
-            <sparkle:shortVersionString>0.6.16</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 新功能
-
-- **界面文字大小**：「设置 ▸ 外观 ▸ 界面文字」可以调界面字号，共五档，和终端字号互不影响。还有一个「加深界面文字」开关，让侧栏和设置页里偏淡的文字更清楚；系统打开「增强对比度」时自动生效。改字号后需要重启 Aster。
-- **Pane 顶边的实时画面按钮**：把鼠标移到终端 Pane 顶边，右上角多了一个眼睛图标，点它收起或恢复实时画面。Claude Code 这类 Agent 接管鼠标后右键菜单弹不出来，这时用它就行。
-- **AI 用量统计 Antigravity CLI**：Token 页现在会统计 `agy` 命令行的 token 用量（不含 Antigravity 应用里的会话）。
-- **Codex 订阅档位**：配额卡上 Codex 的 Pro 会标出是 Pro 100、Pro 200 还是 Pro 500。
-- **原生 SSH 支持 IdentityAgent**：会读取 `~/.ssh/config` 里的 `IdentityAgent`，1Password、Secretive 这类第三方 agent 可以用来认证了。也可以在主机设置的「高级 ▸ Agent 套接字」里单独填。
-
-## 改进
-
-- 放大某个 Pane 后，还原按钮移到窗口标题栏右侧，一直显示。放大期间 Pane 顶边不再出现 `×`、放大按钮和拖动把手。
-- 没有键盘焦点的 Pane 不再显示光标，分屏时不会每个 Pane 都留一个空心方框。
-- 竖线光标加粗了一点，更容易找到。
-
-## 修复
-
-- 修复设置窗口开着时，点侧栏折叠按钮没有反应的问题。
-- 修复界面字号调大后，窗口较小时 Agent 历史、命令面板、全局查找等浮层超出窗口、底部按钮被裁掉的问题。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.16/Aster-0.6.16.dmg" length="50343282" type="application/octet-stream" sparkle:edSignature="jvWGoYGSzXm85isU9Rhg6KTRHEKOEMZ6HrRcgJBeh4OiMWFHlqR7bHFdnnmL9DDLfXya3qgWnysuqI5PtM7iDA=="/>
         </item>
     </channel>
 </rss>
