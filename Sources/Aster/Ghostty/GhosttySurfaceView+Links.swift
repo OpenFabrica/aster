@@ -45,6 +45,16 @@ extension GhosttySurfaceView {
     }
   }
 
+  /// 失去键盘焦点时按「Command 已松开」收尾。Command 点击打开链接后，确认弹窗或被
+  /// 激活的浏览器会拿走焦点，松开 Command 的 flagsChanged 送不到本视图；不在这里清，
+  /// 下划线、手形与预览徽章会一直留在终端上，并随每次输出继续刷新。
+  func resetCommandLinkHover() {
+    guard linkCommandHeld || linkUnderlinesActive || nativeHoveredLink != nil
+      || linkPreviewBadge != nil
+    else { return }
+    handleCommandModifierChange(pressed: false)
+  }
+
   /// 鼠标移动：带 Command 时保证下划线已激活并刷新悬停指针，否则清理残留状态。
   func handleLinkHoverMouseMoved(with event: NSEvent) {
     lastLinkHoverLocation = convert(event.locationInWindow, from: nil)

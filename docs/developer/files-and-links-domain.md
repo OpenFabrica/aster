@@ -88,7 +88,7 @@ Pane 通过目标文件父目录的 vnode 事件检查 `contentModificationDate`
 
 `flagsChanged` 必须按事件携带的 Command 修饰状态同步整个链接交互，不能只处理物理键码 54/55：系统重映射或合成事件可能保留其它键码。原先预览按修饰状态更新、手形和下划线按键码更新，会出现“有 URL 预览但没有手形和下划线”。回归使用 `[HPM] Proxy created: /api  → http://127.0.0.1:8899`，先停住鼠标再发送左右 Command 和非标准键码的 Command 状态事件，验证目标处下划线、手形与预览同步出现，松开后清除。
 
-原生 `mouse_over_link` 命中单独保存在 `nativeHoveredLink`，与预览开关解耦，并和文字扫描共同驱动手形；OSC 8 的显示文字可能不含 URL，不能用文字扫描失败否定原生命中。鼠标点击、滚动和移动经同一事件坐标更新缓存，避免原生预览位置已变化、Aster 仍命中旧位置。松开 Command、离开视图或销毁 surface 时清理命中，迟到的原生回调不得重新显示预览。下划线通过 `CAShapeLayer` 直接合成到 Metal 宿主中，关闭隐式动画并同步更新路径，不依赖透明 `NSView.draw` 的调度；已在独立测试窗口的真实画面中核对代理 URL 下划线可见。
+原生 `mouse_over_link` 命中单独保存在 `nativeHoveredLink`，与预览开关解耦，并和文字扫描共同驱动手形；OSC 8 的显示文字可能不含 URL，不能用文字扫描失败否定原生命中。鼠标点击、滚动和移动经同一事件坐标更新缓存，避免原生预览位置已变化、Aster 仍命中旧位置。松开 Command、离开视图、失去键盘焦点或销毁 surface 时清理命中，迟到的原生回调不得重新显示预览。Command 点击打开链接后，确认弹窗或被激活的浏览器会成为 key window，松开 Command 的 `flagsChanged` 送不到终端；因此窗口失活（`setWindowActive(false)`）与 `resignFirstResponder` 都按「Command 已松开」收尾，否则下划线、手形和预览徽章会一直留在终端上并随输出刷新。下划线通过 `CAShapeLayer` 直接合成到 Metal 宿主中，关闭隐式动画并同步更新路径，不依赖透明 `NSView.draw` 的调度；已在独立测试窗口的真实画面中核对代理 URL 下划线可见。
 
 按下 Command 时每次从窗口读取当前指针位置，不能只在缓存为空时读取；测试通过 `linkPointerLocationProvider` 注入位置，以免合成事件未移动系统指针而掩盖此差异。回归会故意留下错误缓存再按键，确认手形与预览使用新位置。鼠标跟踪仍采用 AppKit 的 [NSTrackingArea 事件机制](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/TrackingAreaObjects/TrackingAreaObjects.html)。
 

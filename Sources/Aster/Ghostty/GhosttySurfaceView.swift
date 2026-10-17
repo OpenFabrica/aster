@@ -679,13 +679,16 @@ final class GhosttySurfaceView: NSView {
     if resigned {
       isFocused = false
       updateFocusState()
+      resetCommandLinkHover()
     }
     return resigned
   }
 
+  /// 同步所在窗口的键盘焦点；失活时一并清掉 Command 悬停状态。
   func setWindowActive(_ active: Bool) {
     isWindowActive = active
     updateFocusState()
+    if !active { resetCommandLinkHover() }
   }
 
   func setPaneActive(_ active: Bool) {

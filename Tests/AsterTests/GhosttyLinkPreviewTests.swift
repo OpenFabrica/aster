@@ -117,3 +117,25 @@ func ghosttyLinkPreviewBadgeIsCompactAndShowsFullURL() throws {
   #expect(badge.textField.lineBreakMode == .byTruncatingMiddle)
   #expect(badge.textField.frame.width < ceil(cellWidth))
 }
+
+@Test("窗口失活时清掉 Command 悬停：松开 Command 的事件被弹窗或浏览器拿走也不残留")
+@MainActor
+func ghosttyWindowDeactivationClearsCommandLinkHover() {
+  let view = makeView()
+  view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+  view.handleCommandModifierChange(pressed: true)
+  view.handleMouseOverLink("https://example.com")
+  #expect(view.linkPreviewText == "https://example.com")
+  #expect(view.linkHoverCursorActive)
+
+  // 确认弹窗或浏览器成为 key window：本视图收不到松开 Command 的 flagsChanged。
+  view.setWindowActive(false)
+  #expect(!view.linkCommandHeld)
+  #expect(!view.linkUnderlinesActive)
+  #expect(!view.linkHoverCursorActive)
+  #expect(view.linkPreviewText == nil)
+
+  // 迟到的原生悬停回调不能把徽章再带回来。
+  view.handleMouseOverLink("https://example.com")
+  #expect(view.linkPreviewText == nil)
+}
