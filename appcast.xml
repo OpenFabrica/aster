@@ -3,6 +3,27 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.22</title>
+            <pubDate>Sat, 17 Oct 2026 20:39:40 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>41</sparkle:version>
+            <sparkle:shortVersionString>0.6.22</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 改进
+
+- **Agent 终端新的控制方式**：Claude Code、Codex 等 agent 在 SSH 主机上用的浮动终端，顶部那排按钮换成了底部一个深色控制胶囊。胶囊上写着是哪个 agent、哪台主机、现在在做什么，按住按钮以外的地方可以拖到别处。
+- **Agent 运行时不会被误输入打断**：agent 连接或运行命令时，终端四周亮起一圈蓝光，这时终端不接受点击和键盘输入，防止你的输入和 agent 的命令混在一起。滚轮照样能翻看输出。
+- **「暂停 agent」改名为「接管」**：点「接管」后蓝光消失，agent 暂停，你可以直接在终端里打字；点「交还 agent」让它继续。「中断」不用先接管。
+
+## 修复
+
+- **打开链接后不再残留下划线和网址提示**：按住 Command 点链接打开后，终端里的链接下划线、手形光标和左下角的网址提示有时会一直留着，还会随着输出不停刷新。现在切到别的窗口或弹出确认框时会自动清掉。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.22/Aster-0.6.22.dmg" length="42400646" type="application/octet-stream" sparkle:edSignature="sPlxH8J4tctwI2VCaiZFArWu0bOcyKEjKeb+8lKmiq2LT8eft6yPxR/pcKuzRQkDrvGDoEaaL02CQ9MC4yR1AQ=="/>
+        </item>
+        <item>
             <title>0.6.21</title>
             <pubDate>Sat, 17 Oct 2026 09:32:11 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -103,21 +124,6 @@
 - 修复命令输出末尾没有换行时（比如 `cat` 一个末尾不带换行的文件），行尾多出一个反色 `%` 的问题。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.18/Aster-0.6.18.dmg" length="49937687" type="application/octet-stream" sparkle:edSignature="AJosh1dCbCpsZiuXgQ0p5fPFwh2w0SyK3dXyl5HNxLxtgG9C2TO8kH0j27cmLwzd5oIoOQSjt+m5N8HkYK+OAg=="/>
-        </item>
-        <item>
-            <title>0.6.17</title>
-            <pubDate>Mon, 05 Oct 2026 13:13:05 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>36</sparkle:version>
-            <sparkle:shortVersionString>0.6.17</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 修复
-
-- 修复「设置 ▸ 外观」里看不到「界面文字」分组的问题。0.6.16 加的「界面字号」和「加深界面文字」现在能在设置里找到了。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.17/Aster-0.6.17.dmg" length="50343404" type="application/octet-stream" sparkle:edSignature="IQ8Yxcuh7KL13P7Ozql8HtSAa1KXxVsPfRpRu6HCkxJyo4/sWuvKvRdoQI8gA/9004hwSPv0uGYyY2h5MTVBBQ=="/>
         </item>
     </channel>
 </rss>
