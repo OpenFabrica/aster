@@ -181,6 +181,9 @@ final class ManagedTerminalCoordinator {
     )
   }()
 
+  /// 本机后台会话服务的状态父目录（App Bundle 内运行时）；客户端主题色写在这里。
+  static var localStateParentPath: String? { resolvedLocalEndpoint?.stateParentPath }
+
   var isEnabled: Bool { endpoint != nil }
 
   /// 端点是否由环境变量显式指定（测试、开发、远端协调器）。显式指定视为用户明确要求

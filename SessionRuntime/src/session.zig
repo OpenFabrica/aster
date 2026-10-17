@@ -3,6 +3,8 @@ const pty = @import("pty.zig");
 const scope = @import("process_scope.zig");
 const vt = @import("vt.zig");
 const history = @import("history_budget.zig");
+const query_scan = @import("query_scan.zig");
+const client_colors = @import("client_colors.zig");
 const Geometry = @import("geometry.zig").Geometry;
 const c = @cImport({
     @cInclude("sys/wait.h");
@@ -29,6 +31,10 @@ pub const Session = struct {
     /// 上一轮读到、但止于未完成序列/半个 UTF-8 字符的尾巴；下一轮放回 `delta_bytes` 开头再判。
     delta_carry: std.ArrayList(u8) = .empty,
     delta_filter: @import("delta_filter.zig").Filter = .{},
+    /// 跨读扫描 PTY 输出里的颜色查询，在查询结束处插入应答（见 `writeOutput`）。
+    query_tokenizer: query_scan.Tokenizer = .{},
+    /// 客户端主题色；由终端池在创建后设置，为 null 时不应答颜色查询。
+    client_colors: ?*client_colors.Source = null,
     eof: bool = false,
     exit_status: ?u32 = null,
     termination_timer: ?std.time.Timer = null,
@@ -378,7 +384,7 @@ pub const Session = struct {
                     }
                     try self.delta_bytes.appendSlice(self.allocator, buffer[0..n]);
                     try self.scanAgentDirectives(buffer[0..n]);
-                    self.terminal.write(buffer[0..n]);
+                    self.writeOutput(buffer[0..n]);
                     try self.enforceHistoryLimit();
                     const response = try self.responses.bytes();
                     if (response.len != 0) {
@@ -399,6 +405,23 @@ pub const Session = struct {
         return changed and (self.delta_bytes.items.len != 0 or self.eof);
     }
 
+    /// 把 PTY 输出喂给 VT，并在每个颜色查询结束处补上服务端的应答。
+    ///
+    /// 按查询切开写入：查询之前的字节先进 VT（它们产生的应答先入队），再排颜色应答，
+    /// 应答顺序与程序发出查询的顺序一致。程序常以 DA1 作为一批探测的结束标记，乱序会让
+    /// 它误判颜色查询没有回应。
+    fn writeOutput(self: *Session, bytes: []const u8) void {
+        var offset: usize = 0;
+        while (self.query_tokenizer.next(bytes, offset)) |found| {
+            self.terminal.write(bytes[offset..found.end]);
+            offset = found.end;
+            const source = self.client_colors orelse continue;
+            var buffer: [256]u8 = undefined;
+            self.responses.push(source.current().reply(found, &buffer));
+        }
+        self.terminal.write(bytes[offset..]);
+    }
+
     /// 尾巴超过这个长度（例如 kitty 图形传输、超长 OSC）就不再等它完整，退回逐块判定。
     const carry_limit: usize = 65536;
 
@@ -409,6 +432,11 @@ pub const Session = struct {
     /// 时画面不停闪）。尾巴对 VT 尚无可见效果，所以留到下一轮和后续字节一起判定是无损的：
     /// 即使中间发了快照，快照里也不含尾巴的效果，下一轮重放尾巴不会重复作用。
     fn finishDelta(self: *Session) !void {
+        // 服务端负责应答的查询不交给客户端：否则整块退回快照，客户端还会再答一遍（见 stripQueries）。
+        // 只在块从 ground 开始时剥离；回退模式下块从序列中间开始，照旧整块快照。
+        if (self.delta_filter.state == .ground) {
+            self.delta_bytes.shrinkRetainingCapacity(query_scan.stripQueries(self.delta_bytes.items));
+        }
         const split = self.delta_filter.consumeSplit(self.delta_bytes.items);
         const tail = self.delta_bytes.items.len - split.complete;
         if (tail != 0 and tail <= carry_limit) {
@@ -859,6 +887,45 @@ test "a frame split across reads is delivered as one safe delta instead of two s
     try std.testing.expectEqual(@as(usize, 0), unsafe_rounds);
     try std.testing.expectEqualStrings("ok\x1b[31mred\x1b[0m", delivered.items);
     try std.testing.expectEqual(@as(usize, 0), session.delta_carry.items.len);
+}
+
+test "theme probe is answered in order by the server and never forces a snapshot" {
+    // Claude Code 的主题探测：OSC 11 查询 + DA1 哨兵。以前整块退回快照，快照 RIS 又触发
+    // 客户端的 mode 2031 配色报告，形成查询—快照死循环；OSC 11 也没人应答。
+    // 子进程用 raw 模式读应答并以十六进制打印，验证应答内容与顺序。
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = client_colors.file_name, .data = "foreground=#000000\nbackground=#ffffff\n" });
+    var colors: client_colors.Source = .{ .dir = tmp.dir };
+    const script =
+        \\import os, tty
+        \\tty.setraw(0)
+        \\os.write(1, b"a\x1b]11;?\x07\x1b[cb")
+        \\data = b""
+        \\while not data.endswith(b"c"): data += os.read(0, 64)
+        \\os.write(1, b"|" + data.hex().encode())
+    ;
+    const argv = [_:null]?[*:0]const u8{ "/usr/bin/python3", "-I", "-c", script };
+    const env = [_:null]?[*:0]const u8{"PATH=/usr/bin:/bin"};
+    const session = try Session.create(std.testing.allocator, "/", "/usr/bin/python3", &argv, &env, 24, 80);
+    defer session.destroy();
+    session.client_colors = &colors;
+    var delivered: std.ArrayList(u8) = .empty;
+    defer delivered.deinit(std.testing.allocator);
+    var unsafe_rounds: usize = 0;
+    var timer = try std.time.Timer.start();
+    while (!(session.eof and session.exit_status != null) and timer.read() < 5 * std.time.ns_per_s) {
+        _ = try session.tick(20, 65536);
+        if (session.delta_bytes.items.len != 0) {
+            if (session.delta_safe) try delivered.appendSlice(std.testing.allocator, session.delta_bytes.items) else unsafe_rounds += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), unsafe_rounds);
+    var expected: [128]u8 = undefined;
+    const replies = "\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c";
+    const hex = std.fmt.bytesToHex(replies.*, .lower);
+    const want = try std.fmt.bufPrint(&expected, "ab|{s}", .{&hex});
+    try std.testing.expectEqualStrings(want, delivered.items);
 }
 
 

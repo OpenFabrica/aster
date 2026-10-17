@@ -602,15 +602,20 @@ pub const ResponseSink = struct {
         return self.buffer[0..self.used];
     }
 
-    fn receive(_: c.GhosttyTerminal, userdata: ?*anyopaque, data: [*c]const u8, count: usize) callconv(.c) void {
-        const self: *ResponseSink = @ptrCast(@alignCast(userdata orelse return));
+    /// 服务端自己合成的应答（颜色查询，见 client_colors.zig）排进同一队列，与 VT 的应答保序。
+    pub fn push(self: *ResponseSink, data: []const u8) void {
         if (self.overflow) return;
-        if (count > self.buffer.len - self.used) {
+        if (data.len > self.buffer.len - self.used) {
             self.overflow = true;
             return;
         }
-        @memcpy(self.buffer[self.used..][0..count], data[0..count]);
-        self.used += count;
+        @memcpy(self.buffer[self.used..][0..data.len], data);
+        self.used += data.len;
+    }
+
+    fn receive(_: c.GhosttyTerminal, userdata: ?*anyopaque, data: [*c]const u8, count: usize) callconv(.c) void {
+        const self: *ResponseSink = @ptrCast(@alignCast(userdata orelse return));
+        self.push(data[0..count]);
     }
 };
 

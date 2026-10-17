@@ -170,6 +170,11 @@ test {
 }
 
 test {
+    _ = @import("query_scan.zig");
+    _ = @import("client_colors.zig");
+}
+
+test {
     _ = @import("operation_request.zig");
 }
 

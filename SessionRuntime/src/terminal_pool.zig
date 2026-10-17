@@ -101,6 +101,8 @@ pub const Pool = struct {
     history_manager: history.Manager,
     history_stats: history.Stats = .{ .charged_bytes = 0, .removed_rows = 0, .removed_pages = 0, .tracked_pages = 0 },
     history_failures: u64 = 0,
+    /// 客户端主题色来源（服务持有）；新建与接管的会话都用它应答颜色查询。
+    client_colors: ?*@import("client_colors.zig").Source = null,
 
     pub fn init(allocator: std.mem.Allocator, limits: Limits) !Pool {
         if (limits.maximum_terminals == 0 or limits.maximum_terminals > 64 or
@@ -182,6 +184,7 @@ pub const Pool = struct {
         const session = try Session.create(self.allocator, cwd, executable, args.ptr, env.ptr, launch.geometry.rows, launch.geometry.columns);
         errdefer session.destroy();
         session.scope_cleanup = self.limits.scope_cleanup;
+        session.client_colors = self.client_colors;
         if (launch.geometry.pixel_width != 0) try session.resizeGeometry(launch.geometry);
         self.entries.appendAssumeCapacity(.{ .id = id, .cwd = cwd, .original_pid = session.process.pid, .session = session });
     }
@@ -306,6 +309,7 @@ pub const Pool = struct {
         errdefer self.allocator.free(cwd);
         const session = try Session.prepare(self.allocator, launch.geometry);
         session.scope_cleanup = self.limits.scope_cleanup;
+        session.client_colors = self.client_colors;
         session.history_excluded = launch.history_excluded;
         errdefer session.destroy();
         var startup = try Startup.beginGeometry(cwd, executable, args.ptr, env.ptr, launch.geometry);
@@ -557,6 +561,7 @@ pub const Pool = struct {
         errdefer session.destroy();
         var process = pty.Process{ .pid = pid, .master = master_fd };
         session.adoptProcess(&process);
+        session.client_colors = self.client_colors;
         session.scope_cleanup = false; // 接管终端非本进程子进程，禁用 scope 清理
         session.adopted = true;
         session.history_excluded = history_excluded;

@@ -29,6 +29,11 @@ enum GhosttyConfiguration {
       case .block: "block"
       }
     let blinkMode = appearance.resolvedCursorBlinkMode
+    let cursorColor = preferences.configuration.appearance.cursorColorOverride ?? theme.cursor
+    // 受管终端的 VT 在后台服务里，颜色查询由它代答；新颜色必须先于新配置到达，
+    // 见 ManagedSessionClientColors。
+    ManagedClientColorsPublisher.publish(
+      foreground: theme.foreground, background: theme.windowBackground, cursor: cursorColor)
     let scrollbackLines = Int(
       min(
         max(
@@ -65,7 +70,7 @@ enum GhosttyConfiguration {
       "foreground = \(rgb(theme.foreground))",
       "background = \(rgb(theme.windowBackground))",
       "background-opacity = \(format(Double(theme.windowBackground.alpha) / 255))",
-      "cursor-color = \(rgb(preferences.configuration.appearance.cursorColorOverride ?? theme.cursor))",
+      "cursor-color = \(rgb(cursorColor))",
       "cursor-text = \(rgb(preferences.configuration.appearance.cursorTextColorOverride ?? theme.cursorText ?? theme.windowBackground))",
       "cursor-opacity = \(format(appearance.resolvedCursorOpacity))",
       "cursor-style = \(cursorStyle)",

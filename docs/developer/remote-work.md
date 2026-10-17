@@ -75,6 +75,8 @@ Ghostty surface 启动本地 `aster-session bridge` 子进程；bridge 使用 ra
 
 服务端 VT 是屏幕、模式和历史真值。重连先发送完整渲染快照，再发送带序号增量；bridge 不向新 surface 重放任意截断的原始字节尾部。快照包括主/备用屏幕、光标、颜色、宽字符、超链接、输入模式及受支持图形状态。终端查询由服务端 VT 统一应答，避免本地 Ghostty 再次应答造成重复输入。P0 必须验证此边界。
 
+服务端负责应答的查询（`SessionRuntime/src/query_scan.zig`）在交给客户端前从增量里删掉：libghostty-vt 自行应答的 DA、DSR、DECRQM、XTVERSION、kitty 键盘查询，以及它不应答、由服务端补答的颜色查询 OSC 10/11/12 与配色查询 `CSI ? 996 n`。以前这些序列让整块退回全量快照；快照以 RIS 开头，客户端 Ghostty 复位时会按 mode 2031 报一次配色，Claude Code 收到后再发「OSC 11 + DA1」探测，形成每秒上百次的快照重绘（输入框闪烁）。颜色查询不能转给客户端回答：同一批探测里的 DA1 由服务端立即应答，客户端的颜色应答绕一圈后才到，程序把 DA1 当作「应答结束」，照样判定没有回应并退回深色主题。所以颜色由服务端按输出顺序应答（`session.zig` 的 `writeOutput` 在每个颜色查询结束处切开写入 VT，再把应答排进同一队列）。颜色来自本机 App 写在状态父目录的 `client-colors`（`ManagedSessionClientColors`，每行 `键=#rrggbb`），`GhosttyConfiguration.make` 每次生成配置时先写它（内容不变就跳过），保证切换主题后 Ghostty 发出 mode 2031 通知时文件已是新颜色；服务端每次应答前按修改时间重读（`client_colors.zig`）。远端机器读不到这个文件，颜色查询照旧不应答。本机服务不会随 App 升级自动替换，已在运行的旧服务要重启后才有这项行为。
+
 ```mermaid
 flowchart LR
   UI[Aster AppKit 工作区] --> C[连接与会话投影]

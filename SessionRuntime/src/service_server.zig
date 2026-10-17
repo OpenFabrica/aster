@@ -53,6 +53,9 @@ fn runInitialized(allocator: std.mem.Allocator, instance: *Instance, name: []con
     defer reactor.deinit();
     var pool = try Pool.init(allocator, .{ .scope_cleanup = true });
     defer pool.deinit();
+    // App 把主题色写在状态父目录（本机所有会话共用），见 client_colors.zig。
+    var colors: @import("client_colors.zig").Source = .{ .dir = instance.parent };
+    pool.client_colors = &colors;
     // A damaged layout stops startup on purpose: silently serving an empty
     // session would look exactly like the user's workspaces having vanished.
     var store = Store.init(allocator);
@@ -259,6 +262,9 @@ fn runWithAdoptedState(allocator: std.mem.Allocator, parent: std.fs.Dir, name: [
     defer reactor.deinit();
     var pool = try Pool.init(allocator, .{ .scope_cleanup = true });
     defer pool.deinit();
+    // App 把主题色写在状态父目录（本机所有会话共用），见 client_colors.zig。
+    var colors: @import("client_colors.zig").Source = .{ .dir = instance.parent };
+    pool.client_colors = &colors;
 
     // Adopt terminals from the old service: each PTY FD + PID pair becomes
     // a pool entry with the same terminalID. VT state rebuilds from PTY output.
