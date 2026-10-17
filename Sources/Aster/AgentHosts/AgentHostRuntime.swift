@@ -78,6 +78,7 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
       actions: .init(
         interrupt: { [weak terminal] in terminal?.userInterrupt() },
         togglePause: { [weak terminal] in terminal?.isPaused.toggle() },
+        focusTerminal: { [weak surface] in surface?.session.focus() },
         closeTerminal: { [weak registry, weak terminal] in
           guard let registry, let terminal else { return }
           registry.close(terminal)

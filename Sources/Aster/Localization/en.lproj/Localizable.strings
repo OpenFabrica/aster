@@ -2111,10 +2111,11 @@
 "已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Registered with %@ using %@. That command currently points to another Aster, which must support aster mcp; otherwise reinstall the aster command.";
 "安装 aster 命令失败。" = "Could not install the aster command.";
 "已撤销 %@ 条授权" = "Revoked %@ grants";
-"恢复 agent" = "Resume Agent";
+"交还 agent" = "Hand Back to Agent";
 "打开 SSH 终端" = "Open SSH terminal";
 "找不到 aster-cli 可执行文件，请先在设置里安装 aster 命令。" = "The aster-cli executable was not found. Install the aster command in Settings first.";
-"暂停 agent" = "Pause Agent";
+"接管" = "Take Over";
+"Agent 正在控制，点「接管」后可以输入" = "Agent is in control. Click Take Over to type.";
 "有 %@ 个 agent 终端正在远程主机上运行命令，退出会断开这些 SSH 连接。" = "%@ agent terminals are running commands on remote hosts. Quitting will disconnect these SSH connections.";
 "本会话允许" = "Allow for Session";
 "正在运行：%@" = "Running: %@";

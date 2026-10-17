@@ -2111,10 +2111,11 @@
 "已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Bei %@ mit %@ registriert. Dieser Befehl zeigt auf ein anderes Aster, das aster mcp unterstützen muss; andernfalls installiere den Befehl aster neu.";
 "安装 aster 命令失败。" = "Der Befehl aster konnte nicht installiert werden.";
 "已撤销 %@ 条授权" = "%@ Freigaben widerrufen";
-"恢复 agent" = "Agent fortsetzen";
+"交还 agent" = "An Agent zurückgeben";
 "打开 SSH 终端" = "SSH-Terminal öffnen";
 "找不到 aster-cli 可执行文件，请先在设置里安装 aster 命令。" = "Die ausführbare Datei aster-cli wurde nicht gefunden. Installieren Sie zuerst den Befehl aster in den Einstellungen.";
-"暂停 agent" = "Agent pausieren";
+"接管" = "Übernehmen";
+"Agent 正在控制，点「接管」后可以输入" = "Der Agent hat die Kontrolle. Klicken Sie auf „Übernehmen“, um zu tippen.";
 "有 %@ 个 agent 终端正在远程主机上运行命令，退出会断开这些 SSH 连接。" = "%@ Agent-Terminals führen Befehle auf Remote-Hosts aus. Beim Beenden werden diese SSH-Verbindungen getrennt.";
 "本会话允许" = "Für Sitzung erlauben";
 "正在运行：%@" = "Läuft: %@";
