@@ -2234,3 +2234,7 @@
 "键盘交互" = "Clavier interactif";
 "默认设置" = "Réglages par défaut";
 "默认设置…" = "Réglages par défaut…";
+"后台会话服务是旧版本" = "Le service de sessions en arrière-plan n’est pas à jour";
+"Aster 已更新，但后台会话服务还在运行旧版本，新版本的修复不会生效。现在重启会结束 %@ 个正在运行的终端。选择「以后再说」，下次打开 Aster 时会再提醒。" = "Aster a été mis à jour, mais le service de sessions en arrière-plan exécute encore l’ancienne version : les nouveaux correctifs ne s’appliquent pas. Le redémarrer maintenant met fin à %@ terminaux en cours d’exécution. Si vous choisissez « Plus tard », Aster vous le rappellera à sa prochaine ouverture.";
+"现在重启" = "Redémarrer maintenant";
+"以后再说" = "Plus tard";

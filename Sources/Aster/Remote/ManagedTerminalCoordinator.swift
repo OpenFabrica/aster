@@ -37,6 +37,17 @@ final class ManagedTerminalCoordinator {
   private(set) var connectionState: SessionConnectionState = .disconnected
   /// 最近一次连接失败原因，用于界面显示明确错误而不是静默回退。
   private(set) var lastError: String?
+  /// 正在进行的连接。启动时每个恢复的 Pane 都会并发对账，共用一次连接：既避免两次
+  /// 并发的服务替换互相停掉对方刚起的服务，也让「旧服务」提示只弹一次。
+  private var inFlightConnect: Task<SessionServerIdentity?, Never>?
+  /// 本次运行是否已就旧服务问过用户。选「以后再说」后本次运行不再问，下次启动再问。
+  private var outdatedServerPromptAnswered = false
+
+  /// 旧服务仍有终端在运行时问用户是否现在重启；参数为运行中的终端数，返回 true 表示重启。
+  /// 测试替换它，避免弹出模态窗口。
+  static var confirmOutdatedServerRestart: @MainActor (Int) async -> Bool = {
+    ManagedServerRestartPrompt.run(runningTerminals: $0)
+  }
 
   /// 远端 SSH target 的环境变量；设置后受管终端走 SSH 传输而不是本机传输。
   static let remoteTargetEnvironmentKey = "ASTER_REMOTE_SSH_TARGET"
@@ -208,27 +219,43 @@ final class ManagedTerminalCoordinator {
   ///
   /// P3 起同一个协调器要驱动 SSH 传输，每次调用都是一次网络往返；在 MainActor 上
   /// 同步等待会卡住整个界面。本机实现也走同一条异步路径，避免两条传输出现两套时序。
+  /// 并发调用共用同一次连接，见 `inFlightConnect`。
   @discardableResult
   func connectAsync() async -> SessionServerIdentity? {
+    if let inFlightConnect { return await inFlightConnect.value }
+    let task = Task { await performConnect() }
+    inFlightConnect = task
+    let identity = await task.value
+    inFlightConnect = nil
+    return identity
+  }
+
+  /// 一次真正的连接：后台握手；旧服务仍有终端在运行时先问用户，同意才替换。
+  private func performConnect() async -> SessionServerIdentity? {
     guard let endpoint else {
       connectionState = .disabled
       return nil
     }
     connectionState = .connecting
     let client = self.client
-    let outcome = await Task.detached(priority: .userInitiated) { () -> Result<SessionServerIdentity, any Error> in
-      do {
-        return .success(try Self.establish(client, endpoint))
-      } catch {
-        return .failure(error)
+    var outcome = await Self.detached { try Self.establish(client, endpoint) }
+    // 用户回答之前不放行对账：其它 Pane 都在等这次连接，不会先挂到马上要停的旧服务上。
+    if case .success(let attachment) = outcome, attachment.outdatedRunningTerminals > 0,
+      !outdatedServerPromptAnswered, let local = client as? LocalManagedSessionClient
+    {
+      outdatedServerPromptAnswered = true
+      if await Self.confirmOutdatedServerRestart(attachment.outdatedRunningTerminals) {
+        outcome = await Self.detached {
+          ManagedServerAttachment(identity: try local.replaceServer(endpoint))
+        }
       }
-    }.value
+    }
     switch outcome {
-    case .success(let identity):
-      serverIdentity = identity
+    case .success(let attachment):
+      serverIdentity = attachment.identity
       connectionState = .online
       lastError = nil
-      return identity
+      return attachment.identity
     case .failure(let error):
       connectionState = .attention
       lastError = String(describing: error)
@@ -236,16 +263,25 @@ final class ManagedTerminalCoordinator {
     }
   }
 
-  /// 确保服务在运行并取回身份。本机服务额外核对登录会话，活过注销的旧服务会被替换；
-  /// 远端服务按原样附加（远端没有本机桌面会话的概念）。
+  /// 在后台线程执行阻塞的服务调用，把结果或错误带回调用方。
+  nonisolated private static func detached<Value: Sendable>(
+    _ body: @escaping @Sendable () throws -> Value
+  ) async -> Result<Value, any Error> {
+    await Task.detached(priority: .userInitiated) { Result { try body() } }.value
+  }
+
+  /// 确保服务在运行并取回身份。本机服务额外核对登录会话与构建号：活过注销的服务直接
+  /// 替换；升级前留下的旧服务没有终端在运行时直接替换，否则在结果里标出，由调用方问用户。
+  /// 远端服务按原样附加（远端没有本机桌面会话的概念，升级走远端安装事务）。
   nonisolated private static func establish(
     _ client: any ManagedSessionClient, _ endpoint: ManagedSessionEndpoint
-  ) throws -> SessionServerIdentity {
+  ) throws -> ManagedServerAttachment {
     if let local = client as? LocalManagedSessionClient {
-      return try local.ensureServerInLoginSession(endpoint)
+      let bundled = ManagedSessionServerBuild.bundled(binaryPath: endpoint.binaryPath, client: local)
+      return try local.ensureCurrentServer(endpoint, bundledBuild: bundled)
     }
     _ = try client.ensureServer(endpoint)
-    return try client.serverStatus(endpoint)
+    return ManagedServerAttachment(identity: try client.serverStatus(endpoint))
   }
 
   /// 异步创建受管终端。失败向上抛出，调用方必须显示明确错误。
@@ -296,6 +332,7 @@ final class ManagedTerminalCoordinator {
   ///
   /// 同步版本保留给必须在返回前完成的关闭路径（`stop()`/`terminate`）；
   /// 交互路径一律用 `connectAsync()`。
+  /// 关闭路径不弹窗：旧服务仍有终端在运行时这里照常附加，不替换。
   @discardableResult
   func connect() -> SessionServerIdentity? {
     guard let endpoint else {
@@ -304,7 +341,7 @@ final class ManagedTerminalCoordinator {
     }
     connectionState = .connecting
     do {
-      let identity = try Self.establish(client, endpoint)
+      let identity = try Self.establish(client, endpoint).identity
       serverIdentity = identity
       connectionState = .online
       lastError = nil

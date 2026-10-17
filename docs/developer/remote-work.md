@@ -75,7 +75,7 @@ Ghostty surface 启动本地 `aster-session bridge` 子进程；bridge 使用 ra
 
 服务端 VT 是屏幕、模式和历史真值。重连先发送完整渲染快照，再发送带序号增量；bridge 不向新 surface 重放任意截断的原始字节尾部。快照包括主/备用屏幕、光标、颜色、宽字符、超链接、输入模式及受支持图形状态。终端查询由服务端 VT 统一应答，避免本地 Ghostty 再次应答造成重复输入。P0 必须验证此边界。
 
-服务端负责应答的查询（`SessionRuntime/src/query_scan.zig`）在交给客户端前从增量里删掉：libghostty-vt 自行应答的 DA、DSR、DECRQM、XTVERSION、kitty 键盘查询，以及它不应答、由服务端补答的颜色查询 OSC 10/11/12 与配色查询 `CSI ? 996 n`。以前这些序列让整块退回全量快照；快照以 RIS 开头，客户端 Ghostty 复位时会按 mode 2031 报一次配色，Claude Code 收到后再发「OSC 11 + DA1」探测，形成每秒上百次的快照重绘（输入框闪烁）。颜色查询不能转给客户端回答：同一批探测里的 DA1 由服务端立即应答，客户端的颜色应答绕一圈后才到，程序把 DA1 当作「应答结束」，照样判定没有回应并退回深色主题。所以颜色由服务端按输出顺序应答（`session.zig` 的 `writeOutput` 在每个颜色查询结束处切开写入 VT，再把应答排进同一队列）。颜色来自本机 App 写在状态父目录的 `client-colors`（`ManagedSessionClientColors`，每行 `键=#rrggbb`），`GhosttyConfiguration.make` 每次生成配置时先写它（内容不变就跳过），保证切换主题后 Ghostty 发出 mode 2031 通知时文件已是新颜色；服务端每次应答前按修改时间重读（`client_colors.zig`）。远端机器读不到这个文件，颜色查询照旧不应答。本机服务不会随 App 升级自动替换，已在运行的旧服务要重启后才有这项行为。
+服务端负责应答的查询（`SessionRuntime/src/query_scan.zig`）在交给客户端前从增量里删掉：libghostty-vt 自行应答的 DA、DSR、DECRQM、XTVERSION、kitty 键盘查询，以及它不应答、由服务端补答的颜色查询 OSC 10/11/12 与配色查询 `CSI ? 996 n`。以前这些序列让整块退回全量快照；快照以 RIS 开头，客户端 Ghostty 复位时会按 mode 2031 报一次配色，Claude Code 收到后再发「OSC 11 + DA1」探测，形成每秒上百次的快照重绘（输入框闪烁）。颜色查询不能转给客户端回答：同一批探测里的 DA1 由服务端立即应答，客户端的颜色应答绕一圈后才到，程序把 DA1 当作「应答结束」，照样判定没有回应并退回深色主题。所以颜色由服务端按输出顺序应答（`session.zig` 的 `writeOutput` 在每个颜色查询结束处切开写入 VT，再把应答排进同一队列）。颜色来自本机 App 写在状态父目录的 `client-colors`（`ManagedSessionClientColors`，每行 `键=#rrggbb`），`GhosttyConfiguration.make` 每次生成配置时先写它（内容不变就跳过），保证切换主题后 Ghostty 发出 mode 2031 通知时文件已是新颜色；服务端每次应答前按修改时间重读（`client_colors.zig`）。远端机器读不到这个文件，颜色查询照旧不应答。已在运行的旧服务要按下文「升级后的旧服务」替换后才有这项行为。
 
 ```mermaid
 flowchart LR
@@ -110,7 +110,14 @@ flowchart LR
 
 旧工作区未含机器引用时解码为现有本地模式。P2 添加“托管到后台”显式迁移入口：只能迁移布局和创建新终端，不声称可以收养旧 PTY。旧进程保留到用户自行关闭；迁移失败回滚配置，不结束旧进程。本机全新终端默认是原生 PTY；只有设置「Shell → 会话恢复 → 本机后台保活」打开（或环境变量显式指定端点）时才自动托管，远端机器始终托管。升级用户保留原有终端直至迁移。
 
-本机后台服务会活过一次注销再登录，但它和它开出的 Shell 仍留在旧的 macOS 审计（登录）会话里：`open`、剪贴板等连不上当前桌面（例如 `claude /login` 打不开浏览器），之后新建的终端也一样。因此 `server.status` 在 macOS 上额外返回服务进程的 `loginSession`，App 每次连接本机服务时（`LocalManagedSessionClient.ensureServerInLoginSession`）与自身会话比较；不一致就停掉旧服务、等它退出后再起新服务，旧会话里的终端随之结束，按冷重启对账。任一侧拿不到会话 ID（旧版服务、调用失败）时不替换。这项核对只在本机 App 里做，不放进 `server start`：从 SSH 登进本机时审计会话本来就不同，放进去会误停桌面那边的服务。
+本机后台服务会活过一次注销再登录，但它和它开出的 Shell 仍留在旧的 macOS 审计（登录）会话里：`open`、剪贴板等连不上当前桌面（例如 `claude /login` 打不开浏览器），之后新建的终端也一样。因此 `server.status` 在 macOS 上额外返回服务进程的 `loginSession`，App 每次连接本机服务时（`LocalManagedSessionClient.ensureCurrentServer`）与自身会话比较；不一致就停掉旧服务、等它退出后再起新服务，旧会话里的终端随之结束，按冷重启对账。任一侧拿不到会话 ID（旧版服务、调用失败）时不替换。这项核对只在本机 App 里做，不放进 `server start`：从 SSH 登进本机时审计会话本来就不同，放进去会误停桌面那边的服务。
+
+本机服务同样会活过 App 升级，运行中的进程仍是旧二进制，新修复不生效。`scripts/build-session-runtime.sh` 把运行时源码（含未提交改动）与 VT 产物键的摘要作为构建号写进二进制（`-Dbuild-id`），`aster-session --version` 末尾多出 `build=<id>`，`server.status` 返回 `build` 字段。只看源码不看二进制：重新签名、只改 App 时构建号不变，不会无谓提示。App 连接时（同一个 `ensureCurrentServer`）用 `--version` 读自带二进制的构建号（`ManagedSessionServerBuild`，按文件大小与修改时间缓存），与服务报的比较：
+- 一致，或 App 侧读不到构建号（不在 git 工作区里的构建）：照常附加。
+- 不一致（加入构建号之前的服务不报构建号，也算不一致）且没有终端在运行：直接替换，用户无感。
+- 不一致且有终端在运行：不动服务，`ManagedServerAttachment.outdatedRunningTerminals` 带回运行中的终端数。协调器弹窗（`ManagedServerRestartPrompt`）说明重启会结束几个终端；选「现在重启」才替换，旧终端按冷重启对账，选「以后再说」本次运行不再问，下次启动再问。
+
+启动时每个恢复的 Pane 都会并发对账，`ManagedTerminalCoordinator.connectAsync` 因此只保留一次进行中的连接，其余调用等它的结果：提示只弹一次，用户回答前不会有 Pane 挂到马上要停的旧服务上，两次并发替换也不会互相停掉对方刚起的服务。关闭路径的同步 `connect()` 不弹窗，旧服务有终端在运行时照常附加。服务端已有实验性的实时交接（`server.handoff`，PTY 文件描述符经 SCM_RIGHTS 转给新服务），但 VT 状态不随之转移、App 侧显示桥也没有接上重连，暂不用于升级。
 
 ## 4. 生命周期和交互合同
 

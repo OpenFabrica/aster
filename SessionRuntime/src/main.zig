@@ -29,6 +29,7 @@ pub fn main() !void {
         }
         if (@import("build_options").with_vt and std.mem.eql(u8, arg, "server")) {
             const action = args.next() orelse return error.MissingServerAction;
+            @import("service_control.zig").build_id = @import("build_options").build_id;
             if (!std.mem.eql(u8, action, "serve") and !std.mem.eql(u8, action, "status") and !std.mem.eql(u8, action, "start") and !std.mem.eql(u8, action, "stop")) return error.UnsupportedServerAction;
             const parent_path = args.next() orelse return error.MissingStateParent;
             const name = args.next() orelse return error.MissingStateName;
@@ -214,7 +215,13 @@ pub fn main() !void {
             return;
         }
         if (std.mem.eql(u8, arg, "--version") and args.next() == null) {
-            try std.fs.File.stdout().writeAll("aster-session 0.1.0-dev protocol=1.0\n");
+            const build_id = @import("build_options").build_id;
+            if (build_id.len == 0) {
+                try std.fs.File.stdout().writeAll("aster-session 0.1.0-dev protocol=1.0\n");
+            } else {
+                var buffer: [256]u8 = undefined;
+                try std.fs.File.stdout().writeAll(try std.fmt.bufPrint(&buffer, "aster-session 0.1.0-dev protocol=1.0 build={s}\n", .{build_id}));
+            }
             return;
         }
     }

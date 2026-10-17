@@ -2234,3 +2234,7 @@
 "键盘交互" = "Tastatur-interaktiv";
 "默认设置" = "Standardeinstellungen";
 "默认设置…" = "Standardeinstellungen…";
+"后台会话服务是旧版本" = "Der Hintergrund-Sitzungsdienst ist veraltet";
+"Aster 已更新，但后台会话服务还在运行旧版本，新版本的修复不会生效。现在重启会结束 %@ 个正在运行的终端。选择「以后再说」，下次打开 Aster 时会再提醒。" = "Aster wurde aktualisiert, aber der Hintergrund-Sitzungsdienst läuft noch in der alten Version, daher greifen die neuen Korrekturen nicht. Ein Neustart jetzt beendet %@ laufende Terminals. Wenn Sie „Später“ wählen, erinnert Aster Sie beim nächsten Öffnen erneut.";
+"现在重启" = "Jetzt neu starten";
+"以后再说" = "Später";

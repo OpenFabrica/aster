@@ -31,10 +31,21 @@ if [[ "${ASTER_SESSION_RUNTIME_REBUILD_VT:-0}" == "1" || ! -f "$vt_prefix/lib/li
   (cd "$RUNTIME_DIR" && PATH="$(dirname "$ZIG"):$PATH" scripts/build-vt.sh native)
 fi
 
-echo "== aster-session: building native binary"
+# 构建号 = 运行时源码（含未提交改动）加 VT 产物键的摘要。App 启动时拿它和运行中的服务比较，
+# 不一样就是升级前留下的旧服务。只看源码、不看二进制：重新签名或只改 App 不会让它变化，
+# 也就不会无谓地提示重启。不在 git 工作区里时为空，App 不做比较。
+build_id="$(
+  cd "$RUNTIME_DIR" &&
+    { git ls-files -z -co --exclude-standard 2>/dev/null | LC_ALL=C sort -z |
+        xargs -0 /usr/bin/shasum -a 256 2>/dev/null || true; echo "$vt_key"; } |
+    /usr/bin/shasum -a 256 | /usr/bin/cut -c1-16
+)"
+git -C "$RUNTIME_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || build_id=""
+
+echo "== aster-session: building native binary (build ${build_id:-none})"
 stage="$RUNTIME_DIR/.build/service-native"
 rm -rf "$stage"
-(cd "$RUNTIME_DIR" && "$ZIG" build -Doptimize=ReleaseSafe -Dvt-prefix="$vt_prefix" --prefix "$stage")
+(cd "$RUNTIME_DIR" && "$ZIG" build -Doptimize=ReleaseSafe -Dvt-prefix="$vt_prefix" -Dbuild-id="$build_id" --prefix "$stage")
 [[ -f "$stage/bin/aster-session" ]] || { echo "error: aster-session not produced" >&2; exit 1; }
 "$stage/bin/aster-session" --version >/dev/null
 

@@ -2234,3 +2234,7 @@
 "键盘交互" = "Keyboard-Interactive";
 "默认设置" = "Defaults";
 "默认设置…" = "Defaults…";
+"后台会话服务是旧版本" = "The background session service is out of date";
+"Aster 已更新，但后台会话服务还在运行旧版本，新版本的修复不会生效。现在重启会结束 %@ 个正在运行的终端。选择「以后再说」，下次打开 Aster 时会再提醒。" = "Aster was updated, but the background session service is still running the old version, so the new fixes do not apply. Restarting it now ends %@ running terminals. If you choose “Later”, Aster reminds you the next time it opens.";
+"现在重启" = "Restart Now";
+"以后再说" = "Later";

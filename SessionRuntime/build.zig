@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
     const vt_prefix = b.option([]const u8, "vt-prefix", "Built pinned libghostty-vt prefix");
     const options = b.addOptions();
     options.addOption(bool, "with_vt", vt_prefix != null);
+    // 源码与 VT 产物的摘要；App 用它判断运行中的服务是不是旧二进制。
+    options.addOption([]const u8, "build_id", b.option([]const u8, "build-id", "Source digest reported as the service build") orelse "");
     exe.root_module.addOptions("build_options", options);
     if (vt_prefix) |prefix| {
         exe.root_module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ prefix, "include" }) });

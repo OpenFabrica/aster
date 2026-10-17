@@ -243,19 +243,23 @@ public struct SessionServerIdentity: Equatable, Sendable {
   public var version: String
   /// 服务进程所在的 macOS 登录（审计）会话 ID；旧版本服务与非 macOS 平台没有该字段。
   public var loginSession: UInt32?
+  /// 服务二进制的构建号（源码摘要），见 `ManagedSessionServerBuild`；旧版本服务没有该字段。
+  public var build: String?
 
   public init(
     reference: SessionServerReference,
     serverEpoch: String,
     capabilities: [String],
     version: String,
-    loginSession: UInt32? = nil
+    loginSession: UInt32? = nil,
+    build: String? = nil
   ) {
     self.reference = reference
     self.serverEpoch = serverEpoch
     self.capabilities = capabilities
     self.version = version
     self.loginSession = loginSession
+    self.build = build
   }
 }
 
@@ -281,7 +285,8 @@ public enum ManagedSessionReplyDecoder {
       serverEpoch: serverEpoch,
       capabilities: (result["capabilities"] as? [String]) ?? [],
       version: (result["version"] as? String) ?? "",
-      loginSession: (result["loginSession"] as? NSNumber)?.uint32Value
+      loginSession: (result["loginSession"] as? NSNumber)?.uint32Value,
+      build: result["build"] as? String
     )
   }
 
@@ -391,21 +396,38 @@ public struct LocalManagedSessionClient: ManagedSessionClient {
       try run(endpoint, ManagedSessionCommand.serverStop(endpoint)))
   }
 
-  /// 连接本机服务，并保证它和调用方处在同一个登录会话里。
+  /// 连接本机服务，并保证它属于当前登录会话、来自 App 自带的这份二进制。
   ///
   /// 后台服务会活过一次注销再登录，但它和它开出的 Shell 仍留在旧的审计会话里，
   /// `open`、剪贴板等都连不上当前桌面（例如 `claude /login` 打不开浏览器），新开的
   /// 终端也一样坏。此时只能停掉旧服务再起新服务，旧会话里的终端随之结束。
+  ///
+  /// 服务也会活过 App 升级，运行的仍是旧二进制。构建号不同且没有终端在运行时直接替换；
+  /// 有终端在运行时不动服务，把运行中的终端数放进结果，由调用方问用户。
   /// 只在本机 App 里调用：从 SSH 登进本机时审计会话本来就不同，不能拿来替换服务。
-  public func ensureServerInLoginSession(
+  ///
+  /// - Parameter bundledBuild: App 自带二进制的构建号；nil 表示未知，不比较构建号。
+  public func ensureCurrentServer(
     _ endpoint: ManagedSessionEndpoint,
-    current: UInt32? = LoginSession.current
-  ) throws -> SessionServerIdentity {
+    current: UInt32? = LoginSession.current,
+    bundledBuild: String?
+  ) throws -> ManagedServerAttachment {
     _ = try ensureServer(endpoint)
     let identity = try serverStatus(endpoint)
-    guard LoginSession.isStale(server: identity.loginSession, current: current) else {
-      return identity
+    if LoginSession.isStale(server: identity.loginSession, current: current) {
+      return ManagedServerAttachment(identity: try replaceServer(endpoint))
     }
+    guard ManagedSessionServerBuild.isOutdated(server: identity.build, bundled: bundledBuild) else {
+      return ManagedServerAttachment(identity: identity)
+    }
+    let running = try listTerminals(endpoint).filter { $0.state == .running }.count
+    guard running > 0 else { return ManagedServerAttachment(identity: try replaceServer(endpoint)) }
+    return ManagedServerAttachment(identity: identity, outdatedRunningTerminals: running)
+  }
+
+  /// 停掉当前服务，再用 `endpoint.binaryPath` 起一个新服务，返回新服务身份。
+  /// 旧服务里的终端全部结束；调用方负责事先确认这是可以接受的。
+  public func replaceServer(_ endpoint: ManagedSessionEndpoint) throws -> SessionServerIdentity {
     try stopServer(endpoint)
     // 停止只是排空请求；等旧进程放掉 socket 再启动，否则 start 会报 already_running
     // 并把仍在退出的旧服务交回来。

@@ -23,6 +23,10 @@ pub const RegistryHandler = struct {
 };
 
 pub const version = "0.1.0-dev";
+/// Source digest baked in by build-session-runtime.sh (`-Dbuild-id`); empty for
+/// ad-hoc builds. Set once by main before any service starts. The app compares
+/// it with its bundled binary to find a service left running from an older build.
+pub var build_id: []const u8 = "";
 pub const capabilities = [_][]const u8{ "health_check", "server_lifecycle", "server_replace", "live_handoff" };
 pub const Status = struct {
     version: []const u8 = version,
@@ -33,6 +37,8 @@ pub const Status = struct {
     /// compares it with its own session to spot a service that outlived a
     /// logout: its children can no longer reach the GUI (open, pasteboard).
     loginSession: ?u32 = null,
+    /// See `build_id`; null when the binary carries none.
+    build: ?[]const u8 = null,
 };
 
 /// Returns the audit session ID on macOS, or null when unavailable. Declared
@@ -126,7 +132,7 @@ pub const Control = struct {
                 if (request.params.object.count() != 0)
                     return try failure(allocator, request, "invalid_request", "This operation accepts no parameters.", .never);
                 if (request.operation == .@"server.status")
-                    return try self.success(allocator, request, Status{ .capabilities = self.advertised_capabilities, .loginSession = loginSession() });
+                    return try self.success(allocator, request, Status{ .capabilities = self.advertised_capabilities, .loginSession = loginSession(), .build = if (build_id.len == 0) null else build_id });
                 return try self.success(allocator, request, .{ .alive = true });
             },
             // P8.3: server.replace (cold) dispatched to domain handler.
@@ -240,8 +246,23 @@ test "status and health replies satisfy the shared response envelope" {
             try std.testing.expectEqualStrings(version, response.value.result.object.get("version").?.string);
             if (builtin.os.tag == .macos)
                 try std.testing.expectEqual(@as(i64, loginSession().?), response.value.result.object.get("loginSession").?.integer);
+            try std.testing.expect(response.value.result.object.get("build") == null);
         } else try std.testing.expect(response.value.result.object.get("alive").?.bool);
     }
+}
+
+test "status reports the baked build id so the app can spot an older service" {
+    const allocator = std.testing.allocator;
+    build_id = "3f9a";
+    defer build_id = "";
+    var control = testControl();
+    const bytes = try testRequest(allocator, &control, .@"server.status", "{}");
+    defer allocator.free(bytes);
+    const output = try control.respond(allocator, bytes);
+    defer allocator.free(output);
+    const response = try std.json.parseFromSlice(replies.Response(std.json.Value), allocator, output, .{});
+    defer response.deinit();
+    try std.testing.expectEqualStrings("3f9a", response.value.result.object.get("build").?.string);
 }
 
 test "stale target and unimplemented operations return bounded explicit failures" {
