@@ -11,6 +11,11 @@ pub const Filter = struct {
     osc_code: u32 = 0,
     osc_header: bool = false,
     osc_allowed: bool = false,
+    /// 仅缓存 OSC 9;4 的短进度载荷；OSC 9 的通知等其它命令不能随之放行。
+    osc_progress: bool = false,
+    progress_payload: [16]u8 = undefined,
+    progress_len: usize = 0,
+    progress_overflow: bool = false,
     utf8_uncertain: bool = false,
 
     pub fn consume(self: *Filter, bytes: []const u8) bool {
@@ -110,7 +115,7 @@ pub const Filter = struct {
             },
             .osc => {
                 if (byte == 7) {
-                    if (!self.osc_allowed) allowed = false;
+                    if (!self.oscIsAllowed()) allowed = false;
                     self.state = .ground;
                 } else if (byte == 0x1b) self.state = .osc_escape else if (self.osc_header) {
                     if (byte == ';') {
@@ -119,17 +124,23 @@ pub const Filter = struct {
                         // 状态、没有宿主副作用；不放行的话受管 Pane 收不到命令边界与 hook 信号。
                         self.osc_allowed = self.osc_code == 0 or self.osc_code == 1 or self.osc_code == 2 or self.osc_code == 7 or self.osc_code == 8 or
                             self.osc_code == 133 or self.osc_code == 6974;
+                        self.osc_progress = self.osc_code == 9;
                     } else if (byte >= '0' and byte <= '9' and self.osc_code < 10000) {
                         self.osc_code = self.osc_code * 10 + byte - '0';
                     } else {
                         self.osc_header = false;
                         self.osc_allowed = false;
                     }
+                } else if (self.osc_progress) {
+                    if (self.progress_len < self.progress_payload.len) {
+                        self.progress_payload[self.progress_len] = byte;
+                        self.progress_len += 1;
+                    } else self.progress_overflow = true;
                 }
             },
             .osc_escape => {
                 if (byte == '\\') {
-                    if (!self.osc_allowed) allowed = false;
+                    if (!self.oscIsAllowed()) allowed = false;
                     self.state = .ground;
                 } else {
                     allowed = false;
@@ -148,6 +159,11 @@ pub const Filter = struct {
         return allowed;
     }
 
+    fn oscIsAllowed(self: *const Filter) bool {
+        return self.osc_allowed or (self.osc_progress and !self.progress_overflow and
+            safeProgress(self.progress_payload[0..self.progress_len]));
+    }
+
     fn escape(self: *Filter, byte: u8) bool {
         self.state = .ground;
         switch (byte) {
@@ -161,6 +177,9 @@ pub const Filter = struct {
                 self.osc_code = 0;
                 self.osc_header = true;
                 self.osc_allowed = false;
+                self.osc_progress = false;
+                self.progress_len = 0;
+                self.progress_overflow = false;
             },
             'P', '_', '^', 'X' => {
                 self.state = .string;
@@ -180,6 +199,47 @@ pub const Filter = struct {
         return true;
     }
 };
+
+/// 标准 OSC 9;4;state[;percent] 只更新进度，没有宿主副作用。状态 5 是客户端完成通知扩展，
+/// 不在此放行；其它 OSC 9 子命令、附加字段和超限百分比仍沿用快照降级。
+fn safeProgress(payload: []const u8) bool {
+    if (payload.len < 3 or !std.mem.eql(u8, payload[0..2], "4;") or payload[2] < '0' or payload[2] > '4') return false;
+    if (payload.len == 3) return true;
+    if (payload[3] != ';' or payload.len > 7) return false;
+    const percent = payload[4..];
+    if (percent.len == 0) return true;
+    for (percent) |byte| if (byte < '0' or byte > '9') return false;
+    return (std.fmt.parseInt(u8, percent, 10) catch return false) <= 100;
+}
+
+test "standard progress preserves cwd deltas without allowing OSC 9 side effects" {
+    for ([_][]const u8{ "4;0", "4;1;50", "4;2;0", "4;3", "4;4;100", "4;1;" }) |payload| {
+        var buffer: [128]u8 = undefined;
+        const bytes = try std.fmt.bufPrint(&buffer, "\x1b]7;file://localhost/tmp/mailez\x07\x1b]9;{s}\x07", .{payload});
+        var filter: Filter = .{};
+        try std.testing.expect(filter.consume(bytes));
+        // 与 Session.finishDelta 一致：未完成尾巴从 ground 重放，任意 PTY 切点均不退快照。
+        for (0..bytes.len) |cut| {
+            var first: Filter = .{};
+            const prefix = first.consumeSplit(bytes[0..cut]);
+            if (prefix.complete != 0) try std.testing.expect(prefix.allowed);
+            var second: Filter = .{};
+            const rest = second.consumeSplit(bytes[prefix.complete..]);
+            try std.testing.expect(rest.allowed and rest.complete == bytes.len - prefix.complete);
+        }
+        var st_buffer: [128]u8 = undefined;
+        const st = try std.fmt.bufPrint(&st_buffer, "\x1b]9;{s}\x1b\\", .{payload});
+        var st_filter: Filter = .{};
+        try std.testing.expect(st_filter.consume(st));
+    }
+    for ([_][]const u8{ "notification", "9;open", "4;5;0", "4;1;101", "4;1;-1", "4;1;50;extra", "4;1;0000000000000000000000" }) |payload| {
+        var buffer: [128]u8 = undefined;
+        const bytes = try std.fmt.bufPrint(&buffer, "\x1b]9;{s}\x1b\\", .{payload});
+        var filter: Filter = .{};
+        try std.testing.expect(!filter.consume(bytes));
+        try std.testing.expect(filter.consume("next"));
+    }
+}
 
 fn safeCSI(parameters: []const u8, final: u8) bool {
     // Window operations, device reports and queries are never mirrored. The
