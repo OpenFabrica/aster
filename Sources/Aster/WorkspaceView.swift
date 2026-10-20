@@ -3054,13 +3054,7 @@ final class WorkspaceViewController: NSViewController {
 
   /// 工作区顶部居中的短提示条。
   private func makeToast(_ message: String) -> NSView {
-    let label = makeLabel(message, size: 11, weight: .medium)
-    label.wantsLayer = true
-    label.layer?.backgroundColor = AsterTheme.panel.withAlphaComponent(0.95).cgColor
-    label.layer?.cornerRadius = 8
-    label.layer?.borderWidth = 1
-    label.layer?.borderColor = AsterTheme.hairline.cgColor
-    label.alignment = .center
+    let label = WorkspaceNoticeView(message: message)
     label.translatesAutoresizingMaskIntoConstraints = false
     label.widthAnchor.constraint(greaterThanOrEqualToConstant: InterfaceScale.length(180)).isActive = true
     label.heightAnchor.constraint(equalToConstant: InterfaceScale.length(34)).isActive = true

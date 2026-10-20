@@ -85,6 +85,8 @@ flowchart LR
 
 `GhosttyConfiguration` 把 Aster 的 block / hollow block / bar / underline 与 blink 设置投影到 Ghostty。窗口与 Pane 焦点通过 `ghostty_surface_set_focus` 同步，光标绘制和 DECSCUSR 优先级由 Ghostty 内核处理。旧 `AsterTerminalView` 的自绘 caret、Agent blink 抑制和插值逻辑只在迁移回归测试中保留。
 
+终端补全面板与工作区状态提示在自身 `effectiveAppearance` 上下文内解析 backing layer 的动态颜色，并在挂入窗口及明暗切换时重算。状态提示由 `WorkspaceNoticeView` 保持文字与底色配对，不依赖外层布局构建的临时绘制上下文。
+
 ## 失败语义
 
 - 文件后缀、文件类型或大小不合法：拒绝导入，不改变当前主题。

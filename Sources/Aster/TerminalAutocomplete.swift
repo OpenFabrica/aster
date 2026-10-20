@@ -1205,6 +1205,8 @@ final class TerminalAutocompleteOverlayView: NSView {
   let descriptionSidebar = AutocompleteDescriptionSidebarView()
   /// 候选超过一屏时的细滚动条。
   let scrollThumb = NSView()
+  /// 保留动态色，挂入窗口或切换外观时按浮层自己的上下文重新解析 CALayer 色值。
+  private var colors: (foreground: NSColor, background: NSColor, accent: NSColor)?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -1235,6 +1237,30 @@ final class TerminalAutocompleteOverlayView: NSView {
 
   required init?(coder: NSCoder) { nil }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    applyLayerColors()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    applyLayerColors()
+  }
+
+  private func applyLayerColors() {
+    guard let colors else { return }
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      panelContainer.layer?.backgroundColor = colors.background.withAlphaComponent(0.97).cgColor
+      panelContainer.layer?.borderColor = colors.foreground.withAlphaComponent(0.18).cgColor
+      panelContainer.layer?.shadowColor = colors.foreground.withAlphaComponent(0.35).cgColor
+      scrollThumb.layer?.backgroundColor = colors.foreground.withAlphaComponent(0.28).cgColor
+      descriptionSidebar.applyLayerColors(foreground: colors.foreground)
+      for row in panel.arrangedSubviews.compactMap({ $0 as? AutocompleteCandidateRow }) {
+        row.applyLayerColors(background: colors.background, accent: colors.accent)
+      }
+    }
+  }
+
   override func hitTest(_ point: NSPoint) -> NSView? {
     // 判容器而不是列表列：否则点在侧栏上会穿透到终端并起选区。
     guard !panelContainer.isHidden, panelContainer.frame.contains(point) else { return nil }
@@ -1258,6 +1284,7 @@ final class TerminalAutocompleteOverlayView: NSView {
     background: NSColor,
     accent: NSColor
   ) -> Bool {
+    colors = (foreground, background, accent)
     ghostLabel.font = font
     ghostLabel.textColor = foreground.withAlphaComponent(0.42)
     let ghostText = showInline ? (result.ghostText ?? "") : ""
@@ -1362,12 +1389,9 @@ final class TerminalAutocompleteOverlayView: NSView {
       panel.addArrangedSubview(row)
     }
 
-    panelContainer.layer?.backgroundColor = background.withAlphaComponent(0.97).cgColor
-    panelContainer.layer?.borderColor = foreground.withAlphaComponent(0.18).cgColor
     // 浮层浮在终端文字之上，只靠 1px 描边分不出层次；投影让它明确「盖住」而不是
     // 「混进」终端内容。阴影色跟随前景色，深浅主题下都不会变成灰雾。
     panelContainer.shadow = NSShadow()
-    panelContainer.layer?.shadowColor = foreground.withAlphaComponent(0.35).cgColor
     panelContainer.layer?.shadowOpacity = 1
     panelContainer.layer?.shadowRadius = 12
     panelContainer.layer?.shadowOffset = CGSize(width: 0, height: -2)
@@ -1405,13 +1429,13 @@ final class TerminalAutocompleteOverlayView: NSView {
       let travel = panelHeight - thumbHeight
       let progress = CGFloat(first) / CGFloat(total - rows)
       scrollThumb.isHidden = false
-      scrollThumb.layer?.backgroundColor = foreground.withAlphaComponent(0.28).cgColor
       scrollThumb.frame = NSRect(
         x: listWidth - 5, y: travel * (1 - progress), width: 3, height: thumbHeight)
     } else {
       scrollThumb.isHidden = true
     }
     panelContainer.isHidden = false
+    applyLayerColors()
     return inlineFits
   }
 
@@ -1479,10 +1503,14 @@ final class AutocompleteDescriptionSidebarView: NSView {
     bodyLabel.textColor = foreground.withAlphaComponent(0.62)
     // 底色由前景色派生：固定灰在浅色主题里会发脏，跟随前景则永远只是「比列表列
     // 略深/略浅一点」。
-    layer?.backgroundColor = foreground.withAlphaComponent(0.045).cgColor
-    separator.layer?.backgroundColor = foreground.withAlphaComponent(0.12).cgColor
+    applyLayerColors(foreground: foreground)
     needsLayout = true
     layoutSubtreeIfNeeded()
+  }
+
+  func applyLayerColors(foreground: NSColor) {
+    layer?.backgroundColor = foreground.withAlphaComponent(0.045).cgColor
+    separator.layer?.backgroundColor = foreground.withAlphaComponent(0.12).cgColor
   }
 
   /// 手算布局：标题单行贴顶，描述正文占满其下方剩余高度。
@@ -1534,16 +1562,12 @@ final class AutocompleteCandidateRow: NSButton {
     // 反而看不清选中的是哪条命令。这里改用 accent 的低透明度淡染 + 一根前导竖条：
     // 淡染由 accent 与终端底色混合而来，深浅主题下都只是「染了一层」而不是换掉底色；
     // 竖条在任意底色上都给出确定性的定位提示。
-    layer?.backgroundColor = selected
-      ? accent.withAlphaComponent(0.15).cgColor
-      : background.withAlphaComponent(0.01).cgColor
     target = self
     self.action = #selector(activate)
 
     if selected {
       let bar = NSView()
       bar.wantsLayer = true
-      bar.layer?.backgroundColor = accent.cgColor
       bar.layer?.cornerRadius = 1.25
       bar.translatesAutoresizingMaskIntoConstraints = false
       addSubview(bar)
@@ -1555,6 +1579,7 @@ final class AutocompleteCandidateRow: NSButton {
       ])
       selectionBar = bar
     }
+    applyLayerColors(background: background, accent: accent)
 
     let icon = NSImageView()
     icon.image = Self.icon(for: candidate.kind)
@@ -1617,6 +1642,13 @@ final class AutocompleteCandidateRow: NSButton {
   required init?(coder: NSCoder) { nil }
 
   @objc private func activate() { actionClosure() }
+
+  func applyLayerColors(background: NSColor, accent: NSColor) {
+    layer?.backgroundColor = selectionBar != nil
+      ? accent.withAlphaComponent(0.15).cgColor
+      : background.withAlphaComponent(0.01).cgColor
+    selectionBar?.layer?.backgroundColor = accent.cgColor
+  }
 
   /// 单行在不截断时需要的宽度，供面板计算自适应宽度。
   /// `includingDescription` 为 false 时算的是「只有图标 + 命令名」的宽度，用于
