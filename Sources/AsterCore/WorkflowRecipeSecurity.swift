@@ -326,7 +326,7 @@ private enum WorkflowShellHandoff {
     else { return true }
 
     let normalized = words.map { word in
-      URL(fileURLWithPath: word).lastPathComponent.lowercased()
+      ShellCommandTokenizer.basename(word).lowercased()
     }
     for (index, word) in normalized.enumerated() {
       if ["ssh", "mosh", "su", "telnet", "screen"].contains(word) { return true }

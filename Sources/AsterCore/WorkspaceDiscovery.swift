@@ -373,7 +373,7 @@ public struct SSHCommandInvocation: Equatable, Sendable {
     guard command.utf8.count <= 16 * 1_024 else { return nil }
     let tokens = ShellCommandTokenizer.tokenize(command).tokens
     guard let executable = tokens.first,
-      URL(fileURLWithPath: executable).lastPathComponent == "ssh"
+      ShellCommandTokenizer.basename(executable) == "ssh"
     else { return nil }
 
     // OpenSSH 单字母选项中，下列参数会消费紧随其后的一个 argv。附着写法（如 -p22）

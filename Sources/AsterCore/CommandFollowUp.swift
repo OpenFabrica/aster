@@ -43,7 +43,7 @@ public enum CommandFollowUpParser {
     let tokens = ShellCommandTokenizer.tokenize(command).tokens
     guard tokens.count >= 2, !tokens.contains(where: shellOperators.contains) else { return nil }
     // `/usr/bin/git` 与 `git` 同样处理；`sudo`/`env` 等前缀命令不猜。
-    let executable = URL(fileURLWithPath: tokens[0]).lastPathComponent
+    let executable = ShellCommandTokenizer.basename(tokens[0])
     let arguments = Array(tokens.dropFirst())
     switch executable {
     case "git": return gitFollowUp(arguments)

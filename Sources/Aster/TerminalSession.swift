@@ -2591,9 +2591,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     if nativeSSH != nil || remoteManagedMachineLabel != nil { return true }
     if !currentWorkingDirectoryIsLocal { return true }
     guard let command = submittedCommand else { return false }
-    let executable = ShellCommandTokenizer.tokenize(command).tokens.first.map {
-      URL(fileURLWithPath: $0).lastPathComponent
-    }
+    let executable = ShellCommandTokenizer.tokenize(command).tokens.first.map(ShellCommandTokenizer.basename)
     return ["ssh", "mosh", "sudo", "su"].contains(executable)
   }
 

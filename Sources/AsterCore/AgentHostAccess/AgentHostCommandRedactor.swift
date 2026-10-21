@@ -63,7 +63,7 @@ public enum AgentHostCommandRedactor {
     apply(#"((?i:authorization):\s*)(?:[A-Za-z]+\s+)?[^\s'"]+"#, template: "$1" + mask)
     // mysql -pSECRET
     if ShellCommandTokenizer.tokenize(command).tokens.contains(where: {
-      inlinePasswordExecutables.contains(URL(fileURLWithPath: $0).lastPathComponent)
+      inlinePasswordExecutables.contains(ShellCommandTokenizer.basename($0))
     }) {
       apply(#"(^|\s)-p(?!\*\*\*)[^\s;&|]+"#, template: "$1-p" + mask)
     }

@@ -39,6 +39,8 @@ struct AgentHostCommandRedactorTests {
       "systemctl status nginx --no-pager",
       "KEYBOARD=us setup",
       "git log --oneline -5",
+      // ASTER-A：含 `http://…${VAR}…` 的命令曾让正式包在脱敏时闪退。
+      #"curl -s -w "%{http_code}\n" http://127.0.0.1:${XR_PORT:-8080}/healthz; echo ok"#,
     ])
   func keepsPublicValues(command: String) {
     let result = AgentHostCommandRedactor.redact(command)

@@ -1090,7 +1090,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       dot.heightAnchor.constraint(equalToConstant: 6),
     ])
     let name = makeLabel(
-      URL(fileURLWithPath: process.command).lastPathComponent, size: 11)
+      ShellCommandTokenizer.basename(process.command), size: 11)
     var detail = "\(process.processIdentifier)"
     if let elapsed = process.elapsedTime { detail += " · \(elapsed)" }
     let meta = makeLabel(detail, size: 10, color: AsterTheme.secondaryInk, monospaced: true)
