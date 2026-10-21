@@ -3,6 +3,21 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.24</title>
+            <pubDate>Wed, 21 Oct 2026 12:35:35 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>43</sparkle:version>
+            <sparkle:shortVersionString>0.6.24</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 修复
+
+- **agent 运行带网址的命令时 Aster 不再闪退**：Claude Code、Codex 等 agent 在 SSH 主机上执行命令时，如果命令里有 `http://127.0.0.1:${PORT}/healthz` 这种带变量的网址，Aster 会在记录审计日志时直接退出。在终端里自己敲以这类网址开头的命令，也可能触发同样的退出。现在这些命令都能正常运行和记录。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.24/Aster-0.6.24.dmg" length="42392773" type="application/octet-stream" sparkle:edSignature="GHXvGNa827fxkKCtCji3n1GdcuDqNaxdCPK46Pw5k8E06oKCZF7Xnu7N6udxju4O1bEPRNpy5zWXaJXXVr4oBw=="/>
+        </item>
+        <item>
             <title>0.6.23</title>
             <pubDate>Tue, 20 Oct 2026 08:51:41 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -82,23 +97,6 @@
 - **原生 SSH 更安全**：原生 SSH Pane 一开始就按敏感会话处理；删除原私钥文件前会核对磁盘上仍是同一把密钥；保险库的钥匙串读写不再占用主线程；发行版忽略调试用的环境变量覆盖。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.20/Aster-0.6.20.dmg" length="51342795" type="application/octet-stream" sparkle:edSignature="/wHp98rHl134emV6Q7R3zjdQG92L7r4ZmoFnvboeQPv4weQKaRbbkJQiR3WqA41i1g+9gZb8vma68SJqbt9NDg=="/>
-        </item>
-        <item>
-            <title>0.6.19</title>
-            <pubDate>Sun, 11 Oct 2026 14:44:33 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>38</sparkle:version>
-            <sparkle:shortVersionString>0.6.19</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 修复
-
-- **关闭后重新打开不再因管道读取竞争退出**：修复启动恢复和工作区检查时，后台子进程输出读取与退出收尾同时访问管道引发的崩溃。快速退出的命令、超时和取消仍保留有界处理，孙进程持有输出管道时也不会无限等待。
-- **Files 打开的源码正常显示**：修复文件 Pane 已加载文本但 Source 区域空白的问题。源码显示区域随 Pane 尺寸调整，恢复工作区、切换 Source/Preview 和缩放窗口后仍能正常显示。
-- **长行可以横向滚动**：关闭 `Soft Wrap` 后，源码文本视图会按长行扩展，不再把显示宽度固定在 Pane 内。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.19/Aster-0.6.19.dmg" length="49859370" type="application/octet-stream" sparkle:edSignature="CATm47T3ZdsliDUdXZmEPIV3UtJC0Dm1Xfu/LNqsfU3vWdrabHF0/4J853Mg+faqMrLL/VylqeP2/g2Pt6yABg=="/>
         </item>
     </channel>
 </rss>
