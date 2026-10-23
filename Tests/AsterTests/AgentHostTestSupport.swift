@@ -110,12 +110,18 @@ final class FakeTerminalPresenter: AgentHostTerminalPresenting {
   private(set) var shown = 0
   private(set) var attentions = 0
   private(set) var closed = false
+  /// 当作这个终端浮窗的窗口；测试用它模拟「浮窗是 key」。
+  weak var ownedWindow: NSWindow?
+  /// 被关闭快捷键收起的次数。
+  private(set) var hiddenByShortcut = 0
   func show(attention: Bool) {
     shown += 1
     if attention { attentions += 1 }
   }
   func refresh() {}
   func close() { closed = true }
+  func ownsKeyWindow(_ keyWindow: NSWindow) -> Bool { keyWindow === ownedWindow }
+  func hideForCloseShortcut() { hiddenByShortcut += 1 }
 }
 
 /// 记录型批准：按预设回答，或挂起直到测试调用 `answer`。
@@ -229,6 +235,14 @@ struct AgentHostFixture {
     ["host": .string(host), "command": .string(command), "agent": ["session": .string(session), "client": "test"],
      "timeout_ms": .number(Double(timeoutMs))]
   }
+}
+
+/// 每次新建的独立 UserDefaults，偏好测试不碰真实设置。
+func makeAgentHostTestDefaults() -> UserDefaults {
+  let suite = "AgentHostTests.\(UUID().uuidString)"
+  let defaults = UserDefaults(suiteName: suite)!
+  defaults.removePersistentDomain(forName: suite)
+  return defaults
 }
 
 /// 轮询等条件成立（最多 `timeout`）。测试并行时主线程可能很忙，固定时长的睡眠不可靠。

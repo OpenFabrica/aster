@@ -146,6 +146,25 @@ final class AgentHostTerminalRegistry {
     entries[terminalID]?.presenter.show(attention: false)
   }
 
+  // MARK: - 键盘归属
+
+  /// 浮窗就是 `keyWindow` 的那个终端的呈现器。
+  private func presenter(owningKeyWindow keyWindow: NSWindow) -> (any AgentHostTerminalPresenting)? {
+    order.lazy.compactMap { self.entries[$0]?.presenter }.first { $0.ownsKeyWindow(keyWindow) }
+  }
+
+  /// 某个 agent 终端的浮窗是不是 key 窗口；菜单据此禁用只作用于背后工作区的命令。
+  func ownsKeyWindow(_ keyWindow: NSWindow) -> Bool {
+    presenter(owningKeyWindow: keyWindow) != nil
+  }
+
+  /// 关闭快捷键落在 agent 浮窗上：收起它并返回 true；否则返回 false，由工作区照常处理。
+  func handleCloseShortcut(in keyWindow: NSWindow) -> Bool {
+    guard let presenter = presenter(owningKeyWindow: keyWindow) else { return false }
+    presenter.hideForCloseShortcut()
+    return true
+  }
+
   // MARK: - 空闲关闭
 
   private func startIdleTimer() {

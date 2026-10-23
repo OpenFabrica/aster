@@ -181,7 +181,10 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   滚轮照常穿透给终端回看输出。等输入时也不撤：状态行提示「点「接管」后在终端里回答」，用户接管后回答 sudo 口令，
   答完点「交还 agent」。不自动交还：接管与交还都只由用户手动操作。终端结束时遮罩淡出，焦点还给终端。
   「接管」就是暂停（`isPaused`）：遮罩撤掉、面板成为 key、焦点交给终端；「交还 agent」恢复，遮罩随即重新盖上。
-  标题栏关闭只隐藏，「窗口 → Agent 终端」找回。
+  标题栏关闭和 ⌘W / ⌥⌘W 都只隐藏，「窗口 → Agent 终端」找回：`AsterApp.closePaneOrTab` / `closePane`
+  在 Quick Terminal、画中画小窗之后先问 `AgentHostRuntime.handleCloseShortcut()`，绝不落到背后工作区的活动 Pane。
+  浮窗是 key 时，只作用于活动 Pane 的菜单命令（分屏类、清屏、查找、只读、Live View、Prompt Queue、复制路径、
+  在访达中显示）置灰，同 Quick Terminal。
   用户随时可以点「接管」接手；暂停后新命令一律 `agent_paused`，已在跑的不受影响。
   布局用 frame 而不是约束，与 Quick Terminal 一样避免对长期复用的终端宿主混用约束。
 

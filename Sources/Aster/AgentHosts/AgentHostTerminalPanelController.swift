@@ -13,6 +13,10 @@ protocol AgentHostTerminalPresenting: AnyObject {
   func refresh()
   /// 关闭窗口（终端已结束或被关闭）。
   func close()
+  /// `keyWindow` 是否就是这个终端的浮窗。是的话 ⌘W 等工作区命令不能落到背后的工作区。
+  func ownsKeyWindow(_ keyWindow: NSWindow) -> Bool
+  /// 关闭快捷键（⌘W / ⌥⌘W）：收起浮窗，同标题栏关闭按钮；终端照常运行。
+  func hideForCloseShortcut()
 }
 
 /// 生产实现：每个终端一个 NSPanel。
@@ -60,6 +64,8 @@ final class AgentHostTerminalPanelController: NSObject, AgentHostTerminalPresent
 
   /// 窗口标题，例如「Claude Code → prod-db (deploy@10.0.0.5:22)」。
   var title: String { panel.title }
+  /// 浮窗本身；测试用它检查显示与隐藏。
+  var window: NSWindow { panel }
 
   func show(attention: Bool) {
     panel.orderFrontRegardless()
@@ -96,6 +102,11 @@ final class AgentHostTerminalPanelController: NSObject, AgentHostTerminalPresent
     panel.orderOut(nil)
     panel.close()
   }
+
+  func ownsKeyWindow(_ keyWindow: NSWindow) -> Bool { keyWindow === panel }
+
+  /// 走标题栏关闭按钮的同一条路径：终端没结束时只隐藏，见 `windowShouldClose`。
+  func hideForCloseShortcut() { panel.performClose(nil) }
 
   /// 标题栏关闭只隐藏面板，终端照常运行；「窗口 → Agent 终端」可以找回。
   func windowShouldClose(_ sender: NSWindow) -> Bool {

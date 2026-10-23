@@ -161,6 +161,21 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
     service.registry.closeAll()
   }
 
+  // MARK: - 键盘归属
+
+  /// 键盘焦点在 agent 终端里（它的浮窗是 key 窗口）。此时只作用于工作区活动 Pane 的菜单命令要禁用，
+  /// 否则会落到背后的工作区，同 Quick Terminal。
+  var ownsKeyboard: Bool {
+    guard let keyWindow = NSApp.keyWindow else { return false }
+    return service.registry.ownsKeyWindow(keyWindow)
+  }
+
+  /// ⌘W / ⌥⌘W 落在 agent 终端上时由它处理（收起浮窗），返回 true；工作区就不能再关 Pane。
+  func handleCloseShortcut() -> Bool {
+    guard let keyWindow = NSApp.keyWindow else { return false }
+    return service.registry.handleCloseShortcut(in: keyWindow)
+  }
+
   // MARK: - 窗口菜单
 
   /// 「窗口 → Agent 终端」子菜单项；内容在打开时按当前终端生成。
