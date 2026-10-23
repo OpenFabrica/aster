@@ -102,8 +102,10 @@ final class AgentHostTerminalPanelController: NSObject, NSWindowDelegate {
     holder.addSubview(button)
     dockAccessory.view = holder
     dockAccessory.layoutAttribute = .trailing
-    dockAccessory.isHidden = true
+    // 先挂进标题栏再隐藏：挂之前设的 isHidden 会被 AppKit 忽略，按钮照样显示，
+    // 而 setDockAvailable(false) 看到 isHidden 已是 true 就不再处理，结果没有 Pane 也露出一个点了没反应的按钮。
     panel.addTitlebarAccessoryViewController(dockAccessory)
+    dockAccessory.isHidden = true
   }
 
   @objc private func dockClicked() { onDock?() }
