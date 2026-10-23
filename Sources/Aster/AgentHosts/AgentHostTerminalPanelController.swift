@@ -93,6 +93,7 @@ final class AgentHostTerminalPanelController: NSObject, AgentHostTerminalPresent
     controlBar.pauseButton.title = terminal.isPaused ? L("交还 agent") : L("接管")
     // 遮罩只在用户接管后撤掉：空闲、等输入时也挡住输入，防止按键和 agent 的命令交错。
     content?.setAgentControlling(terminal.blocksUserInput)
+    content?.setAgentWorking(terminal.state == .connecting || terminal.state == .busy)
     // 更新控件布局；胶囊尺寸只跟随窗口可用宽度，不随状态文案伸缩。
     content?.needsLayout = true
   }
@@ -204,6 +205,11 @@ final class AgentHostTerminalContentView: NSView {
       controlOverlay.setActive(false)
       if overlayHadFocus { focusTerminal() }
     }
+  }
+
+  /// agent 正在干活（连接中、命令运行中）时遮罩光晕呼吸，其余时候静止。
+  func setAgentWorking(_ working: Bool) {
+    controlOverlay.isBreathing = working
   }
 
   /// 终端占满窗口并留出边框宽度；胶囊浮在终端上，默认底部居中，拖过之后保持用户的位置，

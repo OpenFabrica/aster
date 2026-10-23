@@ -109,6 +109,29 @@ struct AgentHostTerminalControlViewsTests {
     #expect(!overlay.acceptsFirstResponder)
   }
 
+  @Test("光晕只在 agent 干活时呼吸：空闲时遮罩照样盖着但静止，撤掉遮罩后不留动画")
+  func overlayBreathesOnlyWhileWorking() {
+    let overlay = AgentHostTerminalControlOverlay(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    // 系统开了「减少动态效果」时永远不呼吸。
+    let animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    overlay.setActive(true)
+    #expect(!overlay.hasBreathingAnimation)
+    overlay.isBreathing = true
+    #expect(overlay.hasBreathingAnimation == animates)
+    overlay.isBreathing = false
+    #expect(!overlay.hasBreathingAnimation)
+    #expect(overlay.isActive)
+
+    overlay.isBreathing = true
+    #expect(overlay.hasBreathingAnimation == animates)
+    // 撤掉遮罩立即停呼吸；仍在干活也不在未生效的遮罩上跑动画，重新盖上才继续。
+    overlay.setActive(false)
+    #expect(!overlay.hasBreathingAnimation)
+    overlay.setActive(true)
+    #expect(overlay.hasBreathingAnimation == animates)
+  }
+
   @Test("胶囊上的按钮照常接收点击，文字和空白处归胶囊自己用来拖动")
   func controlBarKeepsButtonsClickableAndDragsElsewhere() throws {
     let bar = AgentHostTerminalControlBar(frame: NSRect(x: 0, y: 0, width: 600, height: AgentHostTerminalControlBar.height))
