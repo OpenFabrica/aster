@@ -536,10 +536,11 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
         allowSensitiveSessions: controls.resolvedIPCAllowSensitiveSessions,
         shell: self?.preferences.configuration.shell ?? AsterConfiguration().shell)
     }
-    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID。
-    dispatcher.agentHostService = AgentHostRuntime.install(preferences: preferences) {
-      [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector)
-    }.service
+    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID；
+    // 主机终端默认停靠在这个 Pane 底部，定位器经控制桥查 Pane 是否还在、切过去。
+    dispatcher.agentHostService = AgentHostRuntime.install(
+      preferences: preferences, paneLocator: ControlBridgeAgentHostPaneLocator(bridge: bridge)
+    ) { [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector) }.service
     let server = AsterControlServer(
       socketPath: socketPath,
       onDisconnect: { [weak bridge] connection in
@@ -760,6 +761,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // 也不能让在途的事件刷新回调再去动这个已经拆掉的窗口。
     (record.controller.window?.contentViewController as? WorkspaceViewController)?
       .loadedRemoteWorkspaces?.stopAllEventSubscriptions()
+    // 停在这个窗口 Pane 里的 agent 主机终端转成浮窗：模型随窗口释放，控制桥不会为它的 Pane 发
+    // pane.closed。要在 commitTermination 之前做，那之后模型的 Pane 就查不到了。
+    if !isTerminating { AgentHostRuntime.shared?.workspaceWillClose(model: record.model) }
     // 应用整体退出已在两阶段事务中统一提交；用户单独关窗则在可取消确认成功后，
     // 到这里才执行不可逆的快照和 PTY 终止。
     if !isTerminating { record.model.commitTermination() }
@@ -1219,6 +1223,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   @objc private func closePaneOrTab(_ sender: Any?) {
     if quickTerminalController.ownsKeyWindow { quickTerminalController.hide() }
     else if floatingPictureInPictureOwnsKeyWindow { closePictureInPicture(nil) }
+    else if agentHostTerminalHandlesClose() { return }
     else { activeWorkspaceModel.closeSelectedPaneOrTab() }
   }
   @objc private func splitRight(_ sender: Any?) { activeWorkspaceModel.splitSelectedTab(.right) }
@@ -1227,11 +1232,16 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   @objc private func splitUp(_ sender: Any?) { activeWorkspaceModel.splitSelectedTab(.up) }
   @objc private func closePane(_ sender: Any?) {
     if floatingPictureInPictureOwnsKeyWindow { closePictureInPicture(nil) }
+    else if agentHostTerminalHandlesClose() { return }
     else { activeWorkspaceModel.closeActivePane() }
   }
   /// 键盘焦点在可交互画中画小窗里时，关闭类快捷键收回小窗，不能误关工作区的活动 Pane。
   private var floatingPictureInPictureOwnsKeyWindow: Bool {
     (pictureInPictureController as? PaneFloatingTerminalController)?.ownsKeyWindow == true
+  }
+  /// 键盘焦点在 agent 主机终端里时，关闭类快捷键只收起它（返回 true），同样不能误关工作区的活动 Pane。
+  private func agentHostTerminalHandlesClose() -> Bool {
+    AgentHostRuntime.shared?.handleCloseShortcut() == true
   }
   /// 「分离」与「结束受管终端」是两个独立入口：分离保留后台任务，结束才终止进程。
   /// 「文件 ▸ 添加机器…」：转交当前工作区窗口的机器分区动作，两条入口共用同一事务。
@@ -2217,6 +2227,12 @@ extension AsterAppDelegate: NSMenuItemValidation {
     #selector(focusPaneLeft(_:)), #selector(focusPaneRight(_:)),
     #selector(focusNextPane(_:)), #selector(focusPreviousPane(_:)),
   ]
+  /// 只作用于工作区活动 Pane 的命令；键盘在 Quick Terminal 或 agent 主机终端里时禁用，免得落到背后的工作区。
+  private static let activePaneSelectors: Set<Selector> = [
+    #selector(toggleActivePaneReadOnly(_:)), #selector(clearActivePaneScreen(_:)),
+    #selector(copyActivePanePath(_:)), #selector(revealActivePaneInFinder(_:)),
+    #selector(togglePromptQueue(_:)), #selector(toggleActivePaneLiveView(_:)),
+  ]
 
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     guard let action = menuItem.action else { return true }
@@ -2232,11 +2248,16 @@ extension AsterAppDelegate: NSMenuItemValidation {
     }
     // 独立终端没有工作区分屏；不能把其菜单操作落到背后的普通工作区。
     if quickTerminalController.ownsKeyWindow,
-      Self.splitOnlySelectors.contains(action)
-        || [#selector(toggleActivePaneReadOnly(_:)), #selector(clearActivePaneScreen(_:)),
-          #selector(copyActivePanePath(_:)), #selector(revealActivePaneInFinder(_:)),
-          #selector(togglePromptQueue(_:)), #selector(toggleActivePaneLiveView(_:))].contains(action)
+      Self.splitOnlySelectors.contains(action) || Self.activePaneSelectors.contains(action)
     { return false }
+    // agent 主机终端拥有键盘时同理，查找也只会作用于背后的活动 Pane。
+    // ⌥⌘W 保持可用：closePane 只收起 agent 终端，和 ⌘W 一致。
+    if AgentHostRuntime.shared?.ownsKeyboard == true {
+      if action == #selector(closePane(_:)) { return true }
+      if Self.splitOnlySelectors.contains(action) || Self.activePaneSelectors.contains(action)
+        || action == #selector(find(_:))
+      { return false }
+    }
     if action == #selector(checkForUpdates(_:)) {
       // Sparkle 在一次更新会话进行中时 canCheckForUpdates 为假；保持可点会让 Sparkle
       // 直接忽略这次调用，看起来像卡住。开发构建（updater 为 nil）保持可点，

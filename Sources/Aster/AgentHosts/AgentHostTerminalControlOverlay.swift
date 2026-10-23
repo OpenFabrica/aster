@@ -1,4 +1,4 @@
-// agent 正在控制终端时盖在终端上的遮罩：参照 ego lite，四周一圈蓝色光晕和点阵、缓慢呼吸，
+// agent 正在控制终端时盖在终端上的遮罩：参照 ego lite，四周一圈蓝色光晕和点阵（agent 干活时缓慢呼吸），
 // 中间保持透明，用户照样看得清输出。遮罩生效时挡住点击与键盘，防止用户输入和 agent 的命令
 // 交错；滚轮照常穿透，方便回看输出。用户点控制胶囊里的「接管」后遮罩撤掉。
 import AppKit
@@ -26,6 +26,13 @@ final class AgentHostTerminalControlOverlay: NSView {
   private let hintLabel = NSTextField(labelWithString: L("Agent 正在控制，点「接管」后可以输入"))
   /// 遮罩是否生效（拦截输入）。淡出动画期间已为 false。
   private(set) var isActive = false
+  /// agent 是否正在干活（连接中、命令运行中）。只有这时光晕才呼吸；空闲、等输入时遮罩一直盖着，
+  /// 光晕保持静止，不暗示「正在跑」，也不让动画在空闲终端上一直耗电。
+  var isBreathing = false {
+    didSet { if isBreathing != oldValue { updateBreathing() } }
+  }
+  /// 呼吸动画是否在跑；测试用。
+  var hasBreathingAnimation: Bool { glowView.layer?.animation(forKey: "breathing") != nil }
   /// 提示的自动隐藏任务；再次触发时重新计时。
   private var hintHideTask: Task<Void, Never>?
 
@@ -82,15 +89,13 @@ final class AgentHostTerminalControlOverlay: NSView {
     if isActive { addCursorRect(bounds, cursor: .arrow) }
   }
 
-  /// 显示或隐藏遮罩，带淡入淡出；显示时开始呼吸动画。
+  /// 显示或隐藏遮罩，带淡入淡出；显示时若 agent 正在干活就开始呼吸动画，撤掉时立即停下。
   func setActive(_ active: Bool) {
     guard active != isActive else { return }
     isActive = active
     window?.invalidateCursorRects(for: self)
-    if active {
-      isHidden = false
-      startBreathing()
-    }
+    if active { isHidden = false }
+    updateBreathing()
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.25
       animator().alphaValue = active ? 1 : 0
@@ -101,7 +106,7 @@ final class AgentHostTerminalControlOverlay: NSView {
         self.isHidden = true
         self.hintHideTask?.cancel()
         self.hintView.alphaValue = 0
-        self.glowView.layer?.removeAnimation(forKey: "breathing")
+        self.glowView.layer?.removeAnimation(forKey: "settle")
       }
     }
   }
@@ -169,6 +174,23 @@ final class AgentHostTerminalControlOverlay: NSView {
       edge.startPoint = directions[index].0
       edge.endPoint = directions[index].1
     }
+  }
+
+  /// 遮罩生效且 agent 在干活时呼吸，否则停下。
+  private func updateBreathing() {
+    if isActive && isBreathing { startBreathing() } else { stopBreathing() }
+  }
+
+  /// 停止呼吸：从当前亮度平滑回到常亮，避免命令一结束光晕跳一下。
+  private func stopBreathing() {
+    guard let layer = glowView.layer, layer.animation(forKey: "breathing") != nil else { return }
+    let current = layer.presentation()?.opacity ?? 1
+    layer.removeAnimation(forKey: "breathing")
+    let settle = CABasicAnimation(keyPath: "opacity")
+    settle.fromValue = current
+    settle.toValue = 1
+    settle.duration = 0.3
+    layer.add(settle, forKey: "settle")
   }
 
   /// 不透明度在 0.75 与 1 之间缓慢往返，避免呼吸低点过淡；系统开了「减少动态效果」时保持静止。

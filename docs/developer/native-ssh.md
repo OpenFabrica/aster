@@ -214,7 +214,7 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 连接前确认 PTY 前台进程是 `aster-ssh`。引擎回退到 OpenSSH 时，`TerminalSession` 会变成「本地 Shell 里预填 ssh」，
   这时 agent 命令会落到本机；因此前台不是 `aster-ssh` 就立刻结束该终端并报 `host_not_ready`，绝不执行。
 - 认证、口令与主机密钥提示走 App 自己的认证表单（`SSHAuthCoordinator`），与普通原生 SSH 标签一致；
-  agent 永远拿不到口令或私钥，sudo 口令也只能由用户在浮动终端里输入。
+  agent 永远拿不到口令或私钥，sudo 口令也只能由用户接管 agent 主机终端后自己输入。
 
 ## 验证
 

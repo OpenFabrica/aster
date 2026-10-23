@@ -1,5 +1,6 @@
-// agent 主机终端的控制遮罩与控制胶囊：遮罩生效时挡住点击和键盘焦点，胶囊上按钮以外的位置用来拖动。
+// agent 主机终端的控制遮罩与控制胶囊：遮罩规则、遮罩生效时挡住点击和键盘焦点，胶囊上按钮以外的位置用来拖动。
 import AppKit
+import AsterCore
 import Testing
 
 @testable import Aster
@@ -32,7 +33,7 @@ struct AgentHostTerminalControlViewsTests {
 
       for (title, status, tone, pauseTitle) in [
         ("claude-code → 算力服务器", "正在运行：" + String(repeating: "systemctl status milo-tts && ", count: 20), AgentHostTerminalControlBar.Tone.active, "接管"),
-        (String(repeating: "production-host-", count: 20), "等待你的输入：请直接在下面的终端里回答", .attention, "接管"),
+        (String(repeating: "production-host-", count: 20), "等待你的输入：点「接管」后在终端里回答", .attention, "接管"),
         ("claude-code → 算力服务器", "空闲 · agent 已暂停", .paused, "交还 agent"),
         ("claude-code → 算力服务器", "空闲", .idle, "接管"),
       ] {
@@ -66,6 +67,29 @@ struct AgentHostTerminalControlViewsTests {
     }
   }
 
+  @Test("遮罩只在用户接管或终端结束时撤掉：连接、空闲、运行、等输入都挡输入")
+  func overlayBlocksInputUntilTakeover() {
+    for state in [HostTerminalState.connecting, .ready, .busy, .needsInput] {
+      #expect(AgentHostTerminal.blocksUserInput(state: state, isPaused: false), "\(state) 未接管时必须挡输入")
+      #expect(!AgentHostTerminal.blocksUserInput(state: state, isPaused: true), "\(state) 接管后必须放开")
+    }
+    #expect(!AgentHostTerminal.blocksUserInput(state: .ended, isPaused: false))
+    #expect(!AgentHostTerminal.blocksUserInput(state: .ended, isPaused: true))
+
+    let surface = FakeShellSurface()
+    let terminal = AgentHostTerminal(
+      terminalID: "t-overlay", hostID: UUID(), hostName: "prod-db", target: "deploy@prod-db:22", sessionKey: "s1",
+      caller: AgentHostResolvedCaller(key: "s1", session: "s1"), surface: surface)
+    #expect(terminal.blocksUserInput)
+    terminal.isPaused = true
+    #expect(!terminal.blocksUserInput)
+    terminal.isPaused = false
+    #expect(terminal.blocksUserInput)
+    terminal.close()
+    #expect(terminal.state == .ended)
+    #expect(!terminal.blocksUserInput)
+  }
+
   @Test("遮罩未生效时点击穿透给终端，生效后接住点击和键盘焦点，撤掉后再放行")
   func overlayBlocksInputOnlyWhileActive() {
     let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
@@ -83,6 +107,29 @@ struct AgentHostTerminalControlViewsTests {
     overlay.setActive(false)
     #expect(overlay.hitTest(center) == nil)
     #expect(!overlay.acceptsFirstResponder)
+  }
+
+  @Test("光晕只在 agent 干活时呼吸：空闲时遮罩照样盖着但静止，撤掉遮罩后不留动画")
+  func overlayBreathesOnlyWhileWorking() {
+    let overlay = AgentHostTerminalControlOverlay(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    // 系统开了「减少动态效果」时永远不呼吸。
+    let animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    overlay.setActive(true)
+    #expect(!overlay.hasBreathingAnimation)
+    overlay.isBreathing = true
+    #expect(overlay.hasBreathingAnimation == animates)
+    overlay.isBreathing = false
+    #expect(!overlay.hasBreathingAnimation)
+    #expect(overlay.isActive)
+
+    overlay.isBreathing = true
+    #expect(overlay.hasBreathingAnimation == animates)
+    // 撤掉遮罩立即停呼吸；仍在干活也不在未生效的遮罩上跑动画，重新盖上才继续。
+    overlay.setActive(false)
+    #expect(!overlay.hasBreathingAnimation)
+    overlay.setActive(true)
+    #expect(overlay.hasBreathingAnimation == animates)
   }
 
   @Test("胶囊上的按钮照常接收点击，文字和空白处归胶囊自己用来拖动")

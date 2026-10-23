@@ -116,16 +116,20 @@ struct AgentHostControlCommandsTests {
     #expect(await fixture.call("host.exec", AgentHostFixture.exec("true")).error?.code == .agentPaused)
   }
 
-  @Test("调用 Pane 里的 agent 会并入有效会话键")
+  @Test("调用 Pane 里的 agent 会并入有效会话键；Pane UUID 只带给呈现，不进会话键")
   func callerPaneExtendsKey() {
     let fixture = AgentHostFixture()
     let plain = fixture.service.resolveCaller(AgentHostCaller(session: "pane:w1:p1", client: "cli", callerPane: "w1:p1"))
     #expect(plain.key == "pane:w1:p1")
+    #expect(plain.paneUUID == nil)
     var dependencies = fixture.service.dependencies
-    dependencies.resolvePane = { _ in ("w1:p1", .claudeCode, "abc") }
+    let paneUUID = UUID()
+    dependencies.resolvePane = { _ in ("w1:p1", paneUUID, .claudeCode, "abc") }
     let service = AgentHostService(dependencies: dependencies)
     let extended = service.resolveCaller(AgentHostCaller(session: "pane:w1:p1", callerPane: "w1:p1"))
     #expect(extended.key == "pane:w1:p1#\(AgentProvider.claudeCode.rawValue):abc")
     #expect(extended.displayName == AgentProvider.claudeCode.displayName)
+    #expect(extended.paneUUID == paneUUID)
+    #expect(!extended.key.contains(paneUUID.uuidString))
   }
 }

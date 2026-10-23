@@ -57,11 +57,13 @@ extension AsterControlDispatcher {
     return params
   }
 
-  /// 把 `$ASTER_PANE_ID` 解析成 Pane 显示 ID 与其中 agent 的 provider / session ID。
+  /// 把 `$ASTER_PANE_ID` 解析成 Pane 显示 ID、Pane UUID 与其中 agent 的 provider / session ID。
   /// 解析不了（Pane 已关、不是 agent）就返回只有 Pane 的结果或 nil，不报错：身份扩展是尽力而为。
-  func resolveAgentHostCallerPane(_ selector: String) -> (pane: String, provider: AgentProvider?, agentSessionID: String?)? {
+  func resolveAgentHostCallerPane(_ selector: String) -> AgentHostCallerPane? {
     guard let record = try? bridge.resolve(selector: selector) else { return nil }
     let info = bridge.agentInfo(record)
-    return (record.paneID.description, info.flatMap { AgentProvider(rawValue: $0.agent) }, info?.sessionID)
+    return (
+      record.paneID.description, record.runtime.id, info.flatMap { AgentProvider(rawValue: $0.agent) }, info?.sessionID
+    )
   }
 }

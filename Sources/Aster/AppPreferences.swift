@@ -289,6 +289,16 @@ final class AppPreferences: ObservableObject {
     set { defaults.set(newValue, forKey: Keys.agentHostAccessEnabled) }
   }
 
+  /// agent 主机终端停靠在调用 Pane 底部（默认）还是放进独立浮窗；只在用户点「弹出 / 停靠」时写，
+  /// 未知值按停靠处理。不发 objectWillChange：没有界面绑定它，写入不该触发工作区整树刷新。
+  var agentHostTerminalPresentation: AgentHostTerminalPresentation {
+    get {
+      defaults.string(forKey: Keys.agentHostTerminalPresentation)
+        .flatMap(AgentHostTerminalPresentation.init(rawValue:)) ?? .docked
+    }
+    set { defaults.set(newValue.rawValue, forKey: Keys.agentHostTerminalPresentation) }
+  }
+
   /// 用于提炼的 provider rawValue（如 `claudeCode`）。
   var memoryExtractionProvider: String? {
     get { defaults.string(forKey: Keys.memoryExtractionProvider) }
@@ -1129,5 +1139,6 @@ final class AppPreferences: ObservableObject {
     static let memoryExtractionAcknowledged = "aster.memory.extraction-acknowledged.v1"
     static let updateChannel = "aster.update.channel.v1"
     static let agentHostAccessEnabled = "aster.agent-hosts.enabled.v1"
+    static let agentHostTerminalPresentation = "aster.agent-hosts.terminal-presentation.v1"
   }
 }

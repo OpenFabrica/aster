@@ -183,7 +183,7 @@ public enum AsterControlErrorCode: String, Codable, CaseIterable, Sendable {
   case approvalPending = "approval_pending"
   /// 用户拒绝了本会话对该主机的访问（10 分钟冷却）。
   case approvalDenied = "approval_denied"
-  /// 用户在浮动终端里暂停了 agent。
+  /// 用户接管了 agent 主机终端（暂停 agent）。
   case agentPaused = "agent_paused"
   /// SSH 终端在期限内没有就绪（还在连接、认证或握手失败）。
   case hostNotReady = "host_not_ready"

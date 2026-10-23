@@ -4,6 +4,9 @@
 import AsterCore
 import Foundation
 
+/// `$ASTER_PANE_ID` 的解析结果：Pane 显示 ID、Pane UUID（停靠用），以及其中 agent 的 provider / session ID。
+typealias AgentHostCallerPane = (pane: String, paneUUID: UUID, provider: AgentProvider?, agentSessionID: String?)
+
 /// agent 远程执行服务。
 @MainActor
 final class AgentHostService {
@@ -19,8 +22,8 @@ final class AgentHostService {
     var now: () -> Date = Date.init
     /// 批准等待上限：Codex 的工具调用默认 60 秒超时，留出余量。
     var approvalTimeout: Duration = .seconds(50)
-    /// 把 `$ASTER_PANE_ID` 解析成 Pane 显示 ID 与其中 agent 的 provider / session ID。
-    var resolvePane: @MainActor (String) -> (pane: String, provider: AgentProvider?, agentSessionID: String?)? = { _ in nil }
+    /// 把 `$ASTER_PANE_ID` 解析成 Pane（显示 ID 与 UUID）与其中 agent 的 provider / session ID。
+    var resolvePane: @MainActor (String) -> AgentHostCallerPane? = { _ in nil }
   }
 
   /// 生产实例；App 启动时装配，控制协议从这里取。
@@ -436,6 +439,7 @@ final class AgentHostService {
     var resolved = AgentHostResolvedCaller(key: caller.session, session: caller.session, client: caller.client)
     if let selector = caller.callerPane, let pane = dependencies.resolvePane(selector) {
       resolved.pane = pane.pane
+      resolved.paneUUID = pane.paneUUID
       resolved.provider = pane.provider
       resolved.agentSessionID = pane.agentSessionID
       if let provider = pane.provider {

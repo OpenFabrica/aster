@@ -38,6 +38,8 @@ final class AgentHostTerminal {
   private(set) var state: HostTerminalState = .connecting { didSet { if state != oldValue { onChange?() } } }
   /// 用户在面板里暂停了 agent：新命令一律 `agent_paused`，已在跑的不受影响。
   var isPaused = false { didSet { if isPaused != oldValue { onChange?() } } }
+  /// 遮罩此刻是否该挡住用户输入，规则见 `blocksUserInput(state:isPaused:)`。
+  var blocksUserInput: Bool { Self.blocksUserInput(state: state, isPaused: isPaused) }
   private(set) var lastActivity: Date
   /// 连接阶段的致命问题（非原生引擎、fish、探针无回应）；有值时等待方拿到 `host_not_ready`。
   private(set) var connectionError: String?
@@ -222,6 +224,13 @@ final class AgentHostTerminal {
     }
     state = .ended
     onEnded?()
+  }
+
+  /// 遮罩规则：只有用户手动接管（暂停 agent）才放开输入。连接、空闲、运行、等输入都挡着，
+  /// 免得遮罩随每条命令闪一次、空闲时按键混进 agent 的终端；等输入也要先接管再回答。
+  /// 已结束的终端不挡：进程已经不在，「接管」按钮也已禁用，盖着只会提示一个点不了的按钮。
+  static func blocksUserInput(state: HostTerminalState, isPaused: Bool) -> Bool {
+    !isPaused && state != .ended
   }
 
   /// fish 解析期就拒绝 `$?`，错误行以 `fish:` 开头。

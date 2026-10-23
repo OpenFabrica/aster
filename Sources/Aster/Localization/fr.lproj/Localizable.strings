@@ -2106,7 +2106,7 @@
 "关闭终端" = "Fermer le terminal";
 "参数无效" = "Paramètres non valides";
 "这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ demandes identiques attendent pour cette commande ; « Autoriser une fois » n’en laisse passer qu’une.";
-"命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "La commande s’exécute dans un terminal flottant. Vous pouvez à tout moment prendre la main, l’interrompre ou mettre l’agent en pause.";
+"命令会在你看得见的终端里执行，你可以随时接管或中断。" = "La commande s’exécute dans un terminal que vous voyez. Vous pouvez à tout moment prendre la main ou l’interrompre.";
 "已把 Aster 主机访问注册到 %@。" = "L’accès aux hôtes d’Aster a été enregistré auprès de %@.";
 "已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Enregistré auprès de %@ avec %@. Cette commande pointe vers un autre Aster, qui doit prendre en charge aster mcp ; sinon, réinstallez la commande aster.";
 "安装 aster 命令失败。" = "Impossible d’installer la commande aster.";
@@ -2124,7 +2124,7 @@
 "没有找到 %@ 命令，已复制手动配置片段。" = "La commande %@ est introuvable. L’extrait de configuration manuelle a été copié.";
 "理由：%@" = "Motif : %@";
 "空闲 · agent 已暂停" = "Inactif · agent en pause";
-"等待你的输入：请直接在下面的终端里回答" = "En attente de votre saisie : répondez directement dans le terminal ci-dessous";
+"等待你的输入：点「接管」后在终端里回答" = "En attente de votre saisie : cliquez sur Prendre la main, puis répondez dans le terminal";
 "终端已结束" = "Terminal terminé";
 "这条授权已不存在" = "Cette autorisation n’existe plus";
 "退出 Aster？" = "Quitter Aster ?";
@@ -2239,3 +2239,8 @@
 "Aster 已更新，但后台会话服务还在运行旧版本，新版本的修复不会生效。现在重启会结束 %@ 个正在运行的终端。选择「以后再说」，下次打开 Aster 时会再提醒。" = "Aster a été mis à jour, mais le service de sessions en arrière-plan exécute encore l’ancienne version : les nouveaux correctifs ne s’appliquent pas. Le redémarrer maintenant met fin à %@ terminaux en cours d’exécution. Si vous choisissez « Plus tard », Aster vous le rappellera à sa prochaine ouverture.";
 "现在重启" = "Redémarrer maintenant";
 "以后再说" = "Plus tard";
+"弹出为独立窗口" = "Ouvrir dans une fenêtre séparée";
+"停靠到 Pane" = "Ancrer au panneau";
+"收起" = "Réduire";
+"展开" = "Développer";
+"Agent 主机终端" = "Terminal d’hôte de l’agent";

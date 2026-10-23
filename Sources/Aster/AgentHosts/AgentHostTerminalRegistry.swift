@@ -1,5 +1,6 @@
 // agent 主机终端的注册表：按（有效会话键，主机）复用终端，执行数量上限，
-// 空闲 30 分钟自动关闭，随 App 退出，主机被删除时清理。终端不进任何工作区标签。
+// 空闲 30 分钟自动关闭，随 App 退出，主机被删除时清理。终端不进任何工作区标签
+// （停靠在 Pane 底部也只是借位显示，不是 Pane 的一部分）。
 import AppKit
 import AsterCore
 
@@ -141,9 +142,33 @@ final class AgentHostTerminalRegistry {
     for terminal in terminals { close(terminal) }
   }
 
-  /// 把隐藏的面板找回来（窗口菜单）。
+  /// 把终端找回来（窗口菜单）：浮窗置前；停靠时展开停靠区并切到那个 Pane。
   func reveal(_ terminalID: String) {
-    entries[terminalID]?.presenter.show(attention: false)
+    entries[terminalID]?.presenter.reveal()
+  }
+
+  /// 停在已关闭 Pane 里的终端转成浮窗（`isClosed` 判定 Pane 是否已关）。
+  func handlePanesClosed(where isClosed: (UUID) -> Bool) {
+    for id in order { entries[id]?.presenter.handlePanesClosed(where: isClosed) }
+  }
+
+  // MARK: - 键盘归属
+
+  /// 浮窗就是 `keyWindow` 的那个终端的呈现器。
+  private func presenter(owningKeyWindow keyWindow: NSWindow) -> (any AgentHostTerminalPresenting)? {
+    order.lazy.compactMap { self.entries[$0]?.presenter }.first { $0.ownsKeyWindow(keyWindow) }
+  }
+
+  /// 某个 agent 终端的浮窗是不是 key 窗口；菜单据此禁用只作用于背后工作区的命令。
+  func ownsKeyWindow(_ keyWindow: NSWindow) -> Bool {
+    presenter(owningKeyWindow: keyWindow) != nil
+  }
+
+  /// 关闭快捷键落在 agent 浮窗上：收起它并返回 true；否则返回 false，由工作区照常处理。
+  func handleCloseShortcut(in keyWindow: NSWindow) -> Bool {
+    guard let presenter = presenter(owningKeyWindow: keyWindow) else { return false }
+    presenter.hideForCloseShortcut()
+    return true
   }
 
   // MARK: - 空闲关闭

@@ -2106,7 +2106,7 @@
 "关闭终端" = "Terminal schließen";
 "参数无效" = "Ungültige Parameter";
 "这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ identische Anfragen warten auf diesen Befehl; „Einmal erlauben“ lässt nur eine davon ausführen.";
-"命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "Der Befehl wird in einem schwebenden Terminal ausgeführt. Sie können jederzeit übernehmen, abbrechen oder den Agent pausieren.";
+"命令会在你看得见的终端里执行，你可以随时接管或中断。" = "Der Befehl läuft in einem Terminal, das Sie sehen können. Sie können jederzeit übernehmen oder ihn abbrechen.";
 "已把 Aster 主机访问注册到 %@。" = "Der Aster-Host-Zugriff wurde bei %@ registriert.";
 "已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Bei %@ mit %@ registriert. Dieser Befehl zeigt auf ein anderes Aster, das aster mcp unterstützen muss; andernfalls installiere den Befehl aster neu.";
 "安装 aster 命令失败。" = "Der Befehl aster konnte nicht installiert werden.";
@@ -2124,7 +2124,7 @@
 "没有找到 %@ 命令，已复制手动配置片段。" = "Der Befehl %@ wurde nicht gefunden. Das Snippet für die manuelle Konfiguration wurde kopiert.";
 "理由：%@" = "Grund: %@";
 "空闲 · agent 已暂停" = "Inaktiv · Agent pausiert";
-"等待你的输入：请直接在下面的终端里回答" = "Wartet auf Ihre Eingabe: Antworten Sie direkt im Terminal darunter";
+"等待你的输入：点「接管」后在终端里回答" = "Wartet auf Ihre Eingabe: Klicken Sie auf „Übernehmen“ und antworten Sie dann im Terminal";
 "终端已结束" = "Terminal beendet";
 "这条授权已不存在" = "Diese Freigabe existiert nicht mehr";
 "退出 Aster？" = "Aster beenden?";
@@ -2239,3 +2239,8 @@
 "Aster 已更新，但后台会话服务还在运行旧版本，新版本的修复不会生效。现在重启会结束 %@ 个正在运行的终端。选择「以后再说」，下次打开 Aster 时会再提醒。" = "Aster wurde aktualisiert, aber der Hintergrund-Sitzungsdienst läuft noch in der alten Version, daher greifen die neuen Korrekturen nicht. Ein Neustart jetzt beendet %@ laufende Terminals. Wenn Sie „Später“ wählen, erinnert Aster Sie beim nächsten Öffnen erneut.";
 "现在重启" = "Jetzt neu starten";
 "以后再说" = "Später";
+"弹出为独立窗口" = "In eigenem Fenster öffnen";
+"停靠到 Pane" = "Am Bereich andocken";
+"收起" = "Einklappen";
+"展开" = "Ausklappen";
+"Agent 主机终端" = "Agent-Host-Terminal";

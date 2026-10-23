@@ -2106,7 +2106,7 @@
 "关闭终端" = "Close Terminal";
 "参数无效" = "Invalid parameters";
 "这条命令有 %@ 个相同的请求在等待；「允许一次」只放行其中一个。" = "%@ identical requests are waiting for this command; Allow Once lets only one of them run.";
-"命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。" = "The command runs in a floating terminal. You can take over, interrupt, or pause the agent at any time.";
+"命令会在你看得见的终端里执行，你可以随时接管或中断。" = "The command runs in a terminal you can watch. You can take over or interrupt it at any time.";
 "已把 Aster 主机访问注册到 %@。" = "Aster host access was registered with %@.";
 "已注册到 %@，命令为 %@。它目前指向另一个 Aster；该版本需支持 aster mcp，否则请重新安装 aster 命令。" = "Registered with %@ using %@. That command currently points to another Aster, which must support aster mcp; otherwise reinstall the aster command.";
 "安装 aster 命令失败。" = "Could not install the aster command.";
@@ -2124,7 +2124,7 @@
 "没有找到 %@ 命令，已复制手动配置片段。" = "The %@ command was not found. The manual configuration snippet was copied.";
 "理由：%@" = "Reason: %@";
 "空闲 · agent 已暂停" = "Idle · agent paused";
-"等待你的输入：请直接在下面的终端里回答" = "Waiting for your input: answer directly in the terminal below";
+"等待你的输入：点「接管」后在终端里回答" = "Waiting for your input: click Take Over, then answer in the terminal";
 "终端已结束" = "Terminal ended";
 "这条授权已不存在" = "This grant no longer exists";
 "退出 Aster？" = "Quit Aster?";
@@ -2239,3 +2239,8 @@
 "Aster 已更新，但后台会话服务还在运行旧版本，新版本的修复不会生效。现在重启会结束 %@ 个正在运行的终端。选择「以后再说」，下次打开 Aster 时会再提醒。" = "Aster was updated, but the background session service is still running the old version, so the new fixes do not apply. Restarting it now ends %@ running terminals. If you choose “Later”, Aster reminds you the next time it opens.";
 "现在重启" = "Restart Now";
 "以后再说" = "Later";
+"弹出为独立窗口" = "Open in Separate Window";
+"停靠到 Pane" = "Dock to Pane";
+"收起" = "Collapse";
+"展开" = "Expand";
+"Agent 主机终端" = "Agent Host Terminal";

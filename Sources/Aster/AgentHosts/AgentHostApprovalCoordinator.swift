@@ -14,6 +14,8 @@ struct AgentHostResolvedCaller: Hashable, Sendable {
   var pane: String?
   var provider: AgentProvider?
   var agentSessionID: String?
+  /// 调用方 Pane 的 UUID：终端默认停靠在这个 Pane 底部。只用于呈现，不进会话键、不进审计。
+  var paneUUID: UUID?
 
   /// 面板与标题里的 agent 名：provider 显示名，其次客户端名。
   var displayName: String {

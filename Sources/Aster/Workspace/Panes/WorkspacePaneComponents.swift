@@ -455,11 +455,25 @@ final class ActivePaneHostView: NSView {
   private var externalDropZone: ExternalPaneDropZone?
   private weak var contentView: NSView?
   private var contentTopConstraint: NSLayoutConstraint?
-  /// 底部槽：`bottomAccessory`（Prompt Queue，带内边距）。内容底边跟随它，
-  /// 整条约束链每次整体重建。
+  /// 底部槽：`bottomAccessory`（Prompt Queue，带内边距），其下是 `agentHostDock`
+  /// （agent 主机终端停靠区，贴边）。内容底边跟随它们，整条约束链每次整体重建。
   private var bottomAccessory: NSView?
   private var bottomAccessoryInset: CGFloat = 8
+  private var agentHostDock: NSView?
+  private var agentHostDockHeight: DockHeight?
   private var bottomChain: [NSLayoutConstraint] = []
+
+  /// agent 主机终端停靠区的高度规则。
+  struct DockHeight: Equatable {
+    /// 展开时占 Pane 高度的比例。
+    var ratio: CGFloat
+    /// 展开时的最小高度。
+    var minimum: CGFloat
+    /// 展开时给上方内容至少留的高度；Pane 太矮时先压停靠区。
+    var contentReserve: CGFloat
+    /// 收起时的固定高度（只剩头部）；nil 表示展开。
+    var collapsedHeight: CGFloat?
+  }
   /// 非聚焦 Pane 的内容整体透明度。用 alpha 而不是颜色遮罩：透明主题的 window 色
   /// 自带 alpha，`withAlphaComponent` 会把它画成近黑色块；alpha 褪色让内容朝下层
   /// 主题材质本身淡出，任何主题下语义一致，也不需要点击穿透的遮罩视图。
@@ -525,7 +539,23 @@ final class ActivePaneHostView: NSView {
     rebuildBottomChain()
   }
 
-  /// 自上而下 content → [accessory] → host 底边。每次整链重建，不残留半条约束。
+  /// 安装、更新或移除 agent 主机终端停靠区：贴 Pane 底边和左右边，在 Prompt Queue 下面，同样占布局空间。
+  /// 停靠区是长期视图，工作区重建后会被新的 host 接走：只在它确实挂在本 host 下时才移除或建约束，
+  /// 被丢弃的旧 host 不能再碰它。
+  func setAgentHostDock(_ dock: NSView?, height: DockHeight?) {
+    // 工作区每次重建都会给所有 Pane 调一次；没有停靠区的 Pane 不必重建约束链。
+    if dock == nil, agentHostDock == nil { return }
+    if let old = agentHostDock, old !== dock, old.superview === self { old.removeFromSuperview() }
+    agentHostDock = dock
+    agentHostDockHeight = height
+    if let dock {
+      if dock.superview !== self { addSubview(dock) }
+      dock.translatesAutoresizingMaskIntoConstraints = false
+    }
+    rebuildBottomChain()
+  }
+
+  /// 自上而下 content → [accessory] → [停靠区] → host 底边。每次整链重建，不残留半条约束。
   private func rebuildBottomChain() {
     NSLayoutConstraint.deactivate(bottomChain)
     bottomChain.removeAll()
@@ -533,6 +563,28 @@ final class ActivePaneHostView: NSView {
     var chain: [NSLayoutConstraint] = []
     var floorAnchor = bottomAnchor
     var floorInset: CGFloat = 0
+    if let dock = agentHostDock, dock.superview === self, let height = agentHostDockHeight {
+      chain += [
+        dock.leadingAnchor.constraint(equalTo: leadingAnchor),
+        dock.trailingAnchor.constraint(equalTo: trailingAnchor),
+        dock.bottomAnchor.constraint(equalTo: bottomAnchor),
+      ]
+      if let collapsed = height.collapsedHeight {
+        chain.append(dock.heightAnchor.constraint(equalToConstant: collapsed))
+      } else {
+        // 优先级自低到高：按比例 < 不低于最小高度 < 给上方内容留够空间，Pane 太矮时先牺牲停靠区。
+        // 三条都低于 250：分屏给每个 Pane 的回退约束是 250、窗口保持尺寸是 500，停靠区只能在 Pane
+        // 现有高度里分配，绝不能为了满足自己的最小高度去推分隔条或撑大窗口。
+        let proportional = dock.heightAnchor.constraint(equalTo: heightAnchor, multiplier: height.ratio)
+        proportional.priority = NSLayoutConstraint.Priority(200)
+        let minimum = dock.heightAnchor.constraint(greaterThanOrEqualToConstant: height.minimum)
+        minimum.priority = NSLayoutConstraint.Priority(210)
+        let reserve = contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: height.contentReserve)
+        reserve.priority = NSLayoutConstraint.Priority(220)
+        chain += [proportional, minimum, reserve]
+      }
+      floorAnchor = dock.topAnchor
+    }
     if let accessory = bottomAccessory {
       chain += [
         accessory.leadingAnchor.constraint(equalTo: leadingAnchor, constant: bottomAccessoryInset),
