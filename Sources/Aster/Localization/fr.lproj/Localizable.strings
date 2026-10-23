@@ -24,7 +24,6 @@
 "%@ 个会话" = "%@ sessions";
 "%@ 个日志文件 · %@（最多保留 7 天或 20 MB）" = "%@ fichiers journaux · %@ (conservés jusqu'à 7 jours ou 20 Mo)";
 "%@ 个标签" = "%@ onglets";
-"%@ 会话已结束 · %@ · 在此项目新开终端时补全首选" = "Session %@ terminée · %@ · Complétion préférée pour les nouveaux terminaux de ce projet";
 "%@ 分钟" = "%@ min";
 "%@ 前更新" = "Mis à jour il y a %@";
 "%@ 副本" = "%@ copie";

@@ -410,7 +410,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
   /// 某个 Pane 的 Shell 被用户主动结束（`exit` / Ctrl+D），请求窗口层关闭该 Pane。
   var onPaneRequestedCloseAfterExit: ((UUID) -> Void)?
   /// 已绑定 session ID 的 Agent 结束时上报 (paneID, provider, sessionID, 工作目录)。
-  /// 窗口层据此登记「项目最近会话」并提示 resume ID。
+  /// 窗口层据此登记「项目最近会话」，不弹提示。
   var onAgentSessionEnded: ((UUID, AgentProvider, String?, String) -> Void)?
   /// 目录 → 补全首选项（项目最近一次 Agent 会话的 resume 命令）。由窗口层注入，
   /// 标签内每个终端 Pane 的补全控制器共用。
@@ -4669,16 +4669,14 @@ final class AppModel: ObservableObject {
     defaults.set(data, forKey: frequentFoldersKey)
   }
 
-  /// Agent 退出后登记「该项目最近一次会话」并提示可 resume 的命令。没有原生 resume 能力
-  /// 的 provider 不登记也不提示；命令用当前启动前缀规划，与手动 Resume 完全一致。
-  /// `sessionID` 为 nil 时登记为「续上最近一次」（`claude --continue` 等）。
+  /// Agent 退出后登记「该项目最近一次会话」，作为同目录新终端的补全首选。没有原生 resume
+  /// 能力的 provider 不登记。`sessionID` 为 nil 时登记为「续上最近一次」（`claude --continue` 等）。
+  /// 退出时不弹 toast：resume 命令已由补全给出，再弹一次只是打扰。
   private func recordEndedAgentSession(provider: AgentProvider, sessionID: String?, directory: String) {
     guard agentProjectSessions.record(
       provider: provider, sessionID: sessionID, projectDirectory: directory)
     else { return }
     persistAgentProjectSessions()
-    guard let command = projectAgentResumeCommand(provider: provider, sessionID: sessionID) else { return }
-    notice = L("\(provider.displayName) 会话已结束 · \(command) · 在此项目新开终端时补全首选")
   }
 
   private func persistAgentProjectSessions() {

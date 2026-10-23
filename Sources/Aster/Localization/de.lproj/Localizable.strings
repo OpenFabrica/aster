@@ -24,7 +24,6 @@
 "%@ 个会话" = "%@ Sitzungen";
 "%@ 个日志文件 · %@（最多保留 7 天或 20 MB）" = "%@ Protokolldateien · %@ (maximal 7 Tage oder 20 MB aufbewahrt)";
 "%@ 个标签" = "%@ Tabs";
-"%@ 会话已结束 · %@ · 在此项目新开终端时补全首选" = "%@-Sitzung beendet · %@ · Bevorzugte Vervollständigung für neue Terminals in diesem Projekt";
 "%@ 分钟" = "%@ Min.";
 "%@ 前更新" = "Vor %@ aktualisiert";
 "%@ 副本" = "%@ Kopie";

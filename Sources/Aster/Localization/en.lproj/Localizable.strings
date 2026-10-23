@@ -24,7 +24,6 @@
 "%@ 个会话" = "%@ Sessions";
 "%@ 个日志文件 · %@（最多保留 7 天或 20 MB）" = "%@ log files · %@ (retained up to 7 days or 20 MB)";
 "%@ 个标签" = "%@ tabs";
-"%@ 会话已结束 · %@ · 在此项目新开终端时补全首选" = "%@ session ended · %@ · Preferred completion for new terminals in this project";
 "%@ 分钟" = "%@ min";
 "%@ 前更新" = "Updated %@ ago";
 "%@ 副本" = "%@ Copy";

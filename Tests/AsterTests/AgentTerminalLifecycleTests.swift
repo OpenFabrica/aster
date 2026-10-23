@@ -951,7 +951,7 @@ func agentSessionFallsBackToContinueLatest() throws {
   let record = try #require(model.latestProjectAgentSession(for: directory))
   #expect(record.sessionID == nil)
   #expect(model.projectAgentResumeSuggestion(for: directory)?.command == "claude --continue")
-  #expect(model.notice?.contains("claude --continue") == true)
+  #expect(model.notice == nil)
 }
 
 // 用户最常见的「结束」是直接关掉 Pane：没有 commandFinished，也没有 child-exited 回调。
@@ -984,7 +984,7 @@ func closingPaneWithRunningAgentRecordsProjectSession() throws {
   #expect(endedCount == 1)
 }
 
-// Agent 结束 → 登记项目最近会话并提示 resume 命令 → 同目录补全首选项就是这条命令。
+// Agent 结束 → 静默登记项目最近会话（不弹 toast）→ 同目录补全首选项就是 resume 命令。
 @Test("Agent 结束后登记项目会话，同目录补全首选 resume 命令")
 @MainActor
 func endedAgentSessionIsRecordedAndSuggestedForProject() throws {
@@ -1018,9 +1018,8 @@ func endedAgentSessionIsRecordedAndSuggestedForProject() throws {
   let record = try #require(model.latestProjectAgentSession(for: directory))
   #expect(record.provider == .claudeCode)
   #expect(record.sessionID == "sess-42")
-  let notice = try #require(model.notice)
-  #expect(notice.contains("--resume"), "notice: \(notice)")
-  #expect(notice.contains("sess-42"), "notice: \(notice)")
+  // 退出不弹「会话已结束」toast，resume 命令只经补全给出。
+  #expect(model.notice == nil, "notice: \(model.notice ?? "")")
 
   // 补全首选项：整条 resume 命令 + provider 描述；其它目录没有。
   let suggestion = try #require(model.projectAgentResumeSuggestion(for: directory))
