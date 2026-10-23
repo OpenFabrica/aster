@@ -78,17 +78,15 @@ final class AgentHostTerminalPanelController: NSObject, AgentHostTerminalPresent
     case .ready:
       (status, tone) = terminal.isPaused ? (L("空闲 · agent 已暂停"), .paused) : (L("空闲"), .idle)
     case .busy: (status, tone) = (L("正在运行：\(command)"), .active)
-    case .needsInput: (status, tone) = (L("等待你的输入：请直接在下面的终端里回答"), .attention)
+    case .needsInput: (status, tone) = (L("等待你的输入：点「接管」后在终端里回答"), .attention)
     case .ended: (status, tone) = (L("终端已结束"), .ended)
     }
     controlBar.update(title: "\(terminal.caller.displayName) → \(terminal.hostName)", status: status, tone: tone)
     controlBar.interruptButton.isEnabled = terminal.state == .busy || terminal.state == .needsInput
     controlBar.pauseButton.isEnabled = terminal.state != .ended
-    // 只有 agent 真正在操作终端（连接、跑命令）时盖遮罩；等输入、空闲、暂停时撤掉，不干扰用户。
     controlBar.pauseButton.title = terminal.isPaused ? L("交还 agent") : L("接管")
-    // agent 真正在操作终端（连接、跑命令）且没被接管时盖遮罩、挡输入；等输入、空闲、接管后撤掉。
-    let agentControlling = (terminal.state == .connecting || terminal.state == .busy) && !terminal.isPaused
-    content?.setAgentControlling(agentControlling)
+    // 遮罩只在用户接管后撤掉：空闲、等输入时也挡住输入，防止按键和 agent 的命令交错。
+    content?.setAgentControlling(terminal.blocksUserInput)
     // 更新控件布局；胶囊尺寸只跟随窗口可用宽度，不随状态文案伸缩。
     content?.needsLayout = true
   }

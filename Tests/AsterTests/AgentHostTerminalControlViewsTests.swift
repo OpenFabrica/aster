@@ -1,5 +1,6 @@
-// agent 主机终端的控制遮罩与控制胶囊：遮罩生效时挡住点击和键盘焦点，胶囊上按钮以外的位置用来拖动。
+// agent 主机终端的控制遮罩与控制胶囊：遮罩规则、遮罩生效时挡住点击和键盘焦点，胶囊上按钮以外的位置用来拖动。
 import AppKit
+import AsterCore
 import Testing
 
 @testable import Aster
@@ -32,7 +33,7 @@ struct AgentHostTerminalControlViewsTests {
 
       for (title, status, tone, pauseTitle) in [
         ("claude-code → 算力服务器", "正在运行：" + String(repeating: "systemctl status milo-tts && ", count: 20), AgentHostTerminalControlBar.Tone.active, "接管"),
-        (String(repeating: "production-host-", count: 20), "等待你的输入：请直接在下面的终端里回答", .attention, "接管"),
+        (String(repeating: "production-host-", count: 20), "等待你的输入：点「接管」后在终端里回答", .attention, "接管"),
         ("claude-code → 算力服务器", "空闲 · agent 已暂停", .paused, "交还 agent"),
         ("claude-code → 算力服务器", "空闲", .idle, "接管"),
       ] {
@@ -64,6 +65,29 @@ struct AgentHostTerminalControlViewsTests {
       content.layoutSubtreeIfNeeded()
       #expect(content.bounds.contains(bar.frame))
     }
+  }
+
+  @Test("遮罩只在用户接管或终端结束时撤掉：连接、空闲、运行、等输入都挡输入")
+  func overlayBlocksInputUntilTakeover() {
+    for state in [HostTerminalState.connecting, .ready, .busy, .needsInput] {
+      #expect(AgentHostTerminal.blocksUserInput(state: state, isPaused: false), "\(state) 未接管时必须挡输入")
+      #expect(!AgentHostTerminal.blocksUserInput(state: state, isPaused: true), "\(state) 接管后必须放开")
+    }
+    #expect(!AgentHostTerminal.blocksUserInput(state: .ended, isPaused: false))
+    #expect(!AgentHostTerminal.blocksUserInput(state: .ended, isPaused: true))
+
+    let surface = FakeShellSurface()
+    let terminal = AgentHostTerminal(
+      terminalID: "t-overlay", hostID: UUID(), hostName: "prod-db", target: "deploy@prod-db:22", sessionKey: "s1",
+      caller: AgentHostResolvedCaller(key: "s1", session: "s1"), surface: surface)
+    #expect(terminal.blocksUserInput)
+    terminal.isPaused = true
+    #expect(!terminal.blocksUserInput)
+    terminal.isPaused = false
+    #expect(terminal.blocksUserInput)
+    terminal.close()
+    #expect(terminal.state == .ended)
+    #expect(!terminal.blocksUserInput)
   }
 
   @Test("遮罩未生效时点击穿透给终端，生效后接住点击和键盘焦点，撤掉后再放行")

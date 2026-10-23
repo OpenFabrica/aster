@@ -2124,7 +2124,7 @@
 "没有找到 %@ 命令，已复制手动配置片段。" = "Der Befehl %@ wurde nicht gefunden. Das Snippet für die manuelle Konfiguration wurde kopiert.";
 "理由：%@" = "Grund: %@";
 "空闲 · agent 已暂停" = "Inaktiv · Agent pausiert";
-"等待你的输入：请直接在下面的终端里回答" = "Wartet auf Ihre Eingabe: Antworten Sie direkt im Terminal darunter";
+"等待你的输入：点「接管」后在终端里回答" = "Wartet auf Ihre Eingabe: Klicken Sie auf „Übernehmen“ und antworten Sie dann im Terminal";
 "终端已结束" = "Terminal beendet";
 "这条授权已不存在" = "Diese Freigabe existiert nicht mehr";
 "退出 Aster？" = "Aster beenden?";

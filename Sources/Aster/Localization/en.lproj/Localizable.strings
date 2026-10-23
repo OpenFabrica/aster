@@ -2124,7 +2124,7 @@
 "没有找到 %@ 命令，已复制手动配置片段。" = "The %@ command was not found. The manual configuration snippet was copied.";
 "理由：%@" = "Reason: %@";
 "空闲 · agent 已暂停" = "Idle · agent paused";
-"等待你的输入：请直接在下面的终端里回答" = "Waiting for your input: answer directly in the terminal below";
+"等待你的输入：点「接管」后在终端里回答" = "Waiting for your input: click Take Over, then answer in the terminal";
 "终端已结束" = "Terminal ended";
 "这条授权已不存在" = "This grant no longer exists";
 "退出 Aster？" = "Quit Aster?";

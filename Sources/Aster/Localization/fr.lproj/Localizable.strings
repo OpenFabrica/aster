@@ -2124,7 +2124,7 @@
 "没有找到 %@ 命令，已复制手动配置片段。" = "La commande %@ est introuvable. L’extrait de configuration manuelle a été copié.";
 "理由：%@" = "Motif : %@";
 "空闲 · agent 已暂停" = "Inactif · agent en pause";
-"等待你的输入：请直接在下面的终端里回答" = "En attente de votre saisie : répondez directement dans le terminal ci-dessous";
+"等待你的输入：点「接管」后在终端里回答" = "En attente de votre saisie : cliquez sur Prendre la main, puis répondez dans le terminal";
 "终端已结束" = "Terminal terminé";
 "这条授权已不存在" = "Cette autorisation n’existe plus";
 "退出 Aster？" = "Quitter Aster ?";
