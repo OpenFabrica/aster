@@ -35,9 +35,10 @@ public enum AsterControlProtocol {
   /// 兼容别名：见 `AsterControlSocketLocation.defaultPath`。
   public static func defaultSocketPath(
     environment: [String: String] = ProcessInfo.processInfo.environment,
-    homeDirectory: String = NSHomeDirectory()
+    homeDirectory: String = NSHomeDirectory(),
+    identity: AsterAppIdentity = .current
   ) -> String {
-    AsterControlSocketLocation.defaultPath(environment: environment, home: homeDirectory)
+    AsterControlSocketLocation.defaultPath(environment: environment, home: homeDirectory, identity: identity)
   }
 
   /// 把可选 `timeout_ms` 归一到 [0, maximumTimeoutMilliseconds]；nil 走调用方默认值。
@@ -1257,21 +1258,33 @@ public enum AsterControlSocketLocation {
   public static let overrideEnvironmentKey = "ASTER_CONTROL_SOCKET_PATH"
   /// sun_path 104 字节，留余量给 NUL 与实现差异。
   public static let maximumPathBytes = 100
-  public static let relativePath = "Library/Application Support/Aster/Control/aster.sock"
-  public static let fallbackFileName = "aster-control.sock"
 
-  /// 默认路径：`~/Library/Application Support/Aster/Control/aster.sock`；超过 sun_path 上限时
-  /// 回退 `<tmpdir>/aster-control.sock`。
+  /// 相对 home 的默认位置。开发版在 `Aster-Dev` 目录下另开一个，和正式版各听各的。
+  public static func relativePath(identity: AsterAppIdentity) -> String {
+    "Library/Application Support/\(identity.dataDirectoryName)/Control/aster.sock"
+  }
+
+  /// 超长回退时 tmpdir 下的文件名，同样按身份区分。
+  public static func fallbackFileName(identity: AsterAppIdentity) -> String {
+    switch identity {
+    case .release: "aster-control.sock"
+    case .development: "aster-dev-control.sock"
+    }
+  }
+
+  /// 默认路径：`~/Library/Application Support/Aster/Control/aster.sock`（开发版是 `Aster-Dev`）；
+  /// 超过 sun_path 上限时回退 `<tmpdir>/aster-control.sock`（开发版 `aster-dev-control.sock`）。
   public static func defaultPath(
     environment: [String: String] = ProcessInfo.processInfo.environment,
     home: String = NSHomeDirectory(),
-    tmpdir: String? = nil
+    tmpdir: String? = nil,
+    identity: AsterAppIdentity = .current
   ) -> String {
     if let override = environment[overrideEnvironmentKey], override.hasPrefix("/") { return override }
-    let preferred = (home as NSString).appendingPathComponent(relativePath)
+    let preferred = (home as NSString).appendingPathComponent(relativePath(identity: identity))
     if preferred.utf8.count <= maximumPathBytes { return preferred }
     let temporary = tmpdir ?? environment["TMPDIR"] ?? NSTemporaryDirectory()
-    return (temporary as NSString).appendingPathComponent(fallbackFileName)
+    return (temporary as NSString).appendingPathComponent(fallbackFileName(identity: identity))
   }
 }
 

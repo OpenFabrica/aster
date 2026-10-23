@@ -1,3 +1,4 @@
+import AsterCore
 import Foundation
 import OSLog
 
@@ -394,7 +395,9 @@ final class DiagnosticsCenter: @unchecked Sendable {
     let library = (try? fileManager.url(
       for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
       ?? fileManager.temporaryDirectory
-    return library.appendingPathComponent("Logs/Aster", isDirectory: true)
+    // 开发版写 `Logs/Aster-Dev`，和正式版的诊断会话分开。
+    return library.appendingPathComponent("Logs", isDirectory: true)
+      .appendingPathComponent(AsterAppIdentity.current.dataDirectoryName, isDirectory: true)
   }
 
   private static func normalizedEvent(_ event: String) -> String {

@@ -214,13 +214,24 @@ struct AsterControlProtocolTests {
   @Test("默认 socket 路径：覆盖、常规、超长 home 回退 TMPDIR")
   func defaultSocketPath() {
     #expect(AsterControlProtocol.defaultSocketPath(environment: ["ASTER_CONTROL_SOCKET_PATH": "/tmp/x.sock"], homeDirectory: "/Users/a") == "/tmp/x.sock")
-    #expect(AsterControlProtocol.defaultSocketPath(environment: ["ASTER_CONTROL_SOCKET_PATH": "relative"], homeDirectory: "/Users/a")
+    #expect(AsterControlProtocol.defaultSocketPath(environment: ["ASTER_CONTROL_SOCKET_PATH": "relative"], homeDirectory: "/Users/a", identity: .release)
       == "/Users/a/Library/Application Support/Aster/Control/aster.sock")
     let longHome = "/Users/" + String(repeating: "n", count: 80)
-    #expect(AsterControlProtocol.defaultSocketPath(environment: ["TMPDIR": "/tmp/t"], homeDirectory: longHome) == "/tmp/t/aster-control.sock")
+    #expect(AsterControlProtocol.defaultSocketPath(environment: ["TMPDIR": "/tmp/t"], homeDirectory: longHome, identity: .release) == "/tmp/t/aster-control.sock")
     #expect(AsterControlProtocol.defaultSocketPath(environment: [:], homeDirectory: "/Users/a").utf8.count <= AsterControlProtocol.maximumSocketPathBytes)
-    #expect(AsterControlSocketLocation.defaultPath(environment: [:], home: longHome, tmpdir: "/tmp/x") == "/tmp/x/aster-control.sock")
+    #expect(AsterControlSocketLocation.defaultPath(environment: [:], home: longHome, tmpdir: "/tmp/x", identity: .release) == "/tmp/x/aster-control.sock")
     #expect(AsterControlSocketLocation.defaultPath(environment: ["ASTER_CONTROL_SOCKET_PATH": "/s.sock"], home: "/h") == "/s.sock")
+  }
+
+  @Test("开发版的默认 socket 在 Aster-Dev 下，超长回退也换文件名，不会连上正式版")
+  func developmentSocketPathIsSeparate() {
+    #expect(AsterControlSocketLocation.defaultPath(environment: [:], home: "/Users/a", identity: .development)
+      == "/Users/a/Library/Application Support/Aster-Dev/Control/aster.sock")
+    let longHome = "/Users/" + String(repeating: "n", count: 80)
+    #expect(AsterControlSocketLocation.defaultPath(environment: [:], home: longHome, tmpdir: "/tmp/x", identity: .development)
+      == "/tmp/x/aster-dev-control.sock")
+    // 显式覆盖对两个身份一样优先。
+    #expect(AsterControlSocketLocation.defaultPath(environment: ["ASTER_CONTROL_SOCKET_PATH": "/s.sock"], home: "/h", identity: .development) == "/s.sock")
   }
 
   @Test("标题归一化：剥掉 spinner / 盲文前缀，其它保持原样")

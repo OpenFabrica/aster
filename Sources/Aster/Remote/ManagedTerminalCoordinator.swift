@@ -9,7 +9,8 @@ import Foundation
 ///
 /// P8.8 起，全新终端默认走受管路径（Local 后台服务）。打包 App 自动从 Bundle 内
 /// 解析 aster-session 二进制并使用 ~/Library/Application Support/Aster/Sessions/
-/// 作为状态父目录。环境变量仍可覆盖（测试与开发场景）。升级用户保留旧终端直至显式迁移。
+/// （开发版在 `Aster-Dev` 下）作为状态父目录。环境变量仍可覆盖（测试与开发场景）。
+/// 升级用户保留旧终端直至显式迁移。
 @MainActor
 final class ManagedTerminalCoordinator {
   /// 进程级共享实例。测试用独立配置替换它，避免污染用户默认终端策略。
@@ -144,7 +145,7 @@ final class ManagedTerminalCoordinator {
   /// 受管模式端点。环境变量优先；缺失时 Local 从 App Bundle 自动解析。
   ///
   /// 自动解析仅在打包 App 中生效（Bundle 含 aster-session）。状态目录
-  /// 自动创建在 ~/Library/Application Support/Aster/Sessions/，权限 0700。
+  /// 自动创建在 ~/Library/Application Support/Aster/Sessions/（开发版在 `Aster-Dev` 下），权限 0700。
   var endpoint: ManagedSessionEndpoint? {
     // 环境变量显式指定时直接使用（测试、开发、远端协调器）。
     if let binary = environment[Self.binaryEnvironmentKey], !binary.isEmpty,
@@ -170,11 +171,10 @@ final class ManagedTerminalCoordinator {
     guard bundle.pathExtension == "app" else { return nil }
     let binary = bundle.appendingPathComponent("Contents/MacOS/aster-session").path
     guard FileManager.default.isExecutableFile(atPath: binary) else { return nil }
-    // 状态目录：~/Library/Application Support/Aster/Sessions/
-    let appSupport = FileManager.default.urls(
-      for: .applicationSupportDirectory, in: .userDomainMask).first
-    guard let appSupport else { return nil }
-    let stateParent = appSupport.appendingPathComponent("Aster/Sessions").path
+    // 状态目录按身份分开：开发版与正式版各起一个后台会话服务，开发版换服务时
+    // 不会结束正式版的终端。
+    let stateParent = AsterAppIdentity.current.applicationSupportDirectory()
+      .appendingPathComponent("Sessions").path
     // 确保目录存在且权限正确（0700）。
     do {
       try FileManager.default.createDirectory(

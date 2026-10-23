@@ -25,7 +25,10 @@ The project requires macOS 14+, Swift 6.2, Zig 0.15.2, a Rust toolchain (cargo),
   Quick Look thumbnail, which would bake a white square behind the icon.
 - `./scripts/build-dmg.sh` creates and verifies the DMG.
 - `./scripts/release.sh` cuts a full release: it strips the `-dev` suffix from the version in `Resources/Info.plist`, builds a notarized DMG, publishes the GitHub release and appcast, then bumps the version to the next `-dev` and pushes. Run `--dry-run` first to check the computed version; pass `--short` only to skip version numbers. See `docs/developer/software-update.md`.
-- `open dist/Aster.app` launches the packaged application for manual checks.
+- `open dist/Aster.app` launches the packaged application for manual checks. A `-dev` package runs as
+  **Aster Dev** (bundle ID `io.local.aster-terminal.dev`, data under `~/Library/Application Support/Aster-Dev/`),
+  so it can run next to the release app without restoring or rewriting its workspace; a second process of the
+  same identity activates the running one and exits. See `docs/developer/app-identity.md`.
 
 ## Coding Style & Naming Conventions
 

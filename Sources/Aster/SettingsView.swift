@@ -1131,8 +1131,8 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     }
   }
 
-  /// Shell 集成开关同时维护 Bash/tmux 的受管启动文件。禁用前明确确认；文件编辑失败
-  /// 时保留原配置并显示错误，避免界面宣称关闭但旧区块仍实际生效。
+  /// Shell 集成开关同时维护 Bash/tmux 的受管启动文件（开发版只改设置）。禁用前明确确认；
+  /// 文件编辑失败时保留原配置并显示错误，避免界面宣称关闭但旧区块仍实际生效。
   private func setShellIntegrationEnabled(_ enabled: Bool) {
     guard enabled != preferences.configuration.shell.shellIntegration else { return }
     if !enabled {
@@ -1147,13 +1147,16 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
         return
       }
     }
-    guard let installer = AsterResourceLocations.shellIntegrationInstaller() else {
-      message = L("找不到签名的 Shell 集成资源，设置未更改。")
-      refresh()
-      return
-    }
     do {
-      try installer.reconcile(enabled: enabled)
+      // 开发版不碰用户的 Shell 启动文件（见 managesShellStartupFiles），只改设置本身。
+      if AsterResourceLocations.managesShellStartupFiles {
+        guard let installer = AsterResourceLocations.shellIntegrationInstaller() else {
+          message = L("找不到签名的 Shell 集成资源，设置未更改。")
+          refresh()
+          return
+        }
+        try installer.reconcile(enabled: enabled)
+      }
       preferences.configuration.shell.shellIntegration = enabled
       message = enabled ? L("Shell 集成已启用，新 Pane 将立即生效。") : L("Shell 集成已关闭。")
     } catch {
@@ -5103,15 +5106,16 @@ extension SettingsViewController: WKNavigationDelegate {
     refresh()
   }
 
+  /// 可编辑的 settings.json，放在当前身份的数据目录里。
   private func settingsConfigurationURL() -> URL {
-    FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Application Support/Aster", isDirectory: true)
+    AsterAppIdentity.current.applicationSupportDirectory()
       .appendingPathComponent("settings.json")
   }
 
+  /// 用户 Recipe 目录，放在当前身份的数据目录里。
   private func recipesDirectoryURL() -> URL {
-    FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Application Support/Aster/Recipes", isDirectory: true)
+    AsterAppIdentity.current.applicationSupportDirectory()
+      .appendingPathComponent("Recipes", isDirectory: true)
   }
 
   private func writeEditableConfiguration() throws {

@@ -61,15 +61,13 @@ public final class MachineProfileStore: @unchecked Sendable {
     "hostID",
   ]
 
-  /// 默认配置路径：`~/Library/Application Support/Aster/machines.json`。
+  /// 默认配置路径：`~/Library/Application Support/Aster/machines.json`（开发版在 `Aster-Dev` 下）。
   public static func defaultFileURL(
-    fileManager: FileManager = .default
+    fileManager: FileManager = .default,
+    identity: AsterAppIdentity = .current
   ) -> URL {
-    let base =
-      fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(
-        "Library/Application Support")
-    return base.appendingPathComponent("Aster/machines.json")
+    identity.applicationSupportDirectory(fileManager: fileManager)
+      .appendingPathComponent("machines.json")
   }
 
   public let fileURL: URL
