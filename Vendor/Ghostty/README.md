@@ -35,6 +35,10 @@ renderer 用 `content_offset` uniform 把网格整体上移，并把刚画出的
 上限由 `aster-scroll-past-last-line` / `aster-scroll-past-first-line` 与主屏内容决定（最后或第一行有字
 的行、光标行），renderer 把它并入 `content_offset`，露出的部分是空白 padding；整数滚动清零。
 
+按需 vsync 带卡死看门狗：renderer 线程在等待 display link 的渲染后挂 250ms 一次性 timer，回调计数
+不动就停掉链接、标记 `vsync_stalled` 并改为直接绘制；`setMacOSDisplayID`、重新获焦或重新可见时
+清除标记重试。宿主在换屏与屏幕唤醒时重新设置 display id，见 [能耗](../../docs/developer/energy-efficiency.md)。
+
 鼠标上报与 alternate scroll 的纵向滚轮事件按程序回应节流：IO 线程每次 PTY 读取递增
 `renderer.State.aster_output_seq`，`Surface` 在程序没有新输出时最多留 2 个事件在路上，多余的丢弃，
 100ms 无回应自动放行，避免 Claude Code 全屏这类每事件整屏重画的程序积压。

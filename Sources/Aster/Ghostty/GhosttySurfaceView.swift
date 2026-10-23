@@ -489,11 +489,7 @@ final class GhosttySurfaceView: NSView {
 
     ghostty_surface_set_color_scheme(
       surface, dark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
-    if let screen = window?.screen ?? NSScreen.main,
-      let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32
-    {
-      ghostty_surface_set_display_id(surface, displayID)
-    }
+    synchronizeDisplayID()
     updateFocusState()
     updateSurfaceGeometry()
     reportInitialSurfaceVisibility()
@@ -570,7 +566,13 @@ final class GhosttySurfaceView: NSView {
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     observeWindowOcclusion()
-    if window != nil, surface == nil { createSurface() } else { updateSurfaceGeometry() }
+    if window != nil, surface == nil {
+      createSurface()
+    } else {
+      updateSurfaceGeometry()
+      // 换窗口可能也换了屏幕（小窗借走、拖到另一屏的窗口）。
+      if window != nil { synchronizeDisplayID() }
+    }
     synchronizeSurfaceVisibility()
   }
 

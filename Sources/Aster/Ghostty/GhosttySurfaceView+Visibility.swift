@@ -1,5 +1,5 @@
-// 把宿主视图的真实可见性同步给 libghostty：看不见的 surface 不再编码 Metal 帧、
-// 不再呈现 IOSurface，renderer 线程同时降到 utility QoS。
+// 把宿主视图的真实可见性与所在屏幕同步给 libghostty：看不见的 surface 不再编码 Metal 帧、
+// 不再呈现 IOSurface，renderer 线程同时降到 utility QoS；display link 跟着窗口所在屏幕走。
 import AppKit
 @preconcurrency import GhosttyKit
 
@@ -50,18 +50,45 @@ extension GhosttySurfaceView {
     ghostty_surface_set_occlusion(surface, visible)
   }
 
-  /// 跟随当前窗口的遮挡通知；视图换窗口（小窗借走、标签拖放）时重新订阅。
+  /// 跟随当前窗口的遮挡与换屏通知；视图换窗口（小窗借走、标签拖放）时重新订阅。
   func observeWindowOcclusion() {
     let center = NotificationCenter.default
     center.removeObserver(
       self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+    center.removeObserver(self, name: NSWindow.didChangeScreenNotification, object: nil)
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    workspaceCenter.removeObserver(
+      self, name: NSWorkspace.screensDidWakeNotification, object: nil)
     guard let window else { return }
     center.addObserver(
       self, selector: #selector(windowOcclusionStateDidChange(_:)),
       name: NSWindow.didChangeOcclusionStateNotification, object: window)
+    center.addObserver(
+      self, selector: #selector(displayBindingDidChange(_:)),
+      name: NSWindow.didChangeScreenNotification, object: window)
+    workspaceCenter.addObserver(
+      self, selector: #selector(displayBindingDidChange(_:)),
+      name: NSWorkspace.screensDidWakeNotification, object: nil)
+  }
+
+  /// 把窗口当前所在屏幕告诉 libghostty，让 renderer 的 display link 绑到这块屏。
+  ///
+  /// 窗口换屏、屏幕休眠唤醒后都要重新绑定：macOS 可能让旧的 display link 停在
+  /// 「运行中」却不再回调，画面就只在缩放窗口等强制重画时才更新。重新绑定同时
+  /// 让 renderer 重试被看门狗判定卡住的 display link。
+  func synchronizeDisplayID() {
+    guard let surface,
+      let screen = window?.screen ?? NSScreen.main,
+      let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32
+    else { return }
+    ghostty_surface_set_display_id(surface, displayID)
   }
 
   @objc private func windowOcclusionStateDidChange(_ notification: Notification) {
     synchronizeSurfaceVisibility()
+  }
+
+  @objc private func displayBindingDidChange(_ notification: Notification) {
+    synchronizeDisplayID()
   }
 }

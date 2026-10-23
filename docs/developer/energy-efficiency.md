@@ -104,6 +104,14 @@ Ghostty 引擎取消 poll，避免破坏 SwiftTerm Secure Input fallback。`Dock
 `draw_now` completion 返回 `.rearm` 后才停止 display link；执行前再次检查请求位，既避免
 CVDisplayLink callback 与 renderer 互等，也不会吞掉并发到达的新帧。
 
+**卡住的 display link。** 屏幕休眠唤醒后 macOS 可能让 CVDisplayLink 停在「运行中」却不再回调；
+按需 vsync 下 renderer 只在回调里画，于是画面冻结，只有缩放窗口这类同步 `ghostty_surface_draw`
+才能补画。renderer 线程在每次等待 display link 的渲染后挂一个 250ms 一次性看门狗：期间回调计数
+没变、帧仍待画且链接自称运行，就判定卡住，停掉链接并标记 `vsync_stalled`，之后有变化就直接画
+（与无 display link 的降级路径相同）。宿主在窗口换屏（`NSWindow.didChangeScreenNotification`）、
+屏幕唤醒（`NSWorkspace.screensDidWakeNotification`）和视图换窗口时重新 `ghostty_surface_set_display_id`；
+重新绑屏、重新获焦或重新可见都会清掉标记并重试链接。看门狗只在有渲染时挂，空闲路径不增加 timer。
+
 ## 2026-08-19 验证基线
 
 在同一台 Mac、AC 电源、fresh `CFFIXED_USER_HOME`、Debug 构建和一个空闲终端下，启动后

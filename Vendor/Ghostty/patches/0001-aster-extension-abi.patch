@@ -822,28 +822,42 @@ index 22cae8f..8b2b65c 100644
 +aster_output_seq: std.atomic.Value(u64) = .init(0),
 +
 diff --git a/src/renderer/Thread.zig b/src/renderer/Thread.zig
-index 5087213..a6e63ba 100644
+index 5087213..fe9798a 100644
 --- a/src/renderer/Thread.zig
 +++ b/src/renderer/Thread.zig
-@@ -69,0 +70,6 @@ draw_now_c: xev.Completion = .{},
+@@ -69,0 +70,14 @@ draw_now_c: xev.Completion = .{},
 +/// Runs display-link shutdown only after the draw-now completion has rearmed.
 +/// CVDisplayLink's callback notifies draw_now synchronously, so stopping while
 +/// drawNowCallback owns that completion can deadlock both threads.
 +vsync_stop: xev.Async,
 +vsync_stop_c: xev.Completion = .{},
 +
-@@ -156,0 +163,4 @@ pub fn init(
++/// Aster: one-shot watchdog armed when a render waits for the display link.
++/// If no display-link callback arrives in time the link is stuck (macOS can
++/// leave it "running" but silent after display sleep) and the frame would
++/// otherwise never be presented until something forces a draw, e.g. a resize.
++vsync_watchdog_h: xev.Timer,
++vsync_watchdog_c: xev.Completion = .{},
++vsync_watchdog_ticks: u64 = 0,
++
+@@ -156,0 +171,8 @@ pub fn init(
 +    // Deferred display-link shutdown, see the field comment above.
 +    var vsync_stop = try xev.Async.init();
 +    errdefer vsync_stop.deinit();
 +
-@@ -173,0 +184 @@ pub fn init(
++    // Stuck display-link watchdog, see the field comment above.
++    var vsync_watchdog_h = try xev.Timer.init();
++    errdefer vsync_watchdog_h.deinit();
++
+@@ -173,0 +196,2 @@ pub fn init(
 +        .vsync_stop = vsync_stop,
-@@ -190,0 +202 @@ pub fn deinit(self: *Thread) void {
++        .vsync_watchdog_h = vsync_watchdog_h,
+@@ -190,0 +215,2 @@ pub fn deinit(self: *Thread) void {
 +    self.vsync_stop.deinit();
-@@ -241,0 +254 @@ fn threadMain_(self: *Thread) !void {
++    self.vsync_watchdog_h.deinit();
+@@ -241,0 +268 @@ fn threadMain_(self: *Thread) !void {
 +    self.vsync_stop.wait(&self.loop, &self.vsync_stop_c, Thread, self, vsyncStopCallback);
-@@ -566,0 +580,10 @@ fn drawNowCallback(
+@@ -566,0 +594,10 @@ fn drawNowCallback(
 +    if (@hasDecl(rendererpkg.Renderer, "consumeVsync") and
 +        !t.renderer.consumeVsync())
 +    {
@@ -854,7 +868,48 @@ index 5087213..a6e63ba 100644
 +            log.warn("error scheduling display link stop err={}", .{err});
 +        return .rearm;
 +    }
-@@ -571,0 +595,18 @@ fn drawNowCallback(
+@@ -571,0 +609,59 @@ fn drawNowCallback(
++/// Aster: generous against any refresh rate and scheduling jitter, short
++/// enough that a stuck link costs one barely noticeable delay.
++const vsync_watchdog_ms = 250;
++
++/// Aster: arm the watchdog when this render waits on the display link.
++/// Already armed means an earlier frame is still being watched.
++fn armVsyncWatchdog(self: *Thread) void {
++    if (!self.renderer.hasVsync()) return;
++    if (self.vsync_watchdog_c.state() == .active) return;
++    self.vsync_watchdog_ticks = self.renderer.vsync_ticks;
++    self.vsync_watchdog_h.run(
++        &self.loop,
++        &self.vsync_watchdog_c,
++        vsync_watchdog_ms,
++        Thread,
++        self,
++        vsyncWatchdogCallback,
++    );
++}
++
++fn vsyncWatchdogCallback(
++    self_: ?*Thread,
++    _: *xev.Loop,
++    _: *xev.Completion,
++    r: xev.Timer.RunError!void,
++) xev.CallbackAction {
++    _ = r catch |err| switch (err) {
++        error.Canceled => return .disarm,
++        else => {
++            log.warn("error in vsync watchdog err={}", .{err});
++            return .disarm;
++        },
++    };
++
++    const t = self_.?;
++    // Runs outside drawNowCallback, so stopping the link here cannot
++    // deadlock with a display-link callback blocked in draw_now.notify.
++    if (t.renderer.detectVsyncStall(t.vsync_watchdog_ticks)) t.drawFrame(false);
++    return .disarm;
++}
++
 +fn vsyncStopCallback(
 +    self_: ?*Thread,
 +    _: *xev.Loop,
@@ -873,9 +928,10 @@ index 5087213..a6e63ba 100644
 +    return .rearm;
 +}
 +
-@@ -615,0 +657,4 @@ fn renderCallback(
+@@ -615,0 +712,5 @@ fn renderCallback(
 +    if (@hasDecl(rendererpkg.Renderer, "requestVsync")) {
 +        t.renderer.requestVsync();
++        t.armVsyncWatchdog();
 +    }
 +
 diff --git a/src/renderer/cursor.zig b/src/renderer/cursor.zig
@@ -909,10 +965,10 @@ index 33992bc..64d6ba5 100644
 +}
 +
 diff --git a/src/renderer/generic.zig b/src/renderer/generic.zig
-index 0f4a294..3538748 100644
+index 0f4a294..c995918 100644
 --- a/src/renderer/generic.zig
 +++ b/src/renderer/generic.zig
-@@ -117,0 +118,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -117,0 +118,19 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +        /// True while the embedded surface is visible. The display link is
 +        /// armed only when both visibility and focus allow presenting frames.
 +        visible: bool = true,
@@ -922,11 +978,21 @@ index 0f4a294..3538748 100644
 +        /// without waking at the full display rate while the terminal is idle.
 +        vsync_requested: bool = true,
 +
-@@ -545,0 +555 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
++        /// Aster: display-link callbacks consumed so far. The renderer thread
++        /// watchdog compares it across a timeout to spot a link that reports
++        /// running but never fires (seen after display sleep / wake).
++        vsync_ticks: u64 = 0,
++
++        /// Aster: the display link stopped delivering callbacks. Until a
++        /// display, focus or visibility change retries it, frames are drawn
++        /// directly on change instead of waiting for a refresh that never comes.
++        vsync_stalled: bool = false,
++
+@@ -545,0 +565 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +            aster_hide_unfocused_cursor: bool,
-@@ -618,0 +629 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -618,0 +639 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +                    .aster_hide_unfocused_cursor = config.@"aster-hide-unfocused-cursor",
-@@ -694 +705,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -694 +715,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 -                    try macos.video.DisplayLink.createWithActiveCGDisplays()
 +                    macos.video.DisplayLink.createWithActiveCGDisplays() catch |err| fallback: {
 +                        // Embedded hosts can run before macOS exposes an active display (for
@@ -935,15 +1001,20 @@ index 0f4a294..3538748 100644
 +                        log.warn("unable to create display link, disabling vsync err={}", .{err});
 +                        break :fallback null;
 +                    }
-@@ -723,0 +741 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -723,0 +751 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +                    .content_offset = .{ 0, 0 },
-@@ -1025,0 +1044,33 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -1005,0 +1034,2 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
++            // Aster: a new display binding is the moment to retry a stalled link.
++            self.vsync_stalled = false;
+@@ -1025,0 +1056,53 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +        /// Arm the macOS display link for the next synchronized frame. Repeated
 +        /// updates before the next refresh coalesce into the same presentation.
 +        pub fn requestVsync(self: *Self) void {
 +            if (comptime DisplayLink == void) return;
 +            const display_link = self.display_link orelse return;
 +            if (!self.focused or !self.visible) return;
++            // A stalled link stays stopped so drawFrame paints directly.
++            if (self.vsync_stalled) return;
 +            self.vsync_requested = true;
 +            display_link.start() catch {};
 +        }
@@ -953,6 +1024,7 @@ index 0f4a294..3538748 100644
 +        pub fn consumeVsync(self: *Self) bool {
 +            if (comptime DisplayLink == void) return true;
 +            if (self.display_link == null) return true;
++            self.vsync_ticks +%= 1;
 +            if (self.hasAnimations()) return true;
 +            if (self.vsync_requested) {
 +                self.vsync_requested = false;
@@ -971,12 +1043,33 @@ index 0f4a294..3538748 100644
 +            display_link.stop() catch {};
 +        }
 +
-@@ -1032,0 +1084 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
++        /// Aster: called by the renderer thread watchdog `timeout` after a
++        /// frame was requested. If the link claims to run, the frame is still
++        /// pending and no callback arrived since `ticks_at_arm`, the link is
++        /// stuck: stop it and fall back to direct drawing. Returns true then,
++        /// so the caller paints the pending frame right away.
++        pub fn detectVsyncStall(self: *Self, ticks_at_arm: u64) bool {
++            if (comptime DisplayLink == void) return false;
++            const display_link = self.display_link orelse return false;
++            if (!display_link.isRunning()) return false;
++            if (!self.vsync_requested or self.vsync_ticks != ticks_at_arm) return false;
++            log.warn("display link stopped delivering frames, drawing directly", .{});
++            self.vsync_stalled = true;
++            self.vsync_requested = false;
++            display_link.stop() catch {};
++            return true;
++        }
++
+@@ -1032,0 +1116,3 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +            self.vsync_requested = focus;
-@@ -1053,0 +1106,2 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
++            // Aster: regaining focus retries a stalled display link.
++            if (focus) self.vsync_stalled = false;
+@@ -1053,0 +1140,4 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +            self.visible = visible;
 +            self.vsync_requested = visible and self.focused;
-@@ -1204,0 +1259,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
++            // Aster: becoming visible (e.g. display wake) retries a stalled link.
++            if (visible) self.vsync_stalled = false;
+@@ -1204,0 +1295,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +                // Aster: publish the painted fraction for lock-free hit testing.
 +                state.aster_painted_scroll_row_frac.store(
 +                    @bitCast(self.terminal_state.scroll_row_frac),
@@ -987,9 +1080,9 @@ index 0f4a294..3538748 100644
 +                    .monotonic,
 +                );
 +
-@@ -1369,0 +1434 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -1369,0 +1470 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +                        .hide_unfocused = self.config.aster_hide_unfocused_cursor,
-@@ -1418,0 +1484,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -1418,0 +1520,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +
 +                // Aster: sub-row scroll and overscroll shift the whole grid
 +                // (up for positive). Set every frame and force a draw when only
@@ -1003,28 +1096,28 @@ index 0f4a294..3538748 100644
 +                    self.uniforms.content_offset = .{ 0, content_offset_y };
 +                    self.cells_rebuilt = true;
 +                }
-@@ -1941,0 +2020,2 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -1941,0 +2056,2 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +            // Aster: the cell buffer may hold one extra row for a fractional
 +            // scroll; the blank padding is always measured on the real grid.
-@@ -1946 +2026 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -1946 +2062 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 -                    .rows = self.cells.size.rows,
 +                    .rows = self.terminal_state.rows,
-@@ -2322,0 +2403,3 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -2322,0 +2439,3 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +            // Aster: a fractional scroll paints one extra row below the
 +            // viewport, so the cell buffer follows the painted row count.
 +            const paint_rows: terminal.size.CellCountInt = @intCast(state.row_data.len);
-@@ -2324 +2407 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -2324 +2443 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 -                self.cells.size.rows != state.rows or
 +                self.cells.size.rows != paint_rows or
-@@ -2329 +2412 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -2329 +2448 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 -                new_size.rows = state.rows;
 +                new_size.rows = paint_rows;
-@@ -2377 +2460 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -2377 +2496 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 -                state.rows,
 +                state.row_data.len,
-@@ -2388,0 +2472 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -2388,0 +2508 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +                if (cursor_vp.y >= row_dirty.len) break :preedit null;
-@@ -2457,0 +2542 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+@@ -2457,0 +2578 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 +                if (cursor_vp.y >= state.row_data.len) break :cursor;
 diff --git a/src/renderer/metal/Frame.zig b/src/renderer/metal/Frame.zig
 index 388b4f9..7486b27 100644
