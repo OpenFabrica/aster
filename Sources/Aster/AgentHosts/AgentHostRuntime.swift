@@ -21,14 +21,18 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
   var onChange: (() -> Void)?
 
   /// 装配并登记为共享实例；`resolvePane` 把 `$ASTER_PANE_ID` 解析成 Pane 与其中的 agent，
+  /// `resolveAgentSessionPane` 按 agent 会话 ID 找 Pane（Codex 没有 `$ASTER_PANE_ID`），
   /// `paneLocator` 让终端能停靠在调用方 Pane 底部。
   @discardableResult
   static func install(
     preferences: AppPreferences, paneLocator: (any AgentHostPaneLocator)? = nil,
-    resolvePane: @escaping @MainActor (String) -> AgentHostCallerPane?
+    resolvePane: @escaping @MainActor (String) -> AgentHostCallerPane?,
+    resolveAgentSessionPane: @escaping @MainActor (String) -> AgentHostCallerPane? = { _ in nil }
   ) -> AgentHostRuntime {
     if let shared { return shared }
-    let runtime = AgentHostRuntime(preferences: preferences, paneLocator: paneLocator, resolvePane: resolvePane)
+    let runtime = AgentHostRuntime(
+      preferences: preferences, paneLocator: paneLocator, resolvePane: resolvePane,
+      resolveAgentSessionPane: resolveAgentSessionPane)
     shared = runtime
     AgentHostService.shared = runtime.service
     return runtime
@@ -36,7 +40,8 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
 
   private init(
     preferences: AppPreferences, paneLocator: (any AgentHostPaneLocator)?,
-    resolvePane: @escaping @MainActor (String) -> AgentHostCallerPane?
+    resolvePane: @escaping @MainActor (String) -> AgentHostCallerPane?,
+    resolveAgentSessionPane: @escaping @MainActor (String) -> AgentHostCallerPane?
   ) {
     self.preferences = preferences
     self.paneLocator = paneLocator
@@ -60,7 +65,7 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
         hosts: { directory.hosts },
         isEnabled: { [weak preferences] in preferences?.agentHostAccessEnabled ?? false },
         grants: grants, approvals: AgentHostApprovalCoordinator(), registry: registry, audit: audit,
-        user: .current, resolvePane: resolvePane))
+        user: .current, resolvePane: resolvePane, resolveAgentSessionPane: resolveAgentSessionPane))
     super.init()
     registry.onNeedsInput = { [weak self] terminal, prompt in self?.notifyNeedsInput(terminal, prompt: prompt) }
     registry.onChange = { [weak self] in self?.onChange?() }

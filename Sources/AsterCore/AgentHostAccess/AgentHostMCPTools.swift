@@ -41,9 +41,24 @@ public struct AgentHostMCPTools: Sendable {
     }
   }
 
-  /// 本进程发往服务端的调用方身份。
-  public var caller: AgentHostCaller {
-    AgentHostCaller(session: sessionKey, client: clientName ?? Self.fallbackClientName, callerPane: callerPane)
+  /// 本进程发往服务端的调用方身份（不带客户端自报的会话 ID）。
+  public var caller: AgentHostCaller { caller(agentSession: nil) }
+
+  /// 带上这次调用自报的 agent 会话 ID 的调用方身份。
+  public func caller(agentSession: String?) -> AgentHostCaller {
+    AgentHostCaller(
+      session: sessionKey, client: clientName ?? Self.fallbackClientName, callerPane: callerPane,
+      agentSession: agentSession)
+  }
+
+  /// 从 tools/call 的 `_meta` 取客户端自报的会话 ID：Codex 写 `sessionId`（与 hooks 上报的
+  /// session_id 相同），旧版本只在 `x-codex-turn-metadata.session_id` 里。不合法就当没有。
+  static func agentSessionID(fromMeta meta: JSONValue?) -> String? {
+    let raw = meta?["sessionId"]?.stringValue ?? meta?["x-codex-turn-metadata"]?["session_id"]?.stringValue
+    guard let raw, !raw.isEmpty, (try? AgentHostCaller(session: "x", agentSession: raw).validate()) != nil else {
+      return nil
+    }
+    return raw
   }
 
   /// 处理一条请求；返回 nil 表示 notification（无 id），不回包。
@@ -93,7 +108,8 @@ public struct AgentHostMCPTools: Sendable {
     }
     let arguments = params?["arguments"]
     do {
-      let request = try controlRequest(tool: name, arguments: arguments)
+      let request = try controlRequest(
+        tool: name, arguments: arguments, agentSession: Self.agentSessionID(fromMeta: params?["_meta"]))
       let result = try call(request.method, request.params)
       return AgentHostMCPRendering.success(tool: name, result: result)
     } catch let error as AgentHostMCPArgumentError {
@@ -111,8 +127,11 @@ public struct AgentHostMCPTools: Sendable {
   ///
   /// 先在本地用协议类型的 `validate()` 过一遍：参数错误立即以可读文案返回，
   /// 不必为一个必然失败的请求连 socket（甚至拉起 App）。
-  func controlRequest(tool: String, arguments: JSONValue?) throws -> (method: String, params: JSONValue) {
+  func controlRequest(
+    tool: String, arguments: JSONValue?, agentSession: String? = nil
+  ) throws -> (method: String, params: JSONValue) {
     let arguments = try AgentHostMCPArguments.object(arguments)
+    let caller = self.caller(agentSession: agentSession)
     switch tool {
     case AgentHostMCPToolCatalog.Name.listHosts:
       return ("host.list", .object([:]))

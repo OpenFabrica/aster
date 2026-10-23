@@ -24,6 +24,8 @@ final class AgentHostService {
     var approvalTimeout: Duration = .seconds(50)
     /// 把 `$ASTER_PANE_ID` 解析成 Pane（显示 ID 与 UUID）与其中 agent 的 provider / session ID。
     var resolvePane: @MainActor (String) -> AgentHostCallerPane? = { _ in nil }
+    /// 按 agent 自报的会话 ID 找正在跑它的 Pane；没有 `$ASTER_PANE_ID` 时（Codex）的退路。
+    var resolveAgentSessionPane: @MainActor (String) -> AgentHostCallerPane? = { _ in nil }
   }
 
   /// 生产实例；App 启动时装配，控制协议从这里取。
@@ -435,9 +437,15 @@ final class AgentHostService {
 
   /// 有效会话键：调用方给的 session，再并入调用 Pane 里 agent 的 provider 与 session ID。
   /// 新开的 Claude 会话因此不会继承旧会话的「本会话允许」。
+  ///
+  /// 调用方 Pane 先按 `$ASTER_PANE_ID` 找；找不到再按 agent 自报的会话 ID 找。Codex 启动 MCP server
+  /// 时滤掉了环境变量，还可能让多个会话共用一个 MCP 进程，只有会话 ID 能分清是哪个 Pane。
   func resolveCaller(_ caller: AgentHostCaller) -> AgentHostResolvedCaller {
     var resolved = AgentHostResolvedCaller(key: caller.session, session: caller.session, client: caller.client)
-    if let selector = caller.callerPane, let pane = dependencies.resolvePane(selector) {
+    let pane =
+      caller.callerPane.flatMap { dependencies.resolvePane($0) }
+      ?? caller.agentSession.flatMap { dependencies.resolveAgentSessionPane($0) }
+    if let pane {
       resolved.pane = pane.pane
       resolved.paneUUID = pane.paneUUID
       resolved.provider = pane.provider

@@ -110,6 +110,36 @@ struct AgentHostMCPToolsTests {
     #expect(omitted.calls.first?.params["timeout_ms"] == 40_000)
   }
 
+  @Test("Codex 在 tools/call 的 _meta 里自报会话 ID：随 agent.agent_session 发给服务端")
+  func codexMetaSessionIsForwarded() throws {
+    // Codex 滤掉了 $ASTER_PANE_ID，只能靠 _meta 里的会话 ID 反查调用方 Pane。
+    var tools = makeTools(pane: nil)
+    let recorder = CallRecorder()
+    let meta: JSONValue = [
+      "sessionId": "01a168e7-9359-79c0-a964-16f6a7fc3259",
+      "x-codex-turn-metadata": ["session_id": "ignored-when-sessionId-present"],
+    ]
+    _ = tools.handle(
+      request("tools/call", params: ["name": "host_close", "arguments": ["host": "web"], "_meta": meta])
+    ) { method, params in
+      recorder.calls.append((method, params))
+      return .object([:])
+    }
+    let agent = try #require(recorder.calls.first?.params["agent"])
+    #expect(agent["agent_session"] == "01a168e7-9359-79c0-a964-16f6a7fc3259")
+    #expect(agent["caller_pane"] == nil)
+
+    #expect(
+      AgentHostMCPTools.agentSessionID(fromMeta: ["x-codex-turn-metadata": ["session_id": "s-1"]]) == "s-1")
+    #expect(AgentHostMCPTools.agentSessionID(fromMeta: ["sessionId": "bad\nid"]) == nil)
+    #expect(AgentHostMCPTools.agentSessionID(fromMeta: ["sessionId": .string(String(repeating: "a", count: 129))]) == nil)
+    #expect(AgentHostMCPTools.agentSessionID(fromMeta: ["sessionId": ""]) == nil)
+    #expect(AgentHostMCPTools.agentSessionID(fromMeta: nil) == nil)
+    // 没有 _meta 时不带这个字段（Claude Code 照旧只靠 caller_pane）。
+    let (_, plain) = callTool(&tools, "host_close", ["host": "web"])
+    #expect(plain.calls.first?.params["agent"]?["agent_session"] == nil)
+  }
+
   @Test("其余工具映射到对应控制方法")
   func otherToolsMapToMethods() throws {
     var tools = makeTools()

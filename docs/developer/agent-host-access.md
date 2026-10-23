@@ -45,9 +45,10 @@ ssh-agent、模拟点击。这不是沙箱。目标是：agent 拿不到秘密�
 
 ## 控制方法
 
-所有方法带 `agent: {session, client?, caller_pane?}`：`session` 是 1–128 字节的会话键；`client`
-只进审计；`caller_pane` 来自 `$ASTER_PANE_ID`。服务端若能把 `caller_pane` 解析成正在跑 agent 的
-Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<session>#<provider>:<sessionID>`），
+所有方法带 `agent: {session, client?, caller_pane?, agent_session?}`：`session` 是 1–128 字节的会话键；`client`
+只进审计；`caller_pane` 来自 `$ASTER_PANE_ID`；`agent_session`（≤128 字节）是 MCP 客户端在调用里自报的
+agent 会话 ID。服务端先按 `caller_pane` 找调用方 Pane，找不到再按 `agent_session` 找 hooks 上报了同一会话 ID
+的 Pane（恰好一个才算）。找到正在跑 agent 的 Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<session>#<provider>:<sessionID>`），
 新开的 Claude 会话因此不会继承旧会话的「本会话允许」。`host` 是主机 UUID 或精确名称；重名
 `ambiguous_target`，找不到 / 默认项 `not_found`。
 
@@ -172,6 +173,11 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   或 `.window` 独立浮窗。搬动在同一轮主循环里先摘后装，不调 `stop`，surface 与远端命令都不断。
 - 调用方 Pane：`AgentHostControlCommands.resolveAgentHostCallerPane` 把 `$ASTER_PANE_ID`（短 ID）解析成
   `record.runtime.id`，存进 `AgentHostResolvedCaller.paneUUID`。它只用于呈现，不进会话键、不进审计。
+  Codex 启动 MCP server 时只放行 `HOME`、`PATH` 等少数环境变量，`$ASTER_PANE_ID` 进不来；新版还经共享的
+  `codex app-server` 守护进程启动它，多个 Codex 会话共用一个 MCP 进程，进程树也指不回 Pane。所以 `aster mcp`
+  从 tools/call 的 `_meta.sessionId`（退路 `_meta.x-codex-turn-metadata.session_id`）取会话 ID 发成
+  `agent_session`，`resolveAgentHostCallerPane(agentSession:)` 在全部 Pane 里找 hooks 上报了同一 ID 的那个。
+  没装 Codex hooks 时找不到 Pane，终端退回浮窗。
 - 新终端的去处：偏好 `AppPreferences.agentHostTerminalPresentation`（键 `aster.agent-hosts.terminal-presentation.v1`，
   默认 `docked`，未知值按 `docked`）是停靠、`paneUUID` 有值、`AgentHostPaneLocator` 说 Pane 还在 → 停靠；
   否则浮窗（agent 不在 Aster 里跑、控制服务没起来，行为与停靠功能之前相同）。
@@ -329,7 +335,7 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   退出码 75。客户端超时 = `timeout_ms` + 15 秒。
 - `aster mcp`：同步 stdio JSON-RPC（initialize 记录 `clientInfo.name`、tools/list、tools/call、ping；
   通知忽略）；每次调用新建控制连接；会话键 `mcp:<进程启动时的 UUID>`，`caller_pane` 取
-  `$ASTER_PANE_ID`。工具：`list_hosts`、`host_exec`（`timeout_seconds` 1–50，默认 40）、`host_wait`、
+  `$ASTER_PANE_ID`，`agent_session` 取每次 tools/call 的 `_meta.sessionId`（Codex）。工具：`list_hosts`、`host_exec`（`timeout_seconds` 1–50，默认 40）、`host_wait`、
   `host_read`、`host_interrupt`、`host_close`。结果是文本（状态行 + 代码块输出）加 `structuredContent`；
   错误是 `isError: true` 的工具结果，带按错误码给出的下一步提示。
 - 设置里的「安装到 Claude Code / Codex」：执行 `claude mcp add --scope user aster -- <aster> mcp` /

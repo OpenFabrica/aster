@@ -132,4 +132,30 @@ struct AgentHostControlCommandsTests {
     #expect(extended.paneUUID == paneUUID)
     #expect(!extended.key.contains(paneUUID.uuidString))
   }
+
+  @Test("没有 caller_pane（Codex）时按自报的 agent 会话 ID 找 Pane；caller_pane 能解析时优先用它")
+  func agentSessionFindsCallerPane() {
+    let fixture = AgentHostFixture()
+    var dependencies = fixture.service.dependencies
+    let codexPane = UUID()
+    let claudePane = UUID()
+    dependencies.resolveAgentSessionPane = { session in
+      session == "thread-1" ? ("w1:p3", codexPane, .codex, "thread-1") : nil
+    }
+    dependencies.resolvePane = { _ in ("w1:p1", claudePane, .claudeCode, "abc") }
+    let service = AgentHostService(dependencies: dependencies)
+
+    let codex = service.resolveCaller(AgentHostCaller(session: "mcp:x", client: "codex-mcp-client", agentSession: "thread-1"))
+    #expect(codex.paneUUID == codexPane)
+    #expect(codex.displayName == AgentProvider.codex.displayName)
+    // 多个 Codex 会话可能共用一个 MCP 进程：会话键并入会话 ID 后彼此分开。
+    #expect(codex.key == "mcp:x#\(AgentProvider.codex.rawValue):thread-1")
+
+    let unknown = service.resolveCaller(AgentHostCaller(session: "mcp:x", agentSession: "other"))
+    #expect(unknown.paneUUID == nil)
+    #expect(unknown.key == "mcp:x")
+
+    let both = service.resolveCaller(AgentHostCaller(session: "mcp:x", callerPane: "w1:p1", agentSession: "thread-1"))
+    #expect(both.paneUUID == claudePane)
+  }
 }

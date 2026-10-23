@@ -66,4 +66,15 @@ extension AsterControlDispatcher {
       record.paneID.description, record.runtime.id, info.flatMap { AgentProvider(rawValue: $0.agent) }, info?.sessionID
     )
   }
+
+  /// 按 agent 会话 ID（hooks 上报、存在 Pane 会话上的那个）找正在跑它的 Pane。
+  /// 恰好一个 Pane 匹配才算数：同一会话在两个 Pane 里恢复时宁可退回浮窗，也不停错地方。
+  func resolveAgentHostCallerPane(agentSession: String) -> AgentHostCallerPane? {
+    let matches = bridge.allPanes().compactMap { record -> (AsterControlBridge.PaneRecord, AgentInfo)? in
+      guard let info = bridge.agentInfo(record), info.sessionID == agentSession else { return nil }
+      return (record, info)
+    }
+    guard matches.count == 1, let (record, info) = matches.first else { return nil }
+    return (record.paneID.description, record.runtime.id, AgentProvider(rawValue: info.agent), info.sessionID)
+  }
 }

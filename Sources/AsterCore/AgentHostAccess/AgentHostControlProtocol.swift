@@ -36,20 +36,25 @@ public enum AgentHostLimits {
 
 /// 调用方身份。`session` 是授权与终端复用的键；`client` 只进审计；`caller_pane` 来自
 /// `$ASTER_PANE_ID`，服务端据此把 provider 与 agent session ID 并入有效会话键。
+/// `agent_session` 是 MCP 客户端在调用里自报的会话 ID（Codex 的 `_meta.sessionId`）：
+/// Codex 启动 MCP server 时滤掉了 `$ASTER_PANE_ID`，服务端只能凭它反查调用方 Pane。
 public struct AgentHostCaller: Codable, Equatable, Sendable, AsterControlValidatable {
   public var session: String
   public var client: String?
   public var callerPane: String?
+  public var agentSession: String?
 
   private enum CodingKeys: String, CodingKey {
     case session, client
     case callerPane = "caller_pane"
+    case agentSession = "agent_session"
   }
 
-  public init(session: String, client: String? = nil, callerPane: String? = nil) {
+  public init(session: String, client: String? = nil, callerPane: String? = nil, agentSession: String? = nil) {
     self.session = session
     self.client = client
     self.callerPane = callerPane
+    self.agentSession = agentSession
   }
 
   /// 字节上限 + 禁止控制字符：这些值会进审计与面板标题。
@@ -69,6 +74,12 @@ public struct AgentHostCaller: Codable, Equatable, Sendable, AsterControlValidat
         throw AsterControlError.invalidParams("agent.caller_pane 过长")
       }
       try AgentHostValidation.rejectControlCharacters(callerPane, field: "agent.caller_pane")
+    }
+    if let agentSession {
+      guard agentSession.utf8.count <= AgentHostLimits.maximumSessionBytes else {
+        throw AsterControlError.invalidParams("agent.agent_session 最多 \(AgentHostLimits.maximumSessionBytes) 字节")
+      }
+      try AgentHostValidation.rejectControlCharacters(agentSession, field: "agent.agent_session")
     }
   }
 }

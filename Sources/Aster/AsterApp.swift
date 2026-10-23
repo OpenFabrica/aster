@@ -543,11 +543,13 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
         allowSensitiveSessions: controls.resolvedIPCAllowSensitiveSessions,
         shell: self?.preferences.configuration.shell ?? AsterConfiguration().shell)
     }
-    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID；
-    // 主机终端默认停靠在这个 Pane 底部，定位器经控制桥查 Pane 是否还在、切过去。
+    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析（`$ASTER_PANE_ID`，或 Codex 自报的会话 ID），
+    // 扩展出 provider 与 agent session ID；主机终端默认停靠在这个 Pane 底部，定位器经控制桥查 Pane 是否还在、切过去。
     dispatcher.agentHostService = AgentHostRuntime.install(
-      preferences: preferences, paneLocator: ControlBridgeAgentHostPaneLocator(bridge: bridge)
-    ) { [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector) }.service
+      preferences: preferences, paneLocator: ControlBridgeAgentHostPaneLocator(bridge: bridge),
+      resolvePane: { [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector) },
+      resolveAgentSessionPane: { [weak dispatcher] session in dispatcher?.resolveAgentHostCallerPane(agentSession: session) }
+    ).service
     let server = AsterControlServer(
       socketPath: socketPath,
       onDisconnect: { [weak bridge] connection in
