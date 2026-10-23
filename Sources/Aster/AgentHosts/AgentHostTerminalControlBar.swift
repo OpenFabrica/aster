@@ -2,6 +2,7 @@
 // 状态图标、两行文字（任务 / 状态）与胶囊按钮。默认浮在终端底部居中，按住按钮以外的地方
 // 可以拖到别处。无论 App 是浅色还是深色外观都固定用深色，一眼认出「这里是 agent 在控制」。
 import AppKit
+import AsterCore
 
 /// 控制胶囊。由 `AgentHostTerminalPanelController` 填内容、接按钮动作。
 @MainActor
@@ -21,11 +22,16 @@ final class AgentHostTerminalControlBar: NSView {
   }
 
   static let height: CGFloat = 44
+  /// 常规窗口保持固定宽度；仅随可用窗口宽度收窄，不让命令或主机名改变位置。
+  static let preferredWidth: CGFloat = 520
 
   let interruptButton = AgentHostPillButton(style: .normal)
   let pauseButton = AgentHostPillButton(style: .normal)
   let closeButton = AgentHostPillButton(style: .destructive)
 
+  private let grip = AgentHostTerminalGripView()
+  private let iconSlot = NSView()
+  private var pauseButtonWidth: CGFloat = 0
   private let spinner = NSProgressIndicator()
   private let iconView = NSImageView()
   private let titleLabel = NSTextField(labelWithString: "")
@@ -59,6 +65,8 @@ final class AgentHostTerminalControlBar: NSView {
   func update(title: String, status: String, tone: Tone) {
     titleLabel.stringValue = title
     statusLabel.stringValue = status
+    titleLabel.toolTip = title
+    statusLabel.toolTip = status
     statusLabel.textColor = Self.statusColor(for: tone)
     let spinning = tone == .active
     spinner.isHidden = !spinning
@@ -66,6 +74,7 @@ final class AgentHostTerminalControlBar: NSView {
     if spinning { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
     iconView.image = Self.icon(for: tone)
     iconView.contentTintColor = Self.statusColor(for: tone)
+    needsLayout = true
   }
 
   // MARK: - 拖动
@@ -100,32 +109,11 @@ final class AgentHostTerminalControlBar: NSView {
   // MARK: - 布局
 
   private func buildLayout() {
-    let grip = AgentHostTerminalGripView()
-    grip.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([
-      grip.widthAnchor.constraint(equalToConstant: 6),
-      grip.heightAnchor.constraint(equalToConstant: 14),
-    ])
-
     spinner.style = .spinning
     spinner.controlSize = .small
     spinner.isDisplayedWhenStopped = false
     iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-    // 图标与转圈叠在同一个 20pt 方格里，切换时文字不跳动。
-    let iconSlot = NSView()
-    for view in [spinner, iconView] as [NSView] {
-      view.translatesAutoresizingMaskIntoConstraints = false
-      iconSlot.addSubview(view)
-      NSLayoutConstraint.activate([
-        view.centerXAnchor.constraint(equalTo: iconSlot.centerXAnchor),
-        view.centerYAnchor.constraint(equalTo: iconSlot.centerYAnchor),
-      ])
-    }
-    iconSlot.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([
-      iconSlot.widthAnchor.constraint(equalToConstant: 20),
-      iconSlot.heightAnchor.constraint(equalToConstant: 20),
-    ])
+    for view in [spinner, iconView] as [NSView] { iconSlot.addSubview(view) }
 
     titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
     titleLabel.textColor = .white
@@ -133,32 +121,38 @@ final class AgentHostTerminalControlBar: NSView {
     for label in [titleLabel, statusLabel] {
       label.lineBreakMode = .byTruncatingTail
       label.maximumNumberOfLines = 1
-      label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
-    let texts = NSStackView(views: [titleLabel, statusLabel])
-    texts.orientation = .vertical
-    texts.alignment = .leading
-    texts.spacing = 1
-    texts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    // 两种操作文案共用同一宽度，接管切换时不挤动文字区和右侧按钮；按本地化文案测量。
+    pauseButtonWidth = [L("接管"), L("交还 agent")].map {
+      ceil(($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold)]).width) + 24
+    }.max() ?? 0
+    for view in [grip, iconSlot, titleLabel, statusLabel, interruptButton, pauseButton, closeButton] {
+      addSubview(view)
+    }
+  }
 
-    let buttons = NSStackView(views: [interruptButton, pauseButton, closeButton])
-    buttons.orientation = .horizontal
-    buttons.spacing = 6
-    buttons.setContentCompressionResistancePriority(.required, for: .horizontal)
+  /// 与外层终端容器一样使用 frame 布局；按钮从右侧排起，文字只使用剩余宽度。
+  /// 尺寸和位置在同一轮布局内确定，不依赖 Stack 的延迟 intrinsic size 刷新。
+  override func layout() {
+    super.layout()
+    grip.frame = NSRect(x: 12, y: (bounds.height - 14) / 2, width: 6, height: 14)
+    iconSlot.frame = NSRect(x: 26, y: (bounds.height - 20) / 2, width: 20, height: 20)
+    spinner.frame = iconSlot.bounds
+    iconView.frame = iconSlot.bounds
 
-    let row = NSStackView(views: [grip, iconSlot, texts, buttons])
-    row.orientation = .horizontal
-    row.alignment = .centerY
-    row.spacing = 10
-    row.setCustomSpacing(8, after: grip)
-    row.setCustomSpacing(18, after: texts)
-    row.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(row)
-    NSLayoutConstraint.activate([
-      row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-      row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      row.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
+    var trailing = bounds.width - 8
+    for button in [closeButton, pauseButton, interruptButton] {
+      let width = button === pauseButton ? pauseButtonWidth : button.intrinsicContentSize.width
+      button.frame = NSRect(x: trailing - width, y: (bounds.height - 28) / 2, width: width, height: 28)
+      trailing = button.frame.minX - 6
+    }
+    let textX: CGFloat = 56
+    let textWidth = max(interruptButton.frame.minX - 18 - textX, 0)
+    let titleHeight = ceil(titleLabel.intrinsicContentSize.height)
+    let statusHeight = ceil(statusLabel.intrinsicContentSize.height)
+    let textY = ((bounds.height - titleHeight - statusHeight - 1) / 2).rounded()
+    statusLabel.frame = NSRect(x: textX, y: textY, width: textWidth, height: statusHeight)
+    titleLabel.frame = NSRect(x: textX, y: textY + statusHeight + 1, width: textWidth, height: titleHeight)
   }
 
   // MARK: - 外观

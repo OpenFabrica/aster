@@ -37,7 +37,7 @@ final class AgentHostTerminalControlOverlay: NSView {
     glowView.wantsLayer = true
     addSubview(glowView)
     for glow in glowLayers {
-      glow.colors = [Self.glowBlue.withAlphaComponent(0.38).cgColor, Self.glowBlue.withAlphaComponent(0).cgColor]
+      glow.colors = [Self.glowBlue.withAlphaComponent(0.55).cgColor, Self.glowBlue.withAlphaComponent(0).cgColor]
       glowView.layer?.addSublayer(glow)
     }
     dotsLayer.backgroundColor = NSColor(patternImage: Self.dotPattern()).cgColor
@@ -171,14 +171,14 @@ final class AgentHostTerminalControlOverlay: NSView {
     }
   }
 
-  /// 透明度在 0.55 与 1 之间缓慢往返；系统开了「减少动态效果」时保持静止。
+  /// 不透明度在 0.75 与 1 之间缓慢往返，避免呼吸低点过淡；系统开了「减少动态效果」时保持静止。
   private func startBreathing() {
     guard let layer = glowView.layer, layer.animation(forKey: "breathing") == nil,
       !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     else { return }
     let animation = CABasicAnimation(keyPath: "opacity")
     animation.fromValue = 1
-    animation.toValue = 0.55
+    animation.toValue = 0.75
     animation.duration = 1.6
     animation.autoreverses = true
     animation.repeatCount = .infinity
@@ -189,7 +189,7 @@ final class AgentHostTerminalControlOverlay: NSView {
   /// 6pt 一格、中心一个 1.2pt 蓝点的平铺图案。
   private static func dotPattern() -> NSImage {
     NSImage(size: NSSize(width: 6, height: 6), flipped: false) { rect in
-      glowBlue.withAlphaComponent(0.55).setFill()
+      glowBlue.withAlphaComponent(0.7).setFill()
       NSBezierPath(ovalIn: NSRect(x: rect.midX - 0.6, y: rect.midY - 0.6, width: 1.2, height: 1.2)).fill()
       return true
     }

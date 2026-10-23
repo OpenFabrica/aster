@@ -89,7 +89,7 @@ final class AgentHostTerminalPanelController: NSObject, AgentHostTerminalPresent
     // agent 真正在操作终端（连接、跑命令）且没被接管时盖遮罩、挡输入；等输入、空闲、接管后撤掉。
     let agentControlling = (terminal.state == .connecting || terminal.state == .busy) && !terminal.isPaused
     content?.setAgentControlling(agentControlling)
-    // 文字与按钮宽度变了，胶囊要按新内容重新排版。
+    // 更新控件布局；胶囊尺寸只跟随窗口可用宽度，不随状态文案伸缩。
     content?.needsLayout = true
   }
 
@@ -150,7 +150,7 @@ private final class AgentHostTerminalPanel: NSPanel {
 /// 终端 + 控制遮罩 + 浮动控制胶囊的容器。用 frame 布局而不是约束：终端宿主是 frame 挂载的长期复用视图，
 /// 与 Quick Terminal 一样避免混用约束（见 QuickTerminalController.installTerminalHost）。
 @MainActor
-private final class AgentHostTerminalContentView: NSView {
+final class AgentHostTerminalContentView: NSView {
   /// 胶囊默认离终端底边的距离，以及拖动时离四边的最小距离。
   private static let barBottomMargin: CGFloat = 16
   private static let barEdgeMargin: CGFloat = 8
@@ -198,13 +198,13 @@ private final class AgentHostTerminalContentView: NSView {
   }
 
   /// 终端占满窗口并留出边框宽度；胶囊浮在终端上，默认底部居中，拖过之后保持用户的位置，
-  /// 窗口缩小时收回到可见范围内。胶囊宽度贴合内容，窗口窄时两侧各留 8pt。
+  /// 窗口缩小时收回到可见范围内。胶囊使用固定首选宽度，窗口窄时两侧各留 8pt。
   override func layout() {
     super.layout()
     let inset: CGFloat = 2
     hostView.frame = bounds.insetBy(dx: inset, dy: inset)
     controlOverlay.frame = hostView.frame
-    let barWidth = min(max(controlBar.fittingSize.width, 360), max(bounds.width - Self.barEdgeMargin * 2, 0))
+    let barWidth = min(AgentHostTerminalControlBar.preferredWidth, max(bounds.width - Self.barEdgeMargin * 2, 0))
     let size = NSSize(width: barWidth, height: AgentHostTerminalControlBar.height)
     let defaultOrigin = NSPoint(x: ((bounds.width - barWidth) / 2).rounded(), y: Self.barBottomMargin)
     let origin = clampedBarOrigin(barOrigin ?? defaultOrigin, size: size)

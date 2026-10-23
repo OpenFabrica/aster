@@ -7,6 +7,65 @@ import Testing
 @MainActor
 @Suite("Agent 主机终端控制视图")
 struct AgentHostTerminalControlViewsTests {
+  @Test("长命令、主机名与接管状态变化不会移动胶囊和按钮，窄窗口仍可操作")
+  func controlBarStaysInPlaceAcrossContentChanges() throws {
+    let bar = AgentHostTerminalControlBar()
+    bar.interruptButton.title = "中断"
+    bar.pauseButton.title = "接管"
+    bar.closeButton.title = "关闭终端"
+    let content = AgentHostTerminalContentView(controlBar: bar, hostView: NSView(), focusTerminal: {})
+    let window = NSWindow(contentRect: content.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = content
+    defer { window.close() }
+
+    for width: CGFloat in [760, 420] {
+      window.setContentSize(NSSize(width: width, height: 460))
+      bar.pauseButton.title = "接管"
+      bar.update(title: "claude-code → 算力服务器", status: "空闲", tone: .idle)
+      content.needsLayout = true
+      content.layoutSubtreeIfNeeded()
+      bar.layoutSubtreeIfNeeded()
+      let initialFrame = bar.frame
+      let buttons = [bar.interruptButton, bar.pauseButton, bar.closeButton]
+      let initialButtons = buttons.map { bar.convert($0.bounds, from: $0) }
+
+      for (title, status, tone, pauseTitle) in [
+        ("claude-code → 算力服务器", "正在运行：" + String(repeating: "systemctl status milo-tts && ", count: 20), AgentHostTerminalControlBar.Tone.active, "接管"),
+        (String(repeating: "production-host-", count: 20), "等待你的输入：请直接在下面的终端里回答", .attention, "接管"),
+        ("claude-code → 算力服务器", "空闲 · agent 已暂停", .paused, "交还 agent"),
+        ("claude-code → 算力服务器", "空闲", .idle, "接管"),
+      ] {
+        bar.pauseButton.title = pauseTitle
+        bar.update(title: title, status: status, tone: tone)
+        content.needsLayout = true
+        content.layoutSubtreeIfNeeded()
+        bar.layoutSubtreeIfNeeded()
+        #expect(bar.frame == initialFrame)
+        #expect(buttons.map { bar.convert($0.bounds, from: $0) } == initialButtons)
+        #expect(content.bounds.contains(bar.frame))
+        for button in buttons {
+          let rect = bar.convert(button.bounds, from: button)
+          #expect(bar.bounds.contains(rect))
+          #expect(rect.width >= button.intrinsicContentSize.width)
+          let hit = try #require(bar.hitTest(content.convert(NSPoint(x: rect.midX, y: rect.midY), from: bar)))
+          #expect(hit === button || hit.isDescendant(of: button))
+        }
+      }
+      bar.onDrag?(CGSize(width: -100, height: 140))
+      content.layoutSubtreeIfNeeded()
+      let draggedFrame = bar.frame
+      #expect(draggedFrame.origin.y > initialFrame.origin.y)
+      bar.update(title: "远端主机", status: String(repeating: "长命令输出", count: 100), tone: .active)
+      content.needsLayout = true
+      content.layoutSubtreeIfNeeded()
+      #expect(bar.frame == draggedFrame)
+      window.setContentSize(NSSize(width: 420, height: 220))
+      content.layoutSubtreeIfNeeded()
+      #expect(content.bounds.contains(bar.frame))
+    }
+  }
+
   @Test("遮罩未生效时点击穿透给终端，生效后接住点击和键盘焦点，撤掉后再放行")
   func overlayBlocksInputOnlyWhileActive() {
     let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
