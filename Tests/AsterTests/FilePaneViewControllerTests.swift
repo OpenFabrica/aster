@@ -10,13 +10,36 @@ import WebKit
 func fileRenderPipelineSupportsOperatorToken() async throws {
   let artifact = await FileRenderPipeline().renderSource(
     "let selected = preferred ?? fallback",
-    language: "swift"
+    language: "swift",
+    dark: false
   )
   guard case .highlightedRTF(let data)? = artifact else {
     Issue.record("源码渲染没有返回 RTF")
     return
   }
   #expect(!data.isEmpty)
+}
+
+@Test("深色外观的源码高亮使用浅色正文，避免深底深字")
+func fileRenderPipelineUsesLightTextInDarkAppearance() async throws {
+  let text = "plain words"
+  // 对比浅色与深色两次渲染的正文亮度：深色外观下正文必须明显更亮。
+  func brightness(dark: Bool) async throws -> CGFloat {
+    let artifact = await FileRenderPipeline().renderSource(text, language: "plaintext", dark: dark)
+    guard case .highlightedRTF(let data)? = artifact else {
+      Issue.record("源码渲染没有返回 RTF")
+      return -1
+    }
+    let rendered = try NSAttributedString(
+      data: data, options: [.documentType: NSAttributedString.DocumentType.rtf],
+      documentAttributes: nil)
+    let color = try #require(rendered.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
+    return try #require(color.usingColorSpace(.sRGB)).brightnessComponent
+  }
+  let light = try await brightness(dark: false)
+  let dark = try await brightness(dark: true)
+  #expect(light < 0.5)
+  #expect(dark > 0.7)
 }
 
 @Test("File Pane 通过目录事件即时重载外部 atomic replace")

@@ -82,7 +82,9 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   required init?(coder: NSCoder) { nil }
 
   override func loadView() {
-    let root = NSView()
+    let root = AppearanceObservingView()
+    // 源码高亮颜色是渲染时按外观固定下来的，外观切换后要按新主题重新着色。
+    root.onEffectiveAppearanceChange = { [weak self] in self?.scheduleSourceRendering() }
     let column = NSStackView(views: [makeToolbar(), contentHost])
     column.orientation = .vertical
     // 纵向 NSStackView 默认 centerX 对齐：内容视图一旦有固有宽度（如 transcript
@@ -487,6 +489,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     let revision = sourceRenderRevision
     let text = textView.string
     let language = selectedLanguage ?? languageName(for: fileURL?.pathExtension.lowercased() ?? "")
+    let dark = textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     sourceRenderTask?.cancel()
     sourceRenderTask = Task { [weak self] in
       if debounced {
@@ -494,7 +497,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
         guard !Task.isCancelled else { return }
       }
       guard let self,
-        case .highlightedRTF(let data)? = await renderer.renderSource(text, language: language),
+        case .highlightedRTF(let data)? = await renderer.renderSource(text, language: language, dark: dark),
         !Task.isCancelled,
         revision == sourceRenderRevision,
         let textView = sourceTextView,
@@ -946,6 +949,16 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
 /// 二进制预览只保留有界字节，并让 `NSTableView` 按可见行请求内容；即使达到 4 MiB
 /// 上限也不会预先构造二十多万行字符串或同等数量的 AppKit 视图。
 @MainActor
+/// File Pane 根视图：外观（浅色/深色）变化时回调，供源码高亮按新主题重新渲染。
+private final class AppearanceObservingView: NSView {
+  var onEffectiveAppearanceChange: (() -> Void)?
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    onEffectiveAppearanceChange?()
+  }
+}
+
 private final class HexPreviewView: NSView, NSTableViewDataSource, NSTableViewDelegate {
   private let data: Data
   private let isTruncated: Bool
