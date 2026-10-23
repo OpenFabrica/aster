@@ -136,12 +136,11 @@ final class GhosttySurfaceView: NSView {
   var linkUnderlineRefreshScheduled = false
   var linkPathExistenceCache: [String: Bool] = [:]
   var lastLinkHoverLocation: NSPoint?
-  var commandClickOrigin: NSPoint?
+  /// mouseDown 时由 Aster 接管的 Command 点击；nil 表示这次左键手势归 Ghostty。
+  var commandClickGesture: GhosttyCommandClickGesture?
   /// 已向 Ghostty 发出左键 PRESS、尚未发出 RELEASE。宿主整树刷新会把本视图拆下再装回，
   /// AppKit 不再把 mouseUp 送来；Ghostty 会一直当左键按着，之后每次移动都在拉选区。
   var leftMouseReleasePending = false
-  /// 原生 open_url 每回流一次加一；Aster 侧 Command 点击据此避免对同一次点击重复打开。
-  var nativeOpenURLSequence = 0
   var lastGhosttyMouseShape = GHOSTTY_MOUSE_SHAPE_TEXT
   var linkHoverCursorActive = false
 
@@ -259,8 +258,8 @@ final class GhosttySurfaceView: NSView {
     onSearchStateChange?()
   }
 
+  /// Ghostty 原生 open_url（点击归 Ghostty 时的 OSC 8 链接）；交给 Session 走同一套打开授权。
   func handleOpenURL(_ value: String) {
-    nativeOpenURLSequence &+= 1
     onOpenURL?(value)
   }
 

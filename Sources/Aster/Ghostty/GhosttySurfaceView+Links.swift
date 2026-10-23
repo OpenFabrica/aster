@@ -12,12 +12,21 @@ struct GhosttyInlineLinkTarget: Equatable {
   let endColumn: Int
 }
 
+/// mouseDown 时由 Aster 接管的一次 Command 点击。`downEvent` 留给拖出阈值时在按下
+/// 位置补发 PRESS，把手势还给 Ghostty 拖选。
+struct GhosttyCommandClickGesture {
+  let origin: NSPoint
+  let downEvent: NSEvent
+  let target: String
+  let source: DetectedTargetSource
+}
+
 /// Ghostty 引擎下 Aster 侧的链接识别：Command 按下时给视口内所有 URL 与本地路径画
 /// 下划线，悬停时显示预览与手形指针，Command 点击交给 `TerminalTargetOpenCoordinator`。
 ///
 /// Ghostty 原生的 `link-url` 已关闭（见 `GhosttyConfiguration`），普通文字 URL 与路径
-/// 只有这一条通道；OSC 8 显式链接仍由 Ghostty 原生处理，原生 open_url / mouse_over_link
-/// 经主队列异步回流，因此这里的点击与预览都要避让原生来源。
+/// 只有这一条通道；OSC 8 显式链接的悬停由 Ghostty 原生 mouse_over_link 经主队列异步回流，
+/// 预览要避让原生来源。命中链接的 Command 点击在 mouseDown 即归 Aster，不再交给 Ghostty。
 extension GhosttySurfaceView {
   /// Command 点击允许的按下/抬起位移，超过视为拖拽选区而不是点击。
   private static let commandClickSlop: CGFloat = 4
@@ -100,32 +109,50 @@ extension GhosttySurfaceView {
 
   // MARK: - Command 点击
 
-  /// 记录 Command 点击的按下位置；抬起时位移超过阈值视为选区拖拽。
-  func beginCommandClickTracking(with event: NSEvent) {
-    guard event.modifierFlags.contains(.command), navigationMode == .normal else {
-      commandClickOrigin = nil
-      return
+  /// Command 按下：命中链接则由 Aster 接管整次点击并返回 true，调用方不得再把 PRESS
+  /// 交给 Ghostty。开着鼠标上报的前台程序（如 Claude Code 全屏）从 SGR 上报里看不出
+  /// Command，会把它当普通点击、自己打开链接，绕过打开确认；只有不交给 Ghostty 才能拦住。
+  /// 命中判断与手形一致：OSC 8 原生命中优先（显示文字不一定是地址），其次 Aster 侧识别。
+  func beginCommandClick(with event: NSEvent) -> Bool {
+    commandClickGesture = nil
+    guard event.modifierFlags.contains(.command), navigationMode == .normal,
+      linkDetectionEnabled
+    else { return false }
+    let origin = convert(event.locationInWindow, from: nil)
+    let hit: (target: String, source: DetectedTargetSource)
+    if let nativeHoveredLink {
+      hit = (nativeHoveredLink, .osc8)
+    } else if let inline = inlineLinkTarget(at: origin) {
+      hit = (inline.text, .plainText)
+    } else {
+      return false
     }
-    commandClickOrigin = convert(event.locationInWindow, from: nil)
+    commandClickGesture = GhosttyCommandClickGesture(
+      origin: origin, downEvent: event, target: hit.target, source: hit.source)
+    return true
   }
 
-  /// Command 抬起：命中 Aster 侧目标则打开。原生 OSC 8 的 open_url 会先一步进入主队列，
-  /// 因此把打开动作也排到主队列之后，并用序号确认原生没有刚打开过同一次点击。
-  func finishCommandClick(with event: NSEvent) {
-    defer { commandClickOrigin = nil }
-    guard let origin = commandClickOrigin, event.modifierFlags.contains(.command),
-      navigationMode == .normal, linkDetectionEnabled
-    else { return }
+  /// 指针仍在接管点击按下位置的阈值内；超出即视为拖选而不是点击。
+  func isWithinCommandClickSlop(_ event: NSEvent, of gesture: GhosttyCommandClickGesture) -> Bool {
     let local = convert(event.locationInWindow, from: nil)
-    guard abs(local.x - origin.x) <= Self.commandClickSlop,
-      abs(local.y - origin.y) <= Self.commandClickSlop,
-      let target = inlineLinkTarget(at: local)
-    else { return }
-    let sequence = nativeOpenURLSequence
+    return abs(local.x - gesture.origin.x) <= Self.commandClickSlop
+      && abs(local.y - gesture.origin.y) <= Self.commandClickSlop
+  }
+
+  /// Command 抬起：本次点击由 Aster 接管时返回 true，调用方不得再发 RELEASE。仍按着
+  /// Command 且没拖出阈值才打开；打开排到主队列，等 mouseUp 返回后再弹确认框。
+  func finishCommandClick(with event: NSEvent) -> Bool {
+    guard let gesture = commandClickGesture else { return false }
+    commandClickGesture = nil
+    guard event.modifierFlags.contains(.command), linkDetectionEnabled,
+      isWithinCommandClickSlop(event, of: gesture)
+    else { return true }
+    let target = gesture.target
+    let source = gesture.source
     DispatchQueue.main.async { [weak self] in
-      guard let self, self.nativeOpenURLSequence == sequence else { return }
-      self.onRequestOpenTarget?(target.text, .plainText)
+      self?.onRequestOpenTarget?(target, source)
     }
+    return true
   }
 
   // MARK: - 悬停命中

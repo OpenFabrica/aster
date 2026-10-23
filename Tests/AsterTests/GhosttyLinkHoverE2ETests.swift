@@ -108,10 +108,11 @@ func ghosttyCommandHoverShowsLinkPreview() async throws {
       with: type, location: clickPoint, modifierFlags: [.command], timestamp: 0,
       windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0))
   }
-  view.beginCommandClickTracking(with: try clickEvent(.leftMouseDown))
-  view.finishCommandClick(with: try clickEvent(.leftMouseUp))
+  view.mouseDown(with: try clickEvent(.leftMouseDown))
+  view.mouseUp(with: try clickEvent(.leftMouseUp))
   try await Task.sleep(for: .milliseconds(20))
   #expect(clicked == [url])
+  #expect(!view.leftMouseReleasePending, "Aster 接管的 Command 点击不能向 Ghostty 发 PRESS")
 
   view.linkSchemePolicy = .custom([])
   try await Task.sleep(for: .milliseconds(20))

@@ -42,7 +42,7 @@ Aster 是原生 macOS 终端工作区，面向同时使用 Shell、全屏 TUI、
 13. OSC 必须在进入组件 parser 前流式限长；OSC 52 读取默认每次询问，拒绝时不得触碰系统剪贴板。
 14. 原生文本编辑只接管普通 Shell 屏幕；全屏 TUI 和增强键盘协议必须保留程序协商的按键编码。
 15. 自动安全输入只保护当前聚焦 Pane 中 `ECHO` 关闭且 `ICANON` 保持开启的密码式输入；raw-mode TUI 必须排除。多 Pane 共享引用计数，应用失活时暂停系统保护。
-16. 鼠标报告开启时，本地选择只由“绕过鼠标上报”配置的完整修饰键组合接管；手势在 mouseDown 锁定 owner，不能向前台 TUI 泄漏半组 press/release。
+16. 鼠标报告开启时，本地选择只由“绕过鼠标上报”配置的完整修饰键组合接管；手势在 mouseDown 锁定 owner，不能向前台 TUI 泄漏半组 press/release。Command 点击命中链接时整组 press/release 都归 Aster、不上报，否则程序会绕过打开确认自行打开链接。
 17. 平滑滚动只改变 normal buffer 的视口；alternate screen 不允许首尾越界，手势结束必须回到完整字符行。
 18. Shell Integration 资源必须来自签名 Bundle；受管 rc 区块必须幂等、可卸载并保留区块外内容、权限与符号链接。所有目标先预检，后续写入失败时回滚已改目标。
 19. OSC 133 只接受 A/B/C/D、已知提示符扩展 A;cl=line / P;k=i 与非负退出码，不接收或持久化命令正文；命令位置使用包含已裁剪行数的绝对坐标。时间线变化通过专用 `outlineChanged` 事件局部刷新 Outline，不提升为通用工作区重建。

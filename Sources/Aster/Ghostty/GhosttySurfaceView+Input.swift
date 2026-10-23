@@ -129,8 +129,10 @@ extension GhosttySurfaceView {
     guard let surface else { return }
     window?.makeFirstResponder(self)
     guard navigationMode == .normal else { return }
-    beginCommandClickTracking(with: event)
     reportMousePosition(event)
+    // Command 点击命中链接时整次手势归 Aster：PRESS 不交给 Ghostty，开了鼠标上报的
+    // 前台程序也就收不到这次点击，不会绕过打开确认自己去开链接。
+    if beginCommandClick(with: event) { return }
     _ = ghostty_surface_mouse_button(
       surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modifiers(event))
     leftMouseReleasePending = true
@@ -144,11 +146,11 @@ extension GhosttySurfaceView {
   override func mouseUp(with event: NSEvent) {
     guard navigationMode == .normal, let surface else { return }
     reportMousePosition(event)
+    // Aster 接管的 Command 点击从没向 Ghostty 发过 PRESS，RELEASE 也一并不发。
+    if finishCommandClick(with: event) { return }
     leftMouseReleasePending = false
     _ = ghostty_surface_mouse_button(
       surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, modifiers(event))
-    // 先让 Ghostty 处理 OSC 8 原生打开，再由 Aster 侧识别普通文字目标。
-    finishCommandClick(with: event)
   }
 
   override func rightMouseDown(with event: NSEvent) {
@@ -217,8 +219,20 @@ extension GhosttySurfaceView {
     updateLinkHoverCursor()
     if !linkHoverCursorActive { applyMouseShape(lastGhosttyMouseShape) }
   }
+  /// 左键拖动：Aster 接管的 Command 点击拖出阈值后交还 Ghostty，其余照常上报位置。
   override func mouseDragged(with event: NSEvent) {
-    if navigationMode == .normal { reportMousePosition(event) }
+    guard navigationMode == .normal else { return }
+    if let gesture = commandClickGesture {
+      // 阈值内的抖动仍算点击。拖出阈值就是拖选：在按下位置补发 PRESS，把手势还给
+      // Ghostty，之后与普通拖选一致，前台程序收到的也是成对的按下与抬起。
+      guard !isWithinCommandClickSlop(event, of: gesture), let surface else { return }
+      commandClickGesture = nil
+      reportMousePosition(gesture.downEvent)
+      _ = ghostty_surface_mouse_button(
+        surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modifiers(gesture.downEvent))
+      leftMouseReleasePending = true
+    }
+    reportMousePosition(event)
   }
   override func rightMouseDragged(with event: NSEvent) {
     if navigationMode == .normal { reportMousePosition(event) }
