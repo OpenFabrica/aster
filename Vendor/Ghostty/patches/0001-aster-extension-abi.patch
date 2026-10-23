@@ -2166,13 +2166,65 @@ index 1d1bfe2..02b5a06 100644
 +}
 +
 diff --git a/src/termio/stream_handler.zig b/src/termio/stream_handler.zig
-index fb3a6b3..0d6697c 100644
+index fb3a6b3..094ffee 100644
 --- a/src/termio/stream_handler.zig
 +++ b/src/termio/stream_handler.zig
-@@ -950,0 +951,6 @@ pub const StreamHandler = struct {
+@@ -84,0 +85,5 @@ pub const StreamHandler = struct {
++    /// Aster: set once a shell-integrated command starts or ends (OSC 133
++    /// C / D). The next primary prompt then drops input-reporting modes the
++    /// command left behind; prompt repaints without a command keep them.
++    aster_command_ran: bool = false,
++
+@@ -950,0 +956,6 @@ pub const StreamHandler = struct {
 +        // Aster: Screen.reset() puts the cursor back to the hard-coded block.
 +        // RIS means "back to defaults", so reapply the configured cursor-style
 +        // and blink, as a new surface would. Managed session replay starts
 +        // every snapshot with RIS, which otherwise leaves restored panes with
 +        // a block cursor.
 +        try self.setCursorStyle(.default);
+@@ -1079,0 +1091 @@ pub const StreamHandler = struct {
++                self.aster_command_ran = true;
+@@ -1083,0 +1096 @@ pub const StreamHandler = struct {
++                self.aster_command_ran = true;
+@@ -1094,0 +1108,9 @@ pub const StreamHandler = struct {
++            // Aster: a new primary prompt after a command means the shell
++            // owns the keyboard again.
++            .fresh_line_new_prompt,
++            .new_command,
++            => if (self.aster_command_ran) {
++                self.aster_command_ran = false;
++                try self.asterResetLeakedInputModes();
++            },
++
+@@ -1099,2 +1120,0 @@ pub const StreamHandler = struct {
+-            .fresh_line_new_prompt,
+-            .new_command,
+@@ -1109,0 +1130,28 @@ pub const StreamHandler = struct {
++    /// Aster: drop mouse, focus and kitty keyboard reporting that a command
++    /// (e.g. a TUI agent killed or exiting without cleanup) left enabled.
++    /// Otherwise every mouse move and modified key reaches the shell as raw
++    /// text like `35;167;42M` or `9;5u`. Shells enable their own modes after
++    /// printing the prompt, so resetting here never undoes the shell's state.
++    fn asterResetLeakedInputModes(self: *StreamHandler) !void {
++        const modes = [_]terminal.Mode{
++            .mouse_event_x10,
++            .mouse_event_normal,
++            .mouse_event_button,
++            .mouse_event_any,
++            .mouse_format_utf8,
++            .mouse_format_sgr,
++            .mouse_format_urxvt,
++            .mouse_format_sgr_pixels,
++            .focus_event,
++        };
++        // Go through setMode so side effects (mouse shape, flags) follow.
++        for (modes) |mode| {
++            if (self.terminal.modes.get(mode)) try self.setMode(mode, false);
++        }
++
++        // The command may have pushed flags on either screen.
++        inline for (.{ .primary, .alternate }) |key| {
++            if (self.terminal.screens.get(key)) |screen| screen.kitty_keyboard = .{};
++        }
++    }
++
