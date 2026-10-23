@@ -1,6 +1,7 @@
 // 端到端：在真实 Ghostty surface 上跑本地 sh / bash / zsh（交互、带行编辑），用 AgentHostTerminal 的
 // 真实注入与读屏路径验证标记符协议：回显、软折行、PS2 续行、退出码、状态保留、等输入与
 // 用户半行输入被 Ctrl-U 清掉。远端 SSH 只是把同样的字节转给远端 Shell，协议本身在这里验证。
+// 另验证停车位：终端在从没显示过的浮窗里就能启动，在浮窗与 Pane 停靠区之间搬动不断进程。
 import AppKit
 import AsterCore
 import Foundation
@@ -130,4 +131,53 @@ func agentHostFramingAgainstRealGhosttyShell(shell: String) async throws {
 
   terminal.close()
   #expect(terminal.state == .ended)
+}
+
+@Test("停车位：终端内容装进从没显示过的浮窗就能启动；搬进停靠区、再弹回浮窗，进程不断、照常执行")
+@MainActor
+func agentHostParkedTerminalStartsHiddenAndSurvivesMoves() async throws {
+  _ = NSApplication.shared
+  let preferences = AppPreferences(defaults: makeAgentHostTestDefaults())
+  preferences.configuration.controls.autocompleteOnDeviceLearning = false
+  preferences.setCompatibilityValue(.string("/bin/sh"), forKey: "general.shell")
+  // 测试命令不能进开发者真实的 Shell 历史；环境只在启动 Shell 时读取一次。
+  let previousHistory = ProcessInfo.processInfo.environment["HISTFILE"]
+  setenv("HISTFILE", "/dev/null", 1)
+  defer { if let previousHistory { setenv("HISTFILE", previousHistory, 1) } else { unsetenv("HISTFILE") } }
+  let session = TerminalSession(workingDirectory: "/tmp")
+  defer { session.stop(immediately: true) }
+  let host = session.makeTerminalHost(preferences: preferences)
+  let view = try #require(([host] + host.agentHostDescendants).compactMap { $0 as? GhosttySurfaceView }.first)
+  let content = AgentHostTerminalContentView(controlBar: AgentHostTerminalControlBar(), hostView: host, focusTerminal: {})
+  let panel = AgentHostTerminalPanelController(preferences: preferences)
+  defer { panel.close() }
+
+  panel.install(content)
+  #expect(!panel.window.isVisible)
+  await pollUntil(timeout: .seconds(5)) { view.isProcessRunning }
+  #expect(view.isProcessRunning)
+
+  // 搬进另一个窗口里的停靠区（同样不显示）：同一个进程，输入输出照常。
+  let docks = AgentHostPaneDocks()
+  let pane = UUID()
+  docks.attach(agentHostDockItem("t-park", content: content), to: pane)
+  let dock = try #require(docks.mount(for: pane)).view
+  let window = NSWindow(
+    contentRect: NSRect(x: 0, y: 0, width: 700, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
+  window.isReleasedWhenClosed = false
+  defer { window.close() }
+  dock.frame = window.contentView?.bounds ?? .zero
+  window.contentView?.addSubview(dock)
+  dock.layoutSubtreeIfNeeded()
+  #expect(content.window === window)
+  #expect(view.isProcessRunning)
+  // 输出与输入不同（%s 拼出来），读屏看到它就说明 Shell 真的执行了。
+  #expect(session.sendAutomationBytes(Array("printf 'park%sok\\n' -\r".utf8)))
+  await pollUntil(timeout: .seconds(5)) { session.readActiveScreenText()?.contains("park-ok") == true }
+  #expect(session.readActiveScreenText()?.contains("park-ok") == true)
+
+  docks.detach("t-park")
+  panel.install(content)
+  #expect(content.window === panel.window)
+  #expect(view.isProcessRunning)
 }

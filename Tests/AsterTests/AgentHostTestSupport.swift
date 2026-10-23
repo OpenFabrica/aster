@@ -114,14 +114,37 @@ final class FakeTerminalPresenter: AgentHostTerminalPresenting {
   weak var ownedWindow: NSWindow?
   /// 被关闭快捷键收起的次数。
   private(set) var hiddenByShortcut = 0
+  /// 被「窗口 ▸ Agent 终端」找回的次数。
+  private(set) var revealed = 0
+  /// 当作停靠位置的 Pane；`handlePanesClosed` 判定它已关时清空，模拟转成浮窗。
+  var dockedPaneID: UUID?
   func show(attention: Bool) {
     shown += 1
     if attention { attentions += 1 }
   }
+  func reveal() { revealed += 1 }
   func refresh() {}
   func close() { closed = true }
   func ownsKeyWindow(_ keyWindow: NSWindow) -> Bool { keyWindow === ownedWindow }
   func hideForCloseShortcut() { hiddenByShortcut += 1 }
+  func handlePanesClosed(where isClosed: (UUID) -> Bool) {
+    if let pane = dockedPaneID, isClosed(pane) { dockedPaneID = nil }
+  }
+}
+
+/// 可控的 Pane 定位器：测试决定哪些 Pane 还在，记录被切过去的 Pane。
+@MainActor
+final class FakePaneLocator: AgentHostPaneLocator {
+  var alivePanes: Set<UUID> = []
+  private(set) var revealedPanes: [UUID] = []
+  var onPanesClosed: (() -> Void)?
+  func isPaneAlive(_ paneID: UUID) -> Bool { alivePanes.contains(paneID) }
+  func revealPane(_ paneID: UUID) { revealedPanes.append(paneID) }
+  /// 模拟 Pane 关闭：移出存活集合并发出通知。
+  func closePane(_ paneID: UUID) {
+    alivePanes.remove(paneID)
+    onPanesClosed?()
+  }
 }
 
 /// 记录型批准：按预设回答，或挂起直到测试调用 `answer`。

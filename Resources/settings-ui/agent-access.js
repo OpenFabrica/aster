@@ -176,7 +176,7 @@
     label.append(input, element("span", "toggle-track"));
     card.appendChild(settingRow(
       t("允许编程 agent 申请主机访问"),
-      t("打开后，Claude Code、Codex 等 agent 可以申请在已保存的主机上执行命令。每台主机都要你批准；命令在浮动终端里执行，你能看到并随时接手。agent 拿不到口令或私钥。"),
+      t("打开后，Claude Code、Codex 等 agent 可以申请在已保存的主机上执行命令。每台主机都要你批准；命令在你看得见的终端里执行（默认停靠在 agent 所在 Pane 的底部），你能随时接手。agent 拿不到口令或私钥。"),
       label,
     ));
     return section;

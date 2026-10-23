@@ -46,11 +46,13 @@ struct AgentHostCloseShortcutTests {
       terminalID: "t-close", hostID: UUID(), hostName: "prod-db", target: "deploy@prod-db:22", sessionKey: "s1",
       caller: AgentHostResolvedCaller(key: "s1", session: "s1"), surface: surface)
     var closeRequests = 0
-    let controller = AgentHostTerminalPanelController(
+    // 没有定位器：agent 不在 Aster 里跑，终端用浮窗。
+    let controller = AgentHostTerminalPresenter(
       terminal: terminal, hostView: NSView(), preferences: AppPreferences(defaults: makeAgentHostTestDefaults()),
+      docks: AgentHostPaneDocks(), locator: nil,
       actions: .init(interrupt: {}, togglePause: {}, focusTerminal: {}, closeTerminal: { closeRequests += 1 }))
     defer { controller.close() }
-    let panel = controller.window
+    let panel = controller.panel.window
     let other = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
     other.isReleasedWhenClosed = false
 

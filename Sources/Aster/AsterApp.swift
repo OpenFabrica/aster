@@ -536,10 +536,11 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
         allowSensitiveSessions: controls.resolvedIPCAllowSensitiveSessions,
         shell: self?.preferences.configuration.shell ?? AsterConfiguration().shell)
     }
-    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID。
-    dispatcher.agentHostService = AgentHostRuntime.install(preferences: preferences) {
-      [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector)
-    }.service
+    // agent 远程执行（host.exec 等）：调用方 Pane 经控制桥解析，扩展出 provider 与 agent session ID；
+    // 主机终端默认停靠在这个 Pane 底部，定位器经控制桥查 Pane 是否还在、切过去。
+    dispatcher.agentHostService = AgentHostRuntime.install(
+      preferences: preferences, paneLocator: ControlBridgeAgentHostPaneLocator(bridge: bridge)
+    ) { [weak dispatcher] selector in dispatcher?.resolveAgentHostCallerPane(selector) }.service
     let server = AsterControlServer(
       socketPath: socketPath,
       onDisconnect: { [weak bridge] connection in
@@ -760,6 +761,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // 也不能让在途的事件刷新回调再去动这个已经拆掉的窗口。
     (record.controller.window?.contentViewController as? WorkspaceViewController)?
       .loadedRemoteWorkspaces?.stopAllEventSubscriptions()
+    // 停在这个窗口 Pane 里的 agent 主机终端转成浮窗：模型随窗口释放，控制桥不会为它的 Pane 发
+    // pane.closed。要在 commitTermination 之前做，那之后模型的 Pane 就查不到了。
+    if !isTerminating { AgentHostRuntime.shared?.workspaceWillClose(model: record.model) }
     // 应用整体退出已在两阶段事务中统一提交；用户单独关窗则在可取消确认成功后，
     // 到这里才执行不可逆的快照和 PTY 终止。
     if !isTerminating { record.model.commitTermination() }

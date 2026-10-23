@@ -12,28 +12,36 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
   let preferences: AppPreferences
   let service: AgentHostService
   let audit: AgentHostAuditLog
+  /// 停靠在 Pane 底部的终端；工作区按它装卸停靠区。
+  let paneDocks: AgentHostPaneDocks
+  /// 找调用方 Pane；控制服务没起来时为 nil，终端一律用浮窗。
+  private let paneLocator: (any AgentHostPaneLocator)?
   private var cancellables: Set<AnyCancellable> = []
   /// 设置页刷新（授权、终端、开关变化）。
   var onChange: (() -> Void)?
 
-  /// 装配并登记为共享实例；`resolvePane` 把 `$ASTER_PANE_ID` 解析成 Pane 与其中的 agent。
+  /// 装配并登记为共享实例；`resolvePane` 把 `$ASTER_PANE_ID` 解析成 Pane 与其中的 agent，
+  /// `paneLocator` 让终端能停靠在调用方 Pane 底部。
   @discardableResult
   static func install(
-    preferences: AppPreferences,
-    resolvePane: @escaping @MainActor (String) -> (pane: String, provider: AgentProvider?, agentSessionID: String?)?
+    preferences: AppPreferences, paneLocator: (any AgentHostPaneLocator)? = nil,
+    resolvePane: @escaping @MainActor (String) -> AgentHostCallerPane?
   ) -> AgentHostRuntime {
     if let shared { return shared }
-    let runtime = AgentHostRuntime(preferences: preferences, resolvePane: resolvePane)
+    let runtime = AgentHostRuntime(preferences: preferences, paneLocator: paneLocator, resolvePane: resolvePane)
     shared = runtime
     AgentHostService.shared = runtime.service
     return runtime
   }
 
   private init(
-    preferences: AppPreferences,
-    resolvePane: @escaping @MainActor (String) -> (pane: String, provider: AgentProvider?, agentSessionID: String?)?
+    preferences: AppPreferences, paneLocator: (any AgentHostPaneLocator)?,
+    resolvePane: @escaping @MainActor (String) -> AgentHostCallerPane?
   ) {
     self.preferences = preferences
+    self.paneLocator = paneLocator
+    let docks = AgentHostPaneDocks.shared
+    paneDocks = docks
     let audit = AgentHostAuditLog.shared
     self.audit = audit
     let directory = SSHHostDirectory.shared
@@ -45,7 +53,7 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
         return .init(id: id.uuidString, name: profile.name, target: target)
       })
     let registry = AgentHostTerminalRegistry { spec, registry in
-      Self.makeTerminal(spec, registry: registry, preferences: preferences)
+      Self.makeTerminal(spec, registry: registry, preferences: preferences, docks: docks, locator: paneLocator)
     }
     service = AgentHostService(
       dependencies: .init(
@@ -57,6 +65,7 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
     registry.onNeedsInput = { [weak self] terminal, prompt in self?.notifyNeedsInput(terminal, prompt: prompt) }
     registry.onChange = { [weak self] in self?.onChange?() }
     grants.onChange = { [weak self] in self?.onChange?() }
+    paneLocator?.onPanesClosed = { [weak self] in self?.reconcileDockedPanes() }
     audit.pruneExpired()
     Task { await grants.loadIfNeeded() }
     // @Published 在 willSet 发出，切到下一轮主队列再读新值。
@@ -65,16 +74,17 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
     }.store(in: &cancellables)
   }
 
-  /// 生产终端：原生 SSH 会话 + 浮动面板；面板按钮接到终端与注册表。
+  /// 生产终端：原生 SSH 会话 + 呈现器（停靠或浮窗）；控制胶囊的按钮接到终端与注册表。
   private static func makeTerminal(
-    _ spec: AgentHostTerminalSpec, registry: AgentHostTerminalRegistry, preferences: AppPreferences
+    _ spec: AgentHostTerminalSpec, registry: AgentHostTerminalRegistry, preferences: AppPreferences,
+    docks: AgentHostPaneDocks, locator: (any AgentHostPaneLocator)?
   ) -> (AgentHostTerminal, any AgentHostTerminalPresenting) {
     let surface = LiveAgentHostTerminalSurface(hostID: spec.hostID, preferences: preferences)
     let terminal = AgentHostTerminal(
       terminalID: spec.terminalID, hostID: spec.hostID, hostName: spec.hostName, target: spec.target,
       sessionKey: spec.caller.key, caller: spec.caller, surface: surface)
-    let panel = AgentHostTerminalPanelController(
-      terminal: terminal, hostView: surface.hostView, preferences: preferences,
+    let presenter = AgentHostTerminalPresenter(
+      terminal: terminal, hostView: surface.hostView, preferences: preferences, docks: docks, locator: locator,
       actions: .init(
         interrupt: { [weak terminal] in terminal?.userInterrupt() },
         togglePause: { [weak terminal] in terminal?.isPaused.toggle() },
@@ -91,7 +101,22 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
         registry.close(terminal)
       }
     }
-    return (terminal, panel)
+    return (terminal, presenter)
+  }
+
+  // MARK: - Pane 生命周期
+
+  /// 有 Pane 关了：停在已关 Pane 里的终端转成浮窗。
+  private func reconcileDockedPanes() {
+    guard let paneLocator else { return }
+    service.registry.handlePanesClosed { !paneLocator.isPaneAlive($0) }
+  }
+
+  /// 附加工作区窗口要关了：模型随窗口释放，控制桥不会为它的 Pane 发 `pane.closed`。
+  /// 停在这些 Pane 里的终端先转成浮窗，终端照常运行。
+  func workspaceWillClose(model: AppModel) {
+    let paneIDs = Set(model.tabs.flatMap { $0.layout.allPanes.map(\.id) })
+    service.registry.handlePanesClosed { paneIDs.contains($0) }
   }
 
   // MARK: - 主机同步
@@ -163,17 +188,17 @@ final class AgentHostRuntime: NSObject, WorkspaceTerminationParticipant, NSMenuD
 
   // MARK: - 键盘归属
 
-  /// 键盘焦点在 agent 终端里（它的浮窗是 key 窗口）。此时只作用于工作区活动 Pane 的菜单命令要禁用，
-  /// 否则会落到背后的工作区，同 Quick Terminal。
+  /// 键盘焦点在 agent 终端里：它的浮窗是 key 窗口，或 key 窗口的焦点在 Pane 停靠区里。
+  /// 此时只作用于工作区活动 Pane 的菜单命令要禁用，否则会落到背后的工作区，同 Quick Terminal。
   var ownsKeyboard: Bool {
     guard let keyWindow = NSApp.keyWindow else { return false }
-    return service.registry.ownsKeyWindow(keyWindow)
+    return service.registry.ownsKeyWindow(keyWindow) || paneDocks.paneID(owningKeyboardIn: keyWindow) != nil
   }
 
-  /// ⌘W / ⌥⌘W 落在 agent 终端上时由它处理（收起浮窗），返回 true；工作区就不能再关 Pane。
+  /// ⌘W / ⌥⌘W 落在 agent 终端上时由它处理（浮窗收起、停靠区收起），返回 true；工作区就不能再关 Pane。
   func handleCloseShortcut() -> Bool {
     guard let keyWindow = NSApp.keyWindow else { return false }
-    return service.registry.handleCloseShortcut(in: keyWindow)
+    return service.registry.handleCloseShortcut(in: keyWindow) || paneDocks.handleCloseShortcut(in: keyWindow)
   }
 
   // MARK: - 窗口菜单

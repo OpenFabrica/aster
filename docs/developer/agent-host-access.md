@@ -3,8 +3,8 @@
 ## 背景与概念
 
 编程 agent（Claude Code、Codex 等）经 Aster 在**已保存的 SSH 主机**上执行命令，自己永远拿不到
-口令或私钥。命令敲进一个真实的原生 SSH 终端（`aster-ssh client`），终端显示在浮动窗口里，用户
-全程看得见、随时能接手；每台主机的访问都要用户批准，所有执行与授权变化写审计。
+口令或私钥。命令敲进一个真实的原生 SSH 终端（`aster-ssh client`），终端默认停靠在调用 agent 的
+Pane 底部（也可以弹成独立浮窗），用户全程看得见、随时能接手；每台主机的访问都要用户批准，所有执行与授权变化写审计。
 
 入口有三个，都落到控制协议的 `host.*` 方法：
 
@@ -38,7 +38,7 @@ ssh-agent、模拟点击。这不是沙箱。目标是：agent 拿不到秘密�
 | `…/AgentHostAuditRecord.swift`、`AgentHostCommandRedactor.swift` | 审计 schema 与命令脱敏 |
 | `…/AgentHostMCPTools.swift` 等 | `aster mcp` 的协议处理（工具目录、参数映射、渲染） |
 | `…/MCPJSONRPC.swift` | JSON-RPC 类型（由 aster-memory-mcp 与 aster mcp 共用） |
-| `Sources/Aster/AgentHosts/` | 终端、注册表、浮动面板、批准、授权存储、审计落盘、MCP 安装、运行时装配 |
+| `Sources/Aster/AgentHosts/` | 终端、注册表、呈现（Pane 停靠区与浮窗）、批准、授权存储、审计落盘、MCP 安装、运行时装配 |
 | `Sources/Aster/Control/AgentHostControlCommands.swift` | `host.*` 方法的分发 |
 | `Sources/Aster/SettingsAgentAccessBridge.swift`、`Resources/settings-ui/agent-access.js` | 设置「主机」分类（只含 Agent 访问） |
 | `Sources/AsterCLI/HostExecCommands.swift`、`MCPCommand.swift` | CLI 与 MCP 前端 |
@@ -76,7 +76,7 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 `invalid_params`。错误消息是给 agent 的协议文本，与其它控制方法一样不走界面本地化。
 
 `host.*` 不走 IPC 写门禁（Allow Send Keys），有自己的总开关与按主机批准。v1 **没有**授予权限或
-发送任意输入的方法：sudo 口令只能由用户在浮动终端里输入。
+发送任意输入的方法：sudo 口令只能由用户接管终端后自己输入。
 
 ## 执行流程
 
@@ -84,7 +84,7 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 `agent_paused`（在授权簿之前查，暂停时不消耗一次性授权）→ 授权簿判断（见下）→ 需要批准时弹面板，
 最多等 `min(剩余期限, 50 s)`，超时 `approval_pending`（面板保留）→ 批准后复核目标指纹，等待期间
 主机被删或目标变了则这次批准作废（`grant.invalidated`）并报 `host_not_ready` → 再查一次暂停 →
-取或建终端并显示面板 → 期限内没就绪 `host_not_ready` → 排队、必要时重新同步、敲入命令、写
+取或建终端并显示（停靠区展开或浮窗置前）→ 期限内没就绪 `host_not_ready` → 排队、必要时重新同步、敲入命令、写
 `exec.started` → 轮询 → 完成写 `exec.finished`；返回时仍在跑写一次 `exec.pending`，之后真正
 结束时（无论有没有人 `host.wait`）补写 `exec.finished`。
 
@@ -143,7 +143,7 @@ Pane，就把 provider 与 agent session ID 并进**有效会话键**（`<sessio
 
 - `needs_input`：开始标记已出现、结束标记未出现、屏幕静止 ≥2 秒、最后一行像提示（`[sudo] password for`、
   `Password:`、`passphrase`、`(yes/no`、`[y/N]`、`[Y/n]`、`Continue?`、`Press ENTER`、`--More--`、
-  `(END)`，或以 `:` / `?` 结尾）。此时面板置前、请求注意、发系统通知；`host.exec` 立即返回
+  `(END)`，或以 `:` / `?` 结尾）。此时终端被选中并展开（浮窗则置前）、请求注意、发系统通知；`host.exec` 立即返回
   `needs_input`。`host.wait` 只对等待开始之后**新一轮**等输入提前返回，避免对同一提示空转。
 - 期限到达返回 `running` 与已有输出，命令不被杀。
 - 中断：发 `0x03`，1.5 秒宽限期内看到结束标记按完成（命令自己处理了 SIGINT），否则 `interrupted`
@@ -160,34 +160,100 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
 - `AgentHostTerminal`：持有一个独立 `TerminalSession`（`bindNativeSSH(.host(id))` 后再 `makeTerminalHost`，
   写法同 Quick Terminal），**不注册进任何 AppModel 标签**，所以 `pane.*`、`session.snapshot`、
   `agent.*` 都碰不到它，也不进 Session Recording。状态 `connecting → ready ⇄ busy / needs_input → ended`。
-  认证仍走 App 自己的认证表单（`SSHAuthCoordinator`）。
+  认证仍走 App 自己的认证表单（`SSHAuthCoordinator`）。停靠在 Pane 底部也只是借位显示，不是那个 Pane 的一部分。
 - `AgentHostTerminalRegistry`：按（有效会话键，主机）复用；空闲 30 分钟自动关闭；作为
   `WorkspaceTerminationParticipant` 随 App 退出（有命令在跑时确认）；主机被删除时关闭终端并作废授权，
   主机改名同步标题。
-- `AgentHostTerminalPanelController`：每个终端一个浮动 NSPanel（`.nonactivatingPanel`、`.floating`、
-  `hidesOnDeactivate = false`、错位排列、强调色边框）；标题「Claude Code → prod-db (deploy@10.0.0.5:22)」；
-  控制胶囊参照 ego lite 的 agent 控制条（`AgentHostTerminalControlBar`，固定深色外观、首选宽度 520pt），
-  浮在终端上，默认底部居中；按住按钮以外的地方（左侧有把手）可以拖动，位置限制在窗口内，窗口缩小时收回。
+
+### 呈现：停靠在 Pane 底部，或独立浮窗
+
+- `AgentHostTerminalPresenter`：每个终端一个，持有**一份**内容 `AgentHostTerminalContentView`（终端 + 遮罩 +
+  控制胶囊 + 强调色边框），整体在两个去处之间搬：`.docked(paneUUID)` 停靠在调用 agent 的 Pane 底部，
+  或 `.window` 独立浮窗。搬动在同一轮主循环里先摘后装，不调 `stop`，surface 与远端命令都不断。
+- 调用方 Pane：`AgentHostControlCommands.resolveAgentHostCallerPane` 把 `$ASTER_PANE_ID`（短 ID）解析成
+  `record.runtime.id`，存进 `AgentHostResolvedCaller.paneUUID`。它只用于呈现，不进会话键、不进审计。
+- 新终端的去处：偏好 `AppPreferences.agentHostTerminalPresentation`（键 `aster.agent-hosts.terminal-presentation.v1`，
+  默认 `docked`，未知值按 `docked`）是停靠、`paneUUID` 有值、`AgentHostPaneLocator` 说 Pane 还在 → 停靠；
+  否则浮窗（agent 不在 Aster 里跑、控制服务没起来，行为与停靠功能之前相同）。
+- **停车位**：浮窗在呈现器创建时就建好，内容先装进去并强制布局一次。Ghostty surface 要等终端视图进了窗口
+  且尺寸非零才创建，从没显示过的面板也算有窗口，所以停靠模式下（调用方 Pane 可能在后台标签里）SSH 也立刻连上；
+  之后搬进停靠区，停靠时浮窗永不显示。
+- `show(attention:)`（每次 `obtain`、等输入）：浮窗置前；停靠时只展开停靠区并选中这个终端，**不动任何窗口**。
+  `reveal()`（「窗口 ▸ Agent 终端」）：停靠时还经定位器切到那个 Pane 所在标签（标签正放大着别的 Pane 时先还原）
+  并前置窗口。
+- 用户点停靠区的「弹出为独立窗口」→ 搬进浮窗并把偏好写成 `window`；接管中把浮窗设为 key 并交焦点，否则不抢。
+  浮窗标题栏右侧「停靠到 Pane」（`NSTitlebarAccessoryViewController`，Pane 不在时隐藏）→ 搬回 Pane、
+  偏好写成 `docked`、切到那个 Pane；焦点交给工作区按活动 Pane 落，不抢。只有这两个动作写偏好。
+- Pane 关了：`ControlBridgeAgentHostPaneLocator` 订阅 `pane.closed`，下一轮主队列让注册表逐个核对，
+  停在已关 Pane 里的终端转成浮窗显示，**不写偏好、不关终端**（不误杀远端命令）。关**附加**工作区窗口时
+  控制桥不会为它的 Pane 发 `pane.closed`（模型随窗口释放），所以 `AsterApp.windowWillClose` 在
+  `commitTermination()` 之前调 `AgentHostRuntime.workspaceWillClose(model:)` 做同样的事。
+  主窗口关闭不销毁模型，Pane 还在，停靠区等窗口再显示时装回。显示与找回前也会兜底核对一次。
+- 「接管」：浮窗时让浮窗成为 key；停靠时让停靠区所在的工作区窗口成为 key；再把焦点交给终端。
+
+### 停靠区
+
+- `AgentHostPaneDocks`（共享注册表，测试各建一份）按 Pane UUID 记：停靠区视图、终端条目（顺序）、选中项、
+  是否收起、高度比例（默认 0.4，拖动夹在 0.2–0.75）。新终端停进来时被选中并展开；`show` / `reveal` / 点标签
+  都会选中并展开，所以收起后下一条命令会自动展开；最后一个终端摘掉时整个停靠区撤掉。出现、消失、收起、
+  调高度、换显示的终端经 `changes`（Pane UUID）通知工作区局部装卸；状态刷新只改标签，不重装。
+- `AgentHostPaneDockView`（frame 布局）：28pt 头部 + 选中终端的内容。头部左边每台主机一个标签（状态色点：
+  运行蓝、等输入橙、空闲绿、接管黄、结束灰；悬停显示「调用方 → 主机 (目标)」），右边「弹出为独立窗口」
+  「收起 / 展开」；头部空白处上下拖动调高度。**只有选中且展开的终端内容挂在视图树里**，其余终端不在树里，
+  surface 照跑，按键只会进看得见的那个。背景与分隔线在 `draw(_:)` 里解析动态颜色：停靠区是长期视图，
+  不随 `refresh()` 重建，不能在创建时把 CGColor 冻结。停靠区自己吞掉 `mouseDown`（不冒泡到
+  `ActivePaneHostView` 去激活 Pane），并注册与 Pane 宿主相同的拖放类型、一律拒收，文件和文本不会粘进
+  agent 自己的终端，也不会拆出新 Pane。
+
+### 接入工作区（WorkspaceView / ActivePaneHostView）
+
+- `ActivePaneHostView.setAgentHostDock(_:height:)`：底部第二个槽，约束链为内容 → [Prompt Queue，8pt 内边距] →
+  [停靠区，贴边] → 底边。展开时 `高 = Pane 高 × 比例 @200`、`≥ 200pt @210`（约 10 行，agent 的探针只读可见屏幕）、
+  `内容高 ≥ 100pt @220`（Pane 太矮时先压停靠区）；收起时固定 28pt。三条都**低于 250**：分屏给每个 Pane 的
+  回退约束是 250、窗口保持尺寸是 500，停靠区只能在 Pane 现有高度里分配，不能推分隔条或撑大窗口。
+  停靠区会被新的 host 接走，所以只有它确实是本 host 的子视图时才移除或建约束，被丢弃的旧 host 不再碰它。
+- `WorkspaceViewController`（注册表可注入，默认 `.shared`）：
+  1. `refresh()` 重建 Pane 后（Prompt Queue 之后）给每个 `paneHosts` 装回停靠区；`changes` 只装卸那一个 Pane。
+     Pane 不在当前视图树里（后台标签、放大了别的 Pane、主机页）时什么也不做，回来时 `refresh()` 自动装回。
+  2. `refresh()` 开头若 first responder 在停靠区里就记下，装回后**同步**还给它并跳过异步 `focusActivePane`；
+     否则接管后正在输入的 sudo 口令会被一次 toast 或主题刷新送进 agent 自己的终端。局部变化后焦点落回窗口本身时
+     （摘下的正是焦点所在的终端）交还活动 Pane。
+  3. 点击监视器经 `paneHost(forClickOn:)` 沿 superview 找 Pane 容器，碰到停靠区就返回 nil：点停靠区不激活 Pane、
+     不抢焦点。
+
+### 浮窗、控制胶囊与遮罩
+
+- `AgentHostTerminalPanelController`：浮窗外壳，每个终端一个 NSPanel（`.nonactivatingPanel`、`.floating`、
+  `hidesOnDeactivate = false`、错位排列），contentView 是固定容器，内容作为子视图进出；
+  标题「Claude Code → prod-db (deploy@10.0.0.5:22)」。
+- 控制胶囊参照 ego lite 的 agent 控制条（`AgentHostTerminalControlBar`，固定深色外观、首选宽度 520pt），
+  浮在终端上，默认底部居中；按住按钮以外的地方（左侧有把手）可以拖动，位置限制在内容范围内，尺寸缩小时收回。
   胶囊里是状态图标（运行与连接时转圈）、两行文字「调用方 → 主机」与状态（运行蓝、等输入橙、暂停黄），
   以及「中断 / 接管（接管后为「交还 agent」）/ 关闭终端」（关闭为红字）。
-  胶囊宽度不随标题、命令或状态变化，窄窗口两侧保留 8pt；文字单行尾部截断，悬停显示完整内容。
+  胶囊宽度不随标题、命令或状态变化，窄时两侧保留 8pt；文字单行尾部截断，悬停显示完整内容。
   接管按钮按两种本地化文案的最大宽度预留空间，切换时按钮位置保持稳定。
-  除非用户接管（`isPaused`）或终端已结束，终端上一直盖着 `AgentHostTerminalControlOverlay` 遮罩
+- 除非用户接管（`isPaused`）或终端已结束，终端上一直盖着 `AgentHostTerminalControlOverlay` 遮罩
   （规则在 `AgentHostTerminal.blocksUserInput`）：连接、空闲、运行命令、等输入都盖，遮罩不再随每条命令闪一次，
   空闲时的按键也不会混进 agent 的终端。遮罩是四周蓝色光晕加点阵，只在连接中、命令运行中缓慢呼吸
   （`isBreathing`；空闲、等输入时静止，不暗示「正在跑」，也不让动画在空闲终端上一直耗电；
   系统开「减少动态效果」时始终静止），边缘光晕 alpha 为 0.55、点阵 alpha 为 0.7，
   呼吸不透明度在 0.75–1 之间变化，停下时平滑回到常亮；中间透明不挡输出。遮罩**挡住输入**：点击、拖动、右键落在遮罩上，
   键盘焦点从终端移到遮罩上、按键被吞掉，这时顶部短暂提示「Agent 正在控制，点「接管」后可以输入」；
-  滚轮照常穿透给终端回看输出。等输入时也不撤：状态行提示「点「接管」后在终端里回答」，用户接管后回答 sudo 口令，
-  答完点「交还 agent」。不自动交还：接管与交还都只由用户手动操作。终端结束时遮罩淡出，焦点还给终端。
-  「接管」就是暂停（`isPaused`）：遮罩撤掉、面板成为 key、焦点交给终端；「交还 agent」恢复，遮罩随即重新盖上。
-  标题栏关闭和 ⌘W / ⌥⌘W 都只隐藏，「窗口 → Agent 终端」找回：`AsterApp.closePaneOrTab` / `closePane`
-  在 Quick Terminal、画中画小窗之后先问 `AgentHostRuntime.handleCloseShortcut()`，绝不落到背后工作区的活动 Pane。
-  浮窗是 key 时，只作用于活动 Pane 的菜单命令（分屏类、清屏、查找、只读、Live View、Prompt Queue、复制路径、
-  在访达中显示）置灰，同 Quick Terminal。
-  用户随时可以点「接管」接手；暂停后新命令一律 `agent_paused`，已在跑的不受影响。
-  布局用 frame 而不是约束，与 Quick Terminal 一样避免对长期复用的终端宿主混用约束。
+  滚轮照常穿透给终端回看输出（选中、复制输出要先接管）。等输入时也不撤：状态行提示「点「接管」后在终端里回答」，
+  用户接管后回答 sudo 口令，答完点「交还 agent」。不自动交还：接管与交还都只由用户手动操作。
+  终端结束时遮罩淡出，焦点还给终端。「接管」就是暂停（`isPaused`）：遮罩撤掉、焦点交给终端；
+  「交还 agent」恢复，遮罩随即重新盖上。用户随时可以点「接管」接手；暂停后新命令一律 `agent_paused`，
+  已在跑的不受影响。布局用 frame 而不是约束，与 Quick Terminal 一样避免对长期复用的终端宿主混用约束。
+
+### 关闭快捷键与菜单
+
+- 浮窗：标题栏关闭和 ⌘W / ⌥⌘W 都只隐藏，「窗口 → Agent 终端」找回。停靠区：焦点在停靠区里时 ⌘W / ⌥⌘W
+  只把停靠区收起。`AsterApp.closePaneOrTab` / `closePane` 在 Quick Terminal、画中画小窗之后先问
+  `AgentHostRuntime.handleCloseShortcut()`（注册表认浮窗，`AgentHostPaneDocks.handleCloseShortcut(in:)` 认停靠区），
+  绝不落到背后工作区的活动 Pane。
+- 键盘在 agent 终端里（浮窗是 key，或 key 窗口的焦点在停靠区里）时，只作用于活动 Pane 的菜单命令
+  （分屏类、清屏、查找、只读、Live View、Prompt Queue、复制路径、在访达中显示）置灰，同 Quick Terminal；
+  ⌥⌘W 保持可用，由它收起 agent 终端。
 
 ## 批准与授权
 
@@ -299,6 +365,13 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   once 退还，开关与撤销关终端，钥匙串 ACL 核对，`pane.*` 隔离，以及在真实 Ghostty surface 上对本地
   sh / bash / zsh 跑的端到端，含 `LC_ALL=C` 下的 UTF-8 命令）。端到端测试把 `HISTCONTROL`、`HISTFILE`、`ZDOTDIR`
   指到无害值，不污染开发者的 Shell 历史。
+- 停靠与浮窗：`AgentHostTerminalPresentationTests`（去处判定、弹出 / 停靠写偏好、Pane 关闭转浮窗不写偏好、
+  显示与找回）、`AgentHostPaneDockTests`（注册表、只挂选中内容、头部按钮与拖动、关闭快捷键收起）、
+  `AgentHostPaneDockLayoutTests`（Pane 宿主里的叠放与高度规则、旧宿主不碰停靠区、工作区重建后焦点留在停靠区）、
+  `AgentHostCloseShortcutTests`，以及停车位端到端（真实 Ghostty 终端在从没显示过的浮窗里启动，
+  搬进停靠区再弹回，进程不断）。改到工作区布局时加跑 `PaneChrome|PaneFloatingTerminal|WorkspaceBehavior`。
 - 手工验收按 [远程工作验收](remote-work-acceptance.md) 的主机准备：口令主机、sudo 提示（needs_input →
   遮罩不撤 → 接管后在终端里输入 → 交还 agent → `host_wait`）、命令中途接手、中断、撤销授权；
-  审计文件里应能看到真实的 exec 与撤销记录。
+  审计文件里应能看到真实的 exec 与撤销记录。停靠相关：终端出现在 agent 的 Pane 底部；弹出、停靠回来并切到该 Pane；
+  收起后下一条命令自动展开；停靠区里 ⌘W 只收起；接管后在停靠区打字时切主题、拆分别的 Pane、出 toast，焦点不跑；
+  切走标签再回来、放大别的 Pane 再还原；关掉 agent 的 Pane 或它所在的附加窗口，终端变成浮窗。

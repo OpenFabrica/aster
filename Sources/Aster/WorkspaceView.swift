@@ -160,6 +160,8 @@ final class WorkspaceViewController: NSViewController {
   private var hostsHubController: HostsHubViewController?
   /// 主机页与侧栏「主机」行读取的主机目录。生产是共享目录；测试注入临时 hosts.json。
   let hostsDirectory: SSHHostDirectory
+  /// agent 主机终端停靠区。生产是共享注册表；测试注入独立实例。
+  let agentHostDocks: AgentHostPaneDocks
 
   init(
     model: AppModel,
@@ -167,7 +169,8 @@ final class WorkspaceViewController: NSViewController {
     panelLayoutStore: WorkspacePanelLayoutStore,
     fileRenderer: any FileRendering = FileRenderPipeline(),
     secureInputCoordinator: SecureInputCoordinator = .shared,
-    hostsDirectory: SSHHostDirectory = .shared
+    hostsDirectory: SSHHostDirectory = .shared,
+    agentHostDocks: AgentHostPaneDocks = .shared
   ) {
     self.model = model
     self.preferences = preferences
@@ -175,6 +178,7 @@ final class WorkspaceViewController: NSViewController {
     self.fileRenderer = fileRenderer
     self.secureInputCoordinator = secureInputCoordinator
     self.hostsDirectory = hostsDirectory
+    self.agentHostDocks = agentHostDocks
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -184,7 +188,8 @@ final class WorkspaceViewController: NSViewController {
     model: AppModel,
     preferences: AppPreferences,
     secureInputCoordinator: SecureInputCoordinator = .shared,
-    hostsDirectory: SSHHostDirectory = .shared
+    hostsDirectory: SSHHostDirectory = .shared,
+    agentHostDocks: AgentHostPaneDocks = .shared
   ) {
     let suite = "Aster.WorkspacePanelPreview.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -197,7 +202,8 @@ final class WorkspaceViewController: NSViewController {
         legacySidebarWidth: preferences.sidebarWidth
       ),
       secureInputCoordinator: secureInputCoordinator,
-      hostsDirectory: hostsDirectory
+      hostsDirectory: hostsDirectory,
+      agentHostDocks: agentHostDocks
     )
   }
 
@@ -230,6 +236,10 @@ final class WorkspaceViewController: NSViewController {
       .store(in: &modelSubscriptions)
     model.agentChatPresentationRequested
       .sink { [weak self] presentation in self?.presentAgentChatSheet(presentation) }
+      .store(in: &modelSubscriptions)
+    // agent 主机终端停靠区的局部变化（出现、消失、收起、调高度）只装卸那一个 Pane，不整树重建。
+    agentHostDocks.changes
+      .sink { [weak self] paneID in self?.installAgentHostDock(for: paneID, refocusIfLost: true) }
       .store(in: &modelSubscriptions)
     preferences.objectWillChange
       .sink { [weak self] _ in self?.schedulePreferenceRefresh() }
@@ -535,17 +545,23 @@ final class WorkspaceViewController: NSViewController {
   private func activatePane(from event: NSEvent) {
     guard let window = view.window, event.window === window,
       let tab = model.selectedTab, tab.layout.allPanes.count > 1,
-      let hit = window.contentView?.hitTest(event.locationInWindow)
+      let hit = window.contentView?.hitTest(event.locationInWindow),
+      let host = Self.paneHost(forClickOn: hit)
     else { return }
-    // 命中的是终端网格等叶子视图，沿 superview 链向上找到它所属的面板容器。
+    routePaneClick(host.paneID, in: tab)
+  }
+
+  /// 点击落点所属的 Pane 容器：命中的是终端网格等叶子视图，沿 superview 链向上找。
+  /// 落在 agent 主机终端停靠区里时返回 nil：点停靠区不激活 Pane，也不把焦点抢回活动 Pane——
+  /// 用户接管后正在里面打字，或者只是点标签、拖高度。
+  static func paneHost(forClickOn hit: NSView) -> ActivePaneHostView? {
     var candidate: NSView? = hit
     while let current = candidate {
-      if let host = current as? ActivePaneHostView {
-        routePaneClick(host.paneID, in: tab)
-        return
-      }
+      if current is AgentHostPaneDockView { return nil }
+      if let host = current as? ActivePaneHostView { return host }
       candidate = current.superview
     }
+    return nil
   }
 
   /// 点击落点到面板激活的统一入口。点到的已经是活动 Pane 时 `activePaneID` 不变、
@@ -918,6 +934,11 @@ final class WorkspaceViewController: NSViewController {
     // 终端视图由 Session 长期持有，但从视图树移除时 AppKit 仍可能清掉 first
     // responder。记录正在输入的实例，重排完成后同步恢复，避免异步回焦前丢一个按键。
     let previouslyFocusedTerminal = view.window?.firstResponder as? GhosttySurfaceView
+    // 焦点在 agent 主机终端停靠区里（接管后输入 sudo 口令、或停在遮罩上）时同理：停靠区随 Pane 装回后
+    // 原样还给它。否则一次 toast 或主题刷新就会把正在输入的口令送进 agent 自己的终端。
+    let previousDockResponder = (view.window?.firstResponder as? NSView).flatMap {
+      agentHostDocks.paneID(containing: $0) == nil ? nil : $0
+    }
     if !model.isOpenQuicklyPresented { openQuicklyController?.invalidateTargets() }
     observeTabs()
     // `refresh()` 会替换整个布局；详情控制器本身仍按当前 Tab 缓存，重建后的 Panel
@@ -966,6 +987,7 @@ final class WorkspaceViewController: NSViewController {
     if let paneID = model.presentedPromptQueuePaneID {
       setPromptQueuePresented(for: paneID)
     }
+    for paneID in paneHosts.keys { installAgentHostDock(for: paneID, refocusIfLost: false) }
 
     if let tab = model.selectedTab, model.isComposerPresented,
       model.composerState(for: tab.activePaneID).presentation == .floating
@@ -1046,6 +1068,10 @@ final class WorkspaceViewController: NSViewController {
       activeSession?.owns(terminal) == true
     {
       restoredTerminalFocus = window.makeFirstResponder(terminal)
+    } else if !blocksTerminalFocus, let responder = previousDockResponder,
+      let window = view.window, responder.window === window
+    {
+      restoredTerminalFocus = window.makeFirstResponder(responder)
     } else {
       restoredTerminalFocus = false
     }
@@ -2698,6 +2724,21 @@ final class WorkspaceViewController: NSViewController {
     }
     if opened { model.persistWorkspace() }
     return opened
+  }
+
+  /// 把 agent 主机终端停靠区装进（或撤出）对应 Pane 的底部。Pane 不在当前视图树里（后台标签、
+  /// 放大了别的 Pane、主机页）时什么也不做，等它显示时 `refresh()` 再装。
+  /// `refocusIfLost`：局部变化后，原来在停靠区里的焦点（被摘下的终端）会落回窗口本身，这时交还活动 Pane；
+  /// `refresh()` 自己安排焦点，传 false。
+  private func installAgentHostDock(for paneID: UUID, refocusIfLost: Bool) {
+    guard let host = paneHosts[paneID] else { return }
+    // 停靠区在 draw 时解析动态颜色，跨主题复用同一个视图不需要在外观上下文里重建。
+    let mount = agentHostDocks.mount(for: paneID)
+    host.setAgentHostDock(mount?.view, height: mount?.height)
+    guard refocusIfLost, let window = view.window, window.firstResponder === window,
+      let tab = model.selectedTab
+    else { return }
+    focusActivePane(in: tab)
   }
 
   /// 局部挂载 Prompt Queue。队列条作为 Pane 的底部附件占据布局空间（不是覆盖层），

@@ -197,7 +197,7 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
 
 ### Agent 远程执行（`host.*`）
 
-编程 agent 经控制协议在**已保存的 SSH 主机**上执行命令，命令敲进一个用户看得见的原生 SSH 浮动终端。
+编程 agent 经控制协议在**已保存的 SSH 主机**上执行命令，命令敲进一个用户看得见的原生 SSH 终端（默认停靠在调用 agent 的 Pane 底部，可弹成独立浮窗）。
 这组方法的协议常量在 `Sources/AsterCore/AgentHostAccess/AgentHostControlProtocol.swift`（`AgentHostControlMethod`），
 服务端分发在 `Sources/Aster/Control/AgentHostControlCommands.swift`，业务在 `Sources/Aster/AgentHosts/`。
 设计、标记符协议、授权与审计全文见 [Agent 远程执行](agent-host-access.md)，这里只写与控制 API 相关的约定。
@@ -213,10 +213,10 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
 | `host.terminals` | 列出调用方本会话的 agent 终端（`agent` 必填，结果不含会话键） |
 
 - 结果状态 `status`：`completed`（带 `exit_code`）、`running`、`needs_input`、`interrupted`、`ended`。`running` 与
-  `needs_input` 不是错误：命令仍在终端里，用 `host.wait` 继续；sudo 口令之类只能由用户在浮动终端里输入，
+  `needs_input` 不是错误：命令仍在终端里，用 `host.wait` 继续；sudo 口令之类只能由用户接管终端后自己输入，
   v1 没有任何让 agent 授权或发送任意输入的方法。
 - 新增错误码：`agent_access_disabled`（总开关关着）、`approval_pending`（批准面板还在等用户，稍后重试同一请求）、
-  `approval_denied`（用户拒绝，该会话对该主机 10 分钟冷却）、`agent_paused`（用户在浮动终端里暂停了 agent）、
+  `approval_denied`（用户拒绝，该会话对该主机 10 分钟冷却）、`agent_paused`（用户接管了终端，agent 被暂停）、
   `host_not_ready`（SSH 终端期限内没就绪）、`terminal_ended`、`limit_exceeded`。沿用 `not_found`、
   `ambiguous_target`、`pane_busy`、`invalid_params`。消息文本是给 agent 的协议文本，不走界面本地化。
 - **不走 IPC 写门禁。** `host.*` 不受「设置 → 控制 → IPC 允许发送输入」与「允许敏感会话」约束，也不经

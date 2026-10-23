@@ -110,7 +110,7 @@ final class AgentHostApprovalPanel: NSObject, AgentHostApprovalPanelHandling, NS
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
 
-    let note = NSTextField(wrappingLabelWithString: L("命令会在浮动终端里执行，你可以随时接手、中断或暂停 agent。"))
+    let note = NSTextField(wrappingLabelWithString: L("命令会在你看得见的终端里执行，你可以随时接管或中断。"))
     note.textColor = .secondaryLabelColor
     note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 

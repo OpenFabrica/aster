@@ -131,7 +131,7 @@ public enum AgentHostMCPToolCatalog {
   private static let hostExecDescription =
     "Run a shell command on a saved SSH host in a persistent, stateful shell: cd, export and other "
     + "shell state persist between calls on the same host. The user approves access per host and "
-    + "watches every command live in an Aster floating window. Never ask the user for passwords, "
+    + "watches every command live in an Aster terminal. Never ask the user for passwords, "
     + "passphrases or private keys; authentication is handled by Aster. Prefer non-interactive "
     + "forms: -y / --yes, sudo -n, --no-pager, DEBIAN_FRONTEND=noninteractive, and avoid TUIs and "
     + "full-screen programs (vim, top, less, htop). Result status: completed (with exit_code), "

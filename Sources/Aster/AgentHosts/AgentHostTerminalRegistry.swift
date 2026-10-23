@@ -1,5 +1,6 @@
 // agent 主机终端的注册表：按（有效会话键，主机）复用终端，执行数量上限，
-// 空闲 30 分钟自动关闭，随 App 退出，主机被删除时清理。终端不进任何工作区标签。
+// 空闲 30 分钟自动关闭，随 App 退出，主机被删除时清理。终端不进任何工作区标签
+// （停靠在 Pane 底部也只是借位显示，不是 Pane 的一部分）。
 import AppKit
 import AsterCore
 
@@ -141,9 +142,14 @@ final class AgentHostTerminalRegistry {
     for terminal in terminals { close(terminal) }
   }
 
-  /// 把隐藏的面板找回来（窗口菜单）。
+  /// 把终端找回来（窗口菜单）：浮窗置前；停靠时展开停靠区并切到那个 Pane。
   func reveal(_ terminalID: String) {
-    entries[terminalID]?.presenter.show(attention: false)
+    entries[terminalID]?.presenter.reveal()
+  }
+
+  /// 停在已关闭 Pane 里的终端转成浮窗（`isClosed` 判定 Pane 是否已关）。
+  func handlePanesClosed(where isClosed: (UUID) -> Bool) {
+    for id in order { entries[id]?.presenter.handlePanesClosed(where: isClosed) }
   }
 
   // MARK: - 键盘归属
