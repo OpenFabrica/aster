@@ -12,7 +12,7 @@ Use **Help → Report an Issue…** to enter an optional description, then choos
 
 ## Getting Started
 
-1. Double-click `Aster.app`. Aster restores the previous workspace; on first launch it starts a login Shell in your home directory. Before starting the Shell, each restored terminal Pane prints dim timestamp banners: `Exited at MM/dd HH:mm` (when the last snapshot was saved, usually at exit) and `Restored at MM/dd HH:mm`. Output after them belongs to the current session. Snapshots from older versions have no exit time and show only the restore line.
+1. Double-click `Aster.app`. Aster restores the previous workspace; on first launch it starts a login Shell in your home directory. Before starting the Shell, each restored terminal Pane prints dim timestamp banners: `Exited at MM/dd HH:mm` (when the last snapshot was saved, usually at exit) and `Restored at MM/dd HH:mm`. Output after them belongs to the current session. Snapshots from older versions have no exit time and show only the restore line. If Aster is already running and you open another copy (for example from a different folder), Aster switches to the running one instead of starting a second instance.
 2. Click the terminal and type commands directly; there is no separate input field.
 3. Press `⌘T` for a new tab, `⌘D` to split right, or `⇧⌘D` to split down. The **View** menu contains all split commands.
 4. By default, `⇧⌘P` opens the command palette to search the main actions. With the terminal focused, `⌘K` clears its screen. Customize the command-palette shortcut in **Settings → Shortcuts**.

@@ -153,6 +153,11 @@ enum AsterResourceLocations {
     bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
   }
 
+  /// 只有正式版维护用户 Shell 启动文件（`~/.zshrc` 等）里的受管区块。区块里写的是 App 包的
+  /// 绝对路径：开发版也去维护的话，两个 App 会来回改写，正式版的新 Pane 还会去 source 开发版
+  /// 包里的脚本。开发版的 Pane 沿用正式版装好的那一段。
+  static var managesShellStartupFiles: Bool { AsterAppIdentity.current == .release }
+
   static func shellIntegrationInstaller(
     bundle: Bundle = .main,
     fileManager: FileManager = .default

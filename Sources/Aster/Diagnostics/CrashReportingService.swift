@@ -163,12 +163,13 @@ final class CrashReportingService: @unchecked Sendable {
 
   // MARK: - 已上传登记
 
-  /// 已上传文件名登记在 Aster 自己的 Application Support 下；不改动也不删除 Ghostty 的文件，
-  /// `ghostty +crash-report` 仍然可用。
+  /// 已上传文件名登记在 Aster 自己的 Application Support 下（开发版在 `Aster-Dev` 下）；
+  /// 不改动也不删除 Ghostty 的文件，`ghostty +crash-report` 仍然可用。
   private var registryURL: URL {
     let support = (try? fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
       ?? fileManager.temporaryDirectory
-    return support.appendingPathComponent("Aster/CrashReports/uploaded.json")
+    return support.appendingPathComponent(AsterAppIdentity.current.dataDirectoryName)
+      .appendingPathComponent("CrashReports/uploaded.json")
   }
 
   private func uploadedNames() -> Set<String> {

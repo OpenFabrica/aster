@@ -1,3 +1,4 @@
+import AsterCore
 import Foundation
 
 /// Session Memory 的磁盘位置与权限。独立于 DiagnosticsCenter 的日志目录：
@@ -10,16 +11,14 @@ public struct MemoryStoreLocation: Sendable {
     rootDirectory.appendingPathComponent("memory.sqlite", isDirectory: false)
   }
 
-  /// 生产位置：`~/Library/Application Support/Aster/Memory/`。
-  public static func standard(fileManager: FileManager = .default) -> MemoryStoreLocation {
-    let base =
-      fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent(
-        "Library/Application Support", isDirectory: true)
-    return MemoryStoreLocation(
-      rootDirectory:
-        base
-        .appendingPathComponent("Aster", isDirectory: true)
+  /// 生产位置：`~/Library/Application Support/Aster/Memory/`（开发版在 `Aster-Dev` 下）。
+  /// 两个身份各用一个库：启动补收会闭合库里「不属于本进程」的 active 会话，共用一个库时
+  /// 开发版会把正式版正在跑的会话当成崩溃遗留关掉。
+  public static func standard(
+    fileManager: FileManager = .default, identity: AsterAppIdentity = .current
+  ) -> MemoryStoreLocation {
+    MemoryStoreLocation(
+      rootDirectory: identity.applicationSupportDirectory(fileManager: fileManager)
         .appendingPathComponent("Memory", isDirectory: true)
     )
   }

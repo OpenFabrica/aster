@@ -49,12 +49,12 @@ public final class SSHHostStore: @unchecked Sendable {
   /// 一台主机最多引用的保险库密钥数。
   public static let maximumVaultKeys = 16
 
-  /// 默认路径：`~/Library/Application Support/Aster/hosts.json`。
-  public static func defaultFileURL(fileManager: FileManager = .default) -> URL {
-    let base =
-      fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-    return base.appendingPathComponent("Aster/hosts.json")
+  /// 默认路径：`~/Library/Application Support/Aster/hosts.json`（开发版在 `Aster-Dev` 下）。
+  public static func defaultFileURL(
+    fileManager: FileManager = .default, identity: AsterAppIdentity = .current
+  ) -> URL {
+    identity.applicationSupportDirectory(fileManager: fileManager)
+      .appendingPathComponent("hosts.json")
   }
 
   public let fileURL: URL

@@ -27,8 +27,9 @@ struct AgentHostGrantKeychain: AgentHostGrantPersisting {
   static let service = "io.aster.agent-host-grants"
   static let account = "always"
 
-  /// 测试用后缀，避免碰真实条目；生产为空。
-  var serviceSuffix = ""
+  /// service 后缀。正式版为空；开发版是 `.dev`，和正式版各存一条（见 `AsterAppIdentity`）；
+  /// 测试另传后缀，避免碰真实条目。
+  var serviceSuffix = AsterAppIdentity.current.keychainServiceSuffix
 
   private var query: [String: Any] {
     [

@@ -10,11 +10,8 @@ import Foundation
 enum ManagedMigrationSupport {
   /// 迁移备份目录。失败回滚与“恢复入口”都从这里读取迁移前布局。
   static func backupDirectory() -> URL? {
-    guard
-      let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-        .first
-    else { return nil }
-    let directory = base.appendingPathComponent("Aster/RemoteMigrations", isDirectory: true)
+    let directory = AsterAppIdentity.current.applicationSupportDirectory()
+      .appendingPathComponent("RemoteMigrations", isDirectory: true)
     try? FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])

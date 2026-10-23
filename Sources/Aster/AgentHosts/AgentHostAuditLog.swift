@@ -26,14 +26,15 @@ final class AgentHostAuditLog: AgentHostAuditWriting {
     DiagnosticsCenter.shared.record("agent_hosts.audit_write_failed", level: .error, category: .storage, error: error)
   }
 
-  /// 默认目录 `~/Library/Application Support/Aster/audit`。
+  /// 默认目录 `~/Library/Application Support/Aster/audit`（开发版在 `Aster-Dev` 下）。
   init(directory: URL = AgentHostAuditLog.defaultDirectory()) {
     self.directory = directory
   }
 
+  /// 按当前身份算出的审计目录。
   static func defaultDirectory() -> URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Aster/audit", isDirectory: true)
+    AsterAppIdentity.current.applicationSupportDirectory()
+      .appendingPathComponent("audit", isDirectory: true)
   }
 
   /// 追加一条记录。os_log 里命令与原因按 private 标注，只在本机调试时可见。

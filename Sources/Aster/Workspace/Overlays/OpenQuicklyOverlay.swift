@@ -1051,8 +1051,8 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
   }
 
   private func readRecipeURLs() -> [URL] {
-    let root = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Application Support/Aster/Recipes", isDirectory: true)
+    let root = AsterAppIdentity.current.applicationSupportDirectory()
+      .appendingPathComponent("Recipes", isDirectory: true)
     guard
       let entries = try? FileManager.default.contentsOfDirectory(
         at: root,

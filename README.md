@@ -118,6 +118,7 @@ The user guide is available in [English](https://aster.foo/docs/en/) and [Chines
 - [AppKit interface architecture](docs/developer/appkit-interface.md)
 - [Files, links, and the File Pane domain](docs/developer/files-and-links-domain.md)
 - [Theme system domain and implementation](docs/developer/theme-system.md)
+- [App identity and single instance](docs/developer/app-identity.md)
 - [English user guide source](docs/user/help.en.md)
 - [Chinese user help](docs/user/help.md)
 - [Third-party licenses](THIRD-PARTY-NOTICES.md)

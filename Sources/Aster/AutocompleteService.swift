@@ -746,7 +746,8 @@ final class AutocompleteService {
         appropriateFor: nil,
         create: true)
     {
-      base = support.appendingPathComponent("Aster/Autocomplete", isDirectory: true)
+      base = support.appendingPathComponent(AsterAppIdentity.current.dataDirectoryName, isDirectory: true)
+        .appendingPathComponent("Autocomplete", isDirectory: true)
     } else {
       base = fileManager.temporaryDirectory.appendingPathComponent(
         "Aster-Autocomplete-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)

@@ -101,8 +101,12 @@ enum AsterApplication {
     // 打包脚本通过无窗口自检验证最终 App 内的 SwiftPM 资源；命中后必须立即返回，
     // 禁止为了发布验收创建 NSApplication、窗口或任何用户工作区状态。
     if PackagedResourceVerifier.runIfRequested() { return }
+    // 同一身份已有实例在跑：把它调到前台后直接退出，不恢复工作区、不写任何数据。
+    // 必须排在诊断与 NSApplication 之前，第二个进程不能留下任何痕迹。
+    guard AsterSingleInstance.claim() else { return }
     // 在创建窗口前开始记录，启动阶段的资源和集成失败才能进入同一诊断会话。
     DiagnosticsCenter.shared.start()
+    AsterSingleInstance.recordPendingFailure()
     DiagnosticsCenter.shared.cleanStaleFeedbackArchives()
     let application = NSApplication.shared
     let delegate = AsterAppDelegate()
@@ -343,7 +347,10 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     startControlServer()
     // Bash 与 tmux 子 Shell 需要受管 rc 区块；每次启动都按当前签名 Bundle 路径幂等
     // 刷新，应用移动或升级后不会继续 source 旧位置。失败只禁用集成，不阻塞终端窗口。
-    if let installer = AsterResourceLocations.shellIntegrationInstaller() {
+    // 开发版不改 rc 文件，见 managesShellStartupFiles。
+    if AsterResourceLocations.managesShellStartupFiles,
+      let installer = AsterResourceLocations.shellIntegrationInstaller()
+    {
       do {
         try installer.reconcile(enabled: preferences.configuration.shell.shellIntegration)
       } catch {
