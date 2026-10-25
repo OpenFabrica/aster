@@ -74,6 +74,7 @@ func autocompleteShortcutAcceptsOnlyConfiguredKeys() async throws {
   let expectations: [(AutocompleteShortcut, accepted: [TerminalAutocompleteKey], ignored: [TerminalAutocompleteKey])] = [
     (.tab, [.tab], [.right, .controlSpace]),
     (.tabAndRightArrow, [.tab, .right], [.controlSpace]),
+    (.rightArrow, [.right], [.tab, .controlSpace]),
     (.controlSpace, [.controlSpace], [.tab, .right]),
     (.disabled, [], [.tab, .right, .controlSpace]),
   ]
@@ -88,7 +89,11 @@ func autocompleteShortcutAcceptsOnlyConfiguredKeys() async throws {
       let harness = try await AutocompleteHarness(line: "git chec") { $0.autocompleteShortcut = shortcut }
       defer { harness.cleanUp() }
       #expect(harness.controller.handle(key), "\(shortcut) 应响应 \(key)")
-      #expect(String(decoding: harness.sent.value, as: UTF8.self) == "kout")
+      if key == .controlSpace {
+        #expect(harness.sent.value.isEmpty, "Ctrl-Space重新查询，不写入候选")
+      } else {
+        #expect(harness.sent.value == Array(repeating: UInt8(127), count: 4) + Array("checkout ".utf8))
+      }
     }
   }
 }

@@ -24,6 +24,9 @@ final class GhosttyApp {
   private var didInitializeLibrary = false
   private var retainedConfigs: [ghostty_config_t] = []
   private var currentConfigurationText = ""
+  /// 单个 surface 的鼠标权限不能通过 app_update_config 广播到其他终端。
+  private let mousePolicyViews = NSHashTable<GhosttySurfaceView>.weakObjects()
+  private var mousePolicyConfigs: [String: ghostty_config_t] = [:]
 
   private init() {}
 
@@ -38,6 +41,7 @@ final class GhosttyApp {
       retainedConfigs.append(config)
       currentConfigurationText = configurationText
       ghostty_app_update_config(app, config)
+      for view in mousePolicyViews.allObjects { view.reapplyMouseCapturePolicy() }
       return true
     }
 
@@ -99,6 +103,28 @@ final class GhosttyApp {
   func tick() {
     guard let app else { return }
     ghostty_app_tick(app)
+  }
+
+  func registerMousePolicyView(_ view: GhosttySurfaceView) {
+    mousePolicyViews.add(view)
+    view.reapplyMouseCapturePolicy()
+  }
+
+  /// 使用引擎原生 mouse-reporting 开关；Shift bypass 仍允许未按键的 motion 报告。
+  /// 复用同一全局配置派生的两种变体；所有权与已交给 core 的普通配置保持一致。
+  /// 这里只调用 surface_update_config，不改变全局配置或其他 surface。
+  func applyMouseCapturePolicy(to surface: ghostty_surface_t, allowed: Bool) {
+    let text = allowed ? currentConfigurationText
+      : currentConfigurationText + "\nmouse-reporting = false\n"
+    let config: ghostty_config_t
+    if let cached = mousePolicyConfigs[text] { config = cached }
+    else {
+      guard let created = makeConfig(configurationText: text) else { return }
+      retainedConfigs.append(created)
+      mousePolicyConfigs[text] = created
+      config = created
+    }
+    ghostty_surface_update_config(surface, config)
   }
 
   private func makeConfig(configurationText: String) -> ghostty_config_t? {

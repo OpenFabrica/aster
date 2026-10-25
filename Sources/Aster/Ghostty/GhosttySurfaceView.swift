@@ -87,6 +87,15 @@ final class GhosttySurfaceView: NSView {
   var searchSelected = 0
   var searchNeedle = ""
   var focusFollowsMouse = false
+  /// 仅控制应用鼠标报告，不影响键盘、协议回包或本地选区/滚屏。
+  var allowMouseCapture = true {
+    didSet { if oldValue != allowMouseCapture { reapplyMouseCapturePolicy() } }
+  }
+
+  func reapplyMouseCapturePolicy() {
+    guard let surface else { return }
+    GhosttyApp.shared.applyMouseCapturePolicy(to: surface, allowed: allowMouseCapture)
+  }
   var pasteProtectionEnabled = true
   var pasteBracketedSafe = true
   /// OSC 133 确认前台命令正在运行时返回 true；粘贴保护据此放行进入程序输入的粘贴。
@@ -485,6 +494,8 @@ final class GhosttySurfaceView: NSView {
       onSurfaceCreated?(false)
       return
     }
+
+    GhosttyApp.shared.registerMousePolicyView(self)
 
     ghostty_surface_set_color_scheme(
       surface, dark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)

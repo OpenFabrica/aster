@@ -5,9 +5,9 @@ import Testing
 
 @testable import Aster
 
-@Test("可靠 prompt 生成 inline 候选，Tab 只发送尚未输入的后缀")
+@Test("可靠prompt的Tab删除原始token，写入候选和尾空格")
 @MainActor
-func terminalAutocompleteAcceptsOnlyCandidateSuffix() async throws {
+func terminalAutocompleteAcceptsCandidateByReplacingRawToken() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
@@ -34,11 +34,11 @@ func terminalAutocompleteAcceptsOnlyCandidateSuffix() async throws {
   #expect(controller.currentResult.candidates.prefix(2).map(\.insertText) == ["checkout"])
   #expect(controller.currentResult.ghostText == "kout")
   #expect(controller.handle(.tab))
-  #expect(String(decoding: sent, as: UTF8.self) == "kout")
+  #expect(sent == Array(repeating: UInt8(127), count: 4) + Array("checkout ".utf8))
   #expect(controller.lastSubmittedCommand == nil)
 }
 
-@Test("Shell 端 autosuggestion 占据行尾时 Tab 打开面板，绝不接受不可见候选")
+@Test("不可见ghost不接受，Tab查询超时后只回退一次给Shell")
 @MainActor
 func terminalAutocompleteRefusesInvisibleGhostWhenShellSuggestionOwnsLine() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
@@ -61,26 +61,24 @@ func terminalAutocompleteRefusesInvisibleGhostWhenShellSuggestionOwnsLine() asyn
   controller.refreshNow()
   // zsh-autosuggestions 等插件把自己的灰色建议画进网格，可见行不再以本地输入结尾，
   // 回显校验因此一直不通过，Aster ghost 保持隐藏。此时**绝不能**吞掉 Tab 去插入
-  // 用户从未见过的候选文本；但也不该让用户完全看不到 Aster 算出的候选——Shell 的
-  // Tab 只会补第一个词。因此 Tab 改为打开候选面板：面板里每一行都是可见凭据，
-  // 真正的插入需要用户再按一次键。
+  // 用户从未见过的候选文本。Tab 先重新查询，仍没有可见结果时由 watchdog 回退给 Shell。
   view.dataReceived(slice: Array("git checkout -b feature".utf8)[...])
   await Task.yield()
 
-  #expect(controller.currentResult.ghostText != nil)
+  #expect(controller.inlineGhostText == nil)
   #expect(controller.handle(.tab))
-  #expect(controller.panelVisible, "候选要能被看到，而不是无声地丢给 Shell")
-  // 核心不变量：这一步一个字节都不能进 PTY。
+  #expect(!controller.hasUserSelection)
   #expect(sent.isEmpty)
+  await controller.fallbackTabTask?.value
+  #expect(sent == [9])
+  #expect(controller.shellCompletionActive)
+  #expect(!controller.handle(.tab))
 
-  // 面板打开后，同一个 Tab 才真正接受选中的候选。
-  #expect(controller.handle(.tab))
-  #expect(String(decoding: sent, as: UTF8.self) == "eckout")
 }
 
 @Test("Aster 没有候选时 Tab 仍原样交给 Shell 自己的补全")
 @MainActor
-func terminalAutocompletePassesTabToShellWithoutCandidates() throws {
+func terminalAutocompletePassesTabToShellWithoutCandidates() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
@@ -95,10 +93,13 @@ func terminalAutocompletePassesTabToShellWithoutCandidates() throws {
   controller.refreshNow()
 
   #expect(controller.currentResult.candidates.isEmpty)
-  // Shell 自己的补全（`_docker` 之类）必须继续可用。
-  #expect(!controller.handle(.tab))
+  #expect(controller.handle(.tab))
   #expect(sent.isEmpty)
+  await controller.fallbackTabTask?.value
+  #expect(sent == [9])
+  #expect(!controller.handle(.tab))
   #expect(!controller.panelVisible)
+
 }
 
 @Test("Shell 尚未回显本次输入时不显示 inline suggestion")
@@ -183,33 +184,32 @@ func terminalAutocompleteHidesStaleGhostBeforeDebouncedRefresh() async throws {
   #expect(ghost.isHidden)
 }
 
-@Test("唯一候选的 Escape 只关闭 inline，不再打开单项面板")
+@Test("唯一候选先关闭可见 inline，再按 Escape 可打开单项面板")
 @MainActor
-func terminalAutocompleteEscapeNeverOpensSingleCandidatePanel() async throws {
+func terminalAutocompleteEscapeOpensSingleCandidatePanel() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  fixture.controls.value.autocompleteCandidatePanel = .escape
   let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
-  let controller = TerminalAutocompleteController(
-    service: fixture.service,
-    sessionIdentifier: "session",
-    controls: { fixture.controls.value },
-    currentDirectory: { "/project" }
-  )
+  let controller = makeController(fixture)
   controller.attach(to: view)
   view.onAutocompleteOutput = { controller.receiveOutput($0) }
-
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.receiveInput(Array("git chec".utf8)[...])
   controller.refreshNow()
-  // 第一次 Escape 关闭的是“可见”的 inline suggestion；先回显输入让 ghost 显示。
   view.dataReceived(slice: Array("git chec".utf8)[...])
   await Task.yield()
 
+  #expect(controller.currentResult.candidates.map(\.insertText) == ["checkout"])
   #expect(controller.handle(.escape))
   #expect(!controller.panelVisible)
-  #expect(!controller.handle(.escape))
-  #expect(!controller.panelVisible)
+  #expect(controller.handle(.escape))
+  #expect(controller.panelVisible)
+  #expect(!controller.hasUserSelection)
+  let overlay = try #require(view.subviews.compactMap { $0 as? TerminalAutocompleteOverlayView }.first)
+  #expect(!overlay.panelContainer.isHidden)
+  #expect(overlay.panel.arrangedSubviews.count == 1)
 }
 
 @Test("Shell 历史键使当前 prompt 不可靠并立即停用候选")
@@ -251,7 +251,8 @@ func terminalAutocompleteHidesWhileEditingMiddleOfLine() throws {
   controller.receive(.inputStart)
   controller.receiveInput(Array("git ch".utf8)[...])
   controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "eckout")
+  #expect(controller.currentResult.candidates.contains { $0.insertText == "checkout" })
+  #expect(controller.inlineGhostText == nil)
 
   controller.receiveInput([0x1B, 0x5B, 0x44][...])
   controller.refreshNow()
@@ -260,36 +261,34 @@ func terminalAutocompleteHidesWhileEditingMiddleOfLine() throws {
   #expect(!controller.handle(.right))
 }
 
-@Test("OSC 133 命令生命周期把脱敏成功命令写入学习服务")
+@Test("提交时记录整行和词频，重复完成事件不会再次计数")
 @MainActor
-func terminalAutocompleteLearnsOnlyCompletedCommands() throws {
+func terminalAutocompleteLearnsOnSubmissionBeforeCommandFinishes() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
-  let controller = TerminalAutocompleteController(
-    service: fixture.service,
-    sessionIdentifier: "session",
-    controls: { fixture.controls.value },
-    currentDirectory: { "/project" }
-  )
-
+  let controller = makeController(fixture)
   controller.receive(.promptStart)
   controller.receive(.inputStart)
-  controller.receiveInput(Array("curl --token private https://example.test\n".utf8)[...])
+  controller.receiveInput(Array("git status\n".utf8)[...])
+
+  let submitted = fixture.service.completionStore.state
+  #expect(submitted.fullLines.map(\.command) == ["git status"])
+  #expect(submitted.fullLines.first?.count == 1)
+  #expect(submitted.history.first { $0.command == "" && $0.token == "git" }?.count == 1)
+
   controller.receive(.commandStart)
   controller.receiveOutput(Array("done\n".utf8)[...])
   controller.receive(.commandFinished(exitStatus: 0))
+  controller.receive(.commandFinished(exitStatus: 0))
+  #expect(fixture.service.completionStore.state == submitted)
+
   controller.receive(.promptStart)
   controller.receive(.inputStart)
-  // 空 prompt 不再产生候选，必须先敲一个前缀才能看到学习到的命令。
-  controller.receiveInput(Array("curl".utf8)[...])
+  controller.receiveInput(Array("git s".utf8)[...])
   controller.refreshNow()
-
-  #expect(
-    controller.currentResult.candidates.contains {
-      $0.insertText == "curl https://example.test" && $0.kind == .learnedCommand
-    }
-  )
-  #expect(!controller.currentResult.candidates.contains { $0.insertText.contains("private") })
+  #expect(controller.currentResult.candidates.contains {
+    $0.insertText == "git status" && $0.kind == .learnedCommand
+  })
 }
 
 @Test("Ghostty commandStart 先到时仍接收排队中的回车并发布完整命令")
@@ -333,7 +332,7 @@ func terminalAutocompleteKeepsManualPanelOpenWhileTyping() async throws {
   controller.receive(.inputStart)
   controller.receiveInput(Array("git c".utf8)[...])
   controller.refreshNow()
-  // 第一次 Escape 关掉的是“可见”的 ghost，先让 PTY 回显输入。
+  // 多个候选没有自动预览；Escape 直接进入手动选择。
   view.dataReceived(slice: Array("git c".utf8)[...])
   await Task.yield()
   #expect(controller.handle(.escape))
@@ -347,9 +346,7 @@ func terminalAutocompleteKeepsManualPanelOpenWhileTyping() async throws {
   #expect(controller.currentResult.candidates.first?.insertText == "checkout")
 }
 
-// 新开 Pane / 命令刚结束时 prompt 为空，目录历史再多也不能自动压在光标下；
-// 候选与 ghost 照常计算，敲下第一个字符后面板才自动展开，Esc 仍可手动打开。
-@Test("空 prompt 不自动弹出候选面板，输入首字符后才展开")
+@Test("空 prompt 即使已有目录历史也无候选，输入首字符后自动展开")
 @MainActor
 func terminalAutocompleteDoesNotAutoOpenPanelOnEmptyPrompt() throws {
   let fixture = try makeTerminalAutocompleteFixture()
@@ -363,117 +360,82 @@ func terminalAutocompleteDoesNotAutoOpenPanelOnEmptyPrompt() throws {
     controller.receive(.commandStart)
     controller.receive(.commandFinished(exitStatus: 0))
   }
-
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.refreshNow()
-  #expect(controller.currentResult.candidates.count >= 2)
+  #expect(controller.currentResult.candidates.isEmpty)
+  #expect(controller.currentResult.ghostText == nil)
   #expect(!controller.panelVisible)
-
-  // Esc 是用户主动要看：空 prompt 也允许手动打开。
-  #expect(controller.handle(.escape))
-  #expect(controller.panelVisible)
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
+  #expect(!controller.handle(.escape))
   #expect(!controller.panelVisible)
 
   controller.receiveInput(Array("g".utf8)[...])
   controller.refreshNow()
+  #expect(!controller.currentResult.candidates.isEmpty)
   #expect(controller.panelVisible)
 }
 
-// 打错的命令（127 / command not found）回车执行过也不进历史；126 同理。
-@Test("shell 没能执行的命令不写入学习历史")
+@Test("127 清除本次命令历史，其它非零退出码保留已提交的整行")
 @MainActor
-func terminalAutocompleteSkipsUnexecutableCommands() throws {
+func terminalAutocompleteCleansOnlyCommandNotFoundExitStatus() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
-  let controller = TerminalAutocompleteController(
-    service: fixture.service,
-    sessionIdentifier: "session",
-    controls: { fixture.controls.value },
-    currentDirectory: { "/project" }
-  )
+  let controller = makeController(fixture)
   func run(_ command: String, exitStatus: Int, output: String) {
     controller.receive(.promptStart)
     controller.receive(.inputStart)
     controller.receiveInput(Array("\(command)\n".utf8)[...])
+    #expect(fixture.service.completionStore.state.fullLines.contains { $0.command == command })
     controller.receive(.commandStart)
-    // 输出捕获以 OSC 133 C/D 作为命令输出的边界，与真实 PTY 流一致。
-    let stream = "\u{1B}]133;C\u{07}" + output + "\u{1B}]133;D;\(exitStatus)\u{07}"
-    controller.receiveOutput(Array(stream.utf8)[...])
+    controller.receiveOutput(Array(output.utf8)[...])
     controller.receive(.commandFinished(exitStatus: exitStatus))
   }
   run("sw", exitStatus: 127, output: "zsh: command not found: sw\n")
   run("./notexec", exitStatus: 126, output: "zsh: permission denied: ./notexec\n")
-  // 自定义 command_not_found_handler 返回 1：靠输出判定。
   run("gti status", exitStatus: 1, output: "zsh: command not found: gti\n")
-  // 正常失败的命令仍然学习（用户确实在用它）。
   run("git push", exitStatus: 1, output: "fatal: no upstream\n")
   run("ls", exitStatus: 0, output: "")
 
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
-  let learned = controller.currentResult.candidates
-    .filter { $0.kind == .learnedCommand }.map(\.insertText)
+  let learned = fixture.service.completionStore.state.fullLines.map(\.command)
   #expect(!learned.contains("sw"))
-  #expect(!learned.contains("./notexec"))
-  #expect(!learned.contains("gti status"))
+  #expect(learned.contains("./notexec"))
+  #expect(learned.contains("gti status"))
   #expect(learned.contains("git push"))
   #expect(learned.contains("ls"))
-  #expect(TerminalAutocompleteController.commandWasNotExecutable(exitStatus: 0, output: "command not found") == false)
 }
 
-// 结构性纠错依赖真实目录列表：`cd porject` 失败后，下一条空 prompt 的 ghost 是 `cd project`。
-@Test("失败的 cd 与被拒的 git push 在下一条 prompt 给出结构性纠错")
+@Test("失败输出不生成 cd 纠错或 git pull 重试命令")
 @MainActor
-func terminalAutocompleteOffersStructuralCorrections() throws {
+func terminalAutocompleteDoesNotInjectStructuralCorrections() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
-  let workingDirectory = fixture.directory.appendingPathComponent("cwd", isDirectory: true)
+  let cwd = fixture.directory.appendingPathComponent("cwd", isDirectory: true)
   try FileManager.default.createDirectory(
-    at: workingDirectory.appendingPathComponent("project", isDirectory: true), withIntermediateDirectories: true)
+    at: cwd.appendingPathComponent("project", isDirectory: true), withIntermediateDirectories: true)
   let controller = TerminalAutocompleteController(
-    service: fixture.service,
-    sessionIdentifier: "session",
-    controls: { fixture.controls.value },
-    currentDirectory: { workingDirectory.path }
-  )
-  func run(_ command: String, exitStatus: Int, output: String) {
+    service: fixture.service, sessionIdentifier: "session",
+    controls: { fixture.controls.value }, currentDirectory: { cwd.path })
+  func run(_ command: String, output: String, prefix: String) {
     controller.receive(.promptStart)
     controller.receive(.inputStart)
     controller.receiveInput(Array("\(command)\n".utf8)[...])
     controller.receive(.commandStart)
-    let stream = "\u{1B}]133;C\u{07}" + output + "\u{1B}]133;D;\(exitStatus)\u{07}"
-    controller.receiveOutput(Array(stream.utf8)[...])
-    controller.receive(.commandFinished(exitStatus: exitStatus))
+    controller.receiveOutput(Array(output.utf8)[...])
+    controller.receive(.commandFinished(exitStatus: 1))
+    controller.receive(.promptStart)
+    controller.receive(.inputStart)
+    controller.refreshNow()
+    #expect(controller.currentResult.candidates.isEmpty)
+    controller.receiveInput(Array(prefix.utf8)[...])
+    controller.refreshNow()
+    #expect(!controller.currentResult.candidates.contains { $0.kind == .correction })
   }
-
-  run("cd porject", exitStatus: 1, output: "cd: no such file or directory: porject\n")
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
-  let first = controller.currentResult.candidates.first
-  #expect(first?.kind == .correction)
-  #expect(first?.insertText == "cd project")
-  #expect(first?.description == TerminalAutocompleteController.correctionDescription(.nearestDirectory))
-  #expect(controller.currentResult.ghostText == "cd project")
-
-  run(
-    "git push", exitStatus: 1,
-    output: "hint: Updates were rejected because the remote contains work that you do not have locally.\n")
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
-  #expect(controller.currentResult.candidates.first?.insertText == "git pull --rebase && git push")
-  // 成功的命令清掉旧纠错。
-  run("ls", exitStatus: 0, output: "")
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
-  #expect(!controller.currentResult.candidates.contains { $0.kind == .correction })
+  run("cd porject", output: "cd: no such file or directory: porject\n", prefix: "cd p")
+  #expect(!controller.currentResult.candidates.contains {
+    $0.kind == .learnedCommand && $0.insertText == "cd project"
+  })
+  run("git push", output: "Updates were rejected because the remote contains work.\n", prefix: "git p")
+  #expect(!controller.currentResult.candidates.contains { $0.insertText == "git pull --rebase && git push" })
 }
 
 @Test("Escape 关闭自动面板后本轮 prompt 内不再自动弹回")
@@ -524,16 +486,18 @@ func terminalAutocompleteAutoPanelWaitsForSelection() throws {
   #expect(controller.panelVisible)
   #expect(!controller.hasUserSelection)
   #expect(!controller.handle(.enter))
+  #expect(!controller.panelVisible)
+  controller.refreshNow()
   #expect(controller.handle(.down))
   #expect(controller.hasUserSelection)
   #expect(controller.selectedIndex == 0)
   #expect(controller.handle(.enter))
-  #expect(String(decoding: sent, as: UTF8.self) == "eckout")
+  #expect(sent == [127, 127] + Array("checkout ".utf8))
 }
 
-@Test("手动打开的候选面板立即用 Return 接受当前行")
+@Test("手动面板初始无选择，方向键选择后Return替换当前词")
 @MainActor
-func terminalAutocompleteManualPanelAcceptsReturnImmediately() async throws {
+func terminalAutocompleteManualPanelRequiresSelectionForReturn() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   fixture.controls.value.autocompleteCandidatePanel = .escape
@@ -552,9 +516,11 @@ func terminalAutocompleteManualPanelAcceptsReturnImmediately() async throws {
   await Task.yield()
   #expect(controller.handle(.escape))
   #expect(controller.panelVisible)
-  #expect(controller.hasUserSelection)
+  #expect(!controller.hasUserSelection)
+  #expect(controller.handle(.down))
   #expect(controller.handle(.enter))
-  #expect(String(decoding: sent, as: UTF8.self) == "eckout")
+  #expect(sent == [127, 127] + Array("checkout ".utf8))
+
 }
 
 @Test("inline 与候选面板同时关闭时完全不查询规格库")
@@ -576,14 +542,16 @@ func terminalAutocompleteSkipsSuggestionsWhenInlineAndPanelDisabled() throws {
   #expect(!controller.panelVisible)
 }
 
-@Test("自动面板在候选降到一条以下时自动收起")
+@Test("自动面板保留唯一候选，候选为空才收起")
 @MainActor
-func terminalAutocompleteAutoPanelClosesWhenCandidatesDropBelowTwo() throws {
+func terminalAutocompleteAutoPanelClosesOnlyWhenCandidatesAreEmpty() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   fixture.controls.value.autocompleteCandidatePanel = .automatic
+  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
   let controller = makeController(fixture)
-
+  controller.attach(to: view)
+  let overlay = try #require(view.subviews.compactMap { $0 as? TerminalAutocompleteOverlayView }.first)
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.receiveInput(Array("git c".utf8)[...])
@@ -592,8 +560,16 @@ func terminalAutocompleteAutoPanelClosesWhenCandidatesDropBelowTwo() throws {
 
   controller.receiveInput(Array("herry-pi".utf8)[...])
   controller.refreshNow()
-  #expect(controller.currentResult.candidates.count < 2)
+  #expect(controller.currentResult.candidates.map(\.insertText) == ["cherry-pick"])
+  #expect(controller.panelVisible)
+  #expect(!overlay.panelContainer.isHidden)
+  #expect(overlay.panel.arrangedSubviews.count == 1)
+
+  controller.receiveInput(Array("zzzz".utf8)[...])
+  controller.refreshNow()
+  #expect(controller.currentResult.candidates.isEmpty)
   #expect(!controller.panelVisible)
+  #expect(overlay.panelContainer.isHidden)
 }
 
 @Test("滚动视窗以最小移动跟随选中项并覆盖循环选择")
@@ -617,124 +593,73 @@ func terminalAutocompleteScrollsWindowToKeepSelectionVisible() {
       current: 3, selected: 2, count: 5, visibleRows: rows) == 0)
 }
 
-@Test("上一条失败命令在下一条空 prompt 推荐纠错")
+@Test("命令输出中的纠错提示不成为补全来源")
 @MainActor
-func terminalAutocompleteOffersCorrectionOnEmptyPrompt() throws {
+func terminalAutocompleteDoesNotParseCorrectionFromOutput() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
-  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
   let controller = makeController(fixture)
-  controller.attach(to: view)
-  _ = fixture.service.record(command: "git log", directory: "/project", exitStatus: 0,
-    ignorePatterns: [], knownOptions: [], sessionIdentifier: "session")
-
-  // 跑一条失败命令，让它留下 "git stauts" → "git status" 的纠错。
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.receiveInput(Array("git stauts\r".utf8)[...])
   controller.receive(.commandStart)
-  let output = """
-    \u{1B}]133;C\u{07}git: 'stauts' is not a git command. See 'git --help'.
-
-    The most similar command is
-    status
-    \u{1B}]133;D;1\u{07}
-    """
-  controller.receiveOutput(Array(output.utf8)[...])
+  controller.receiveOutput(Array("git: 'stauts' is not a git command. The most similar command is status\n".utf8)[...])
   controller.receive(.commandFinished(exitStatus: 1))
-
-  // 新一轮空 prompt 提供纠错；Shell 是否占据光标之后的空间由 adapter 实时校验。
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "git status")
-  #expect(controller.currentResult.candidates.count > 1)
-  let overlay = try #require(view.subviews.compactMap { $0 as? TerminalAutocompleteOverlayView }.first)
-  let ghost = try #require(overlay.subviews.compactMap { $0 as? NSTextField }.first)
-  #expect(ghost.stringValue == "git status")
-  #expect(!ghost.isHidden)
+  #expect(controller.currentResult.candidates.isEmpty)
+  #expect(controller.currentResult.ghostText == nil)
 
-  // 纠错本身仍然在：用户一开始打字就能看到它。
   controller.receiveInput(Array("git st".utf8)[...])
   controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "atus")
+  #expect(controller.currentResult.candidates.contains { $0.insertText == "status" && $0.kind == .subcommand })
+  #expect(!controller.currentResult.candidates.contains { $0.kind == .correction })
+  #expect(!fixture.service.completionStore.state.fullLines.contains { $0.command == "git status" })
 }
 
-@Test("git clone 成功后下一条空 prompt 推荐 cd <目录>，本机学习关闭也生效")
+@Test("成功 clone 不生成下一步 cd 建议，已有目录仍能正常补全")
 @MainActor
-func terminalAutocompleteOffersCdAfterSuccessfulClone() throws {
+func terminalAutocompleteDoesNotInjectCdAfterSuccessfulClone() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
-  // 目录必须真实存在才推荐：模拟 clone 在 cwd 下创建了 dxy-device。
   let cwd = fixture.directory.appendingPathComponent("cwd", isDirectory: true)
   try FileManager.default.createDirectory(
     at: cwd.appendingPathComponent("dxy-device"), withIntermediateDirectories: true)
   fixture.controls.value.autocompleteOnDeviceLearning = false
-  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
   let controller = TerminalAutocompleteController(
-    service: fixture.service,
-    sessionIdentifier: "session",
-    controls: { fixture.controls.value },
-    currentDirectory: { cwd.path }
-  )
-  controller.attach(to: view)
-
+    service: fixture.service, sessionIdentifier: "session",
+    controls: { fixture.controls.value }, currentDirectory: { cwd.path })
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.receiveInput(Array("git clone ssh://git@example.com/dxyc/dxy-device.git\r".utf8)[...])
   controller.receive(.commandStart)
   controller.receive(.commandFinished(exitStatus: 0))
-
   controller.receive(.promptStart)
   controller.receive(.inputStart)
-  // prompt 一就绪就立刻画出 ghost，不等 150ms 防抖与完整候选计算。
-  let overlay = try #require(view.subviews.compactMap { $0 as? TerminalAutocompleteOverlayView }.first)
-  let ghost = try #require(overlay.subviews.compactMap { $0 as? NSTextField }.first)
-  #expect(ghost.stringValue == "cd dxy-device")
-  #expect(!ghost.isHidden)
   controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "cd dxy-device")
-  #expect(controller.currentResult.candidates.first?.insertText == "cd dxy-device")
-  #expect(controller.currentResult.candidates.first?.kind == .followUp)
-  // 空 prompt 上还有历史/规格候选，但「下一步」是唯一确定建议，ghost 必须仍然画着。
-  #expect(ghost.stringValue == "cd dxy-device")
-  #expect(!ghost.isHidden)
+  #expect(controller.currentResult.candidates.isEmpty)
+  #expect(controller.currentResult.ghostText == nil)
 
-  // 输入前缀时只补后缀；前缀不匹配时消失。
   controller.receiveInput(Array("cd d".utf8)[...])
   controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "xy-device")
-  controller.receiveInput(Array("ls".utf8)[...])
-  controller.refreshNow()
-  #expect(controller.currentResult.candidates.first?.insertText != "cd dxy-device")
-
-  // 目标目录不存在（clone 到别处或失败）时不推荐。
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.receiveInput(Array("git clone https://example.com/org/missing.git\r".utf8)[...])
-  controller.receive(.commandStart)
-  controller.receive(.commandFinished(exitStatus: 0))
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
-  #expect(controller.currentResult.ghostText != "cd missing")
+  #expect(controller.currentResult.candidates.contains { $0.kind == .folder && $0.displayText == "dxy-device/" })
+  #expect(!controller.currentResult.candidates.contains { $0.kind == .followUp })
 }
 
-@Test("venv 建好后推荐 source 激活，激活脚本不存在时不推荐；commit 后无需校验路径")
+@Test("创建 venv 或成功 commit 不生成后续动作")
 @MainActor
-func terminalAutocompleteOffersFollowUpsWithFileAndNoPathChecks() throws {
+func terminalAutocompleteDoesNotInjectFollowUpCommands() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   let cwd = fixture.directory.appendingPathComponent("cwd", isDirectory: true)
   try FileManager.default.createDirectory(
     at: cwd.appendingPathComponent(".venv/bin"), withIntermediateDirectories: true)
-  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
+  try Data().write(to: cwd.appendingPathComponent(".venv/bin/activate"))
   let controller = TerminalAutocompleteController(
     service: fixture.service, sessionIdentifier: "session",
     controls: { fixture.controls.value }, currentDirectory: { cwd.path })
-  controller.attach(to: view)
-
-  func run(_ command: String) {
+  for command in ["python3 -m venv .venv", "git commit -m \"feat: x\""] {
     controller.receive(.promptStart)
     controller.receive(.inputStart)
     controller.receiveInput(Array((command + "\r").utf8)[...])
@@ -743,70 +668,117 @@ func terminalAutocompleteOffersFollowUpsWithFileAndNoPathChecks() throws {
     controller.receive(.promptStart)
     controller.receive(.inputStart)
     controller.refreshNow()
+    #expect(controller.currentResult.candidates.isEmpty)
+    #expect(controller.currentResult.ghostText == nil)
   }
-
-  // activate 文件还不存在（目录存在不算）→ 不推荐。
-  run("python3 -m venv .venv")
-  #expect(controller.currentResult.ghostText != "source .venv/bin/activate")
-
-  FileManager.default.createFile(
-    atPath: cwd.appendingPathComponent(".venv/bin/activate").path, contents: Data())
-  run("python3 -m venv .venv")
-  #expect(controller.currentResult.ghostText == "source .venv/bin/activate")
-
-  run("git commit -m \"feat: x\"")
-  #expect(controller.currentResult.ghostText == "git push")
-  #expect(controller.currentResult.candidates.first?.description == L("推送刚才的提交"))
+  #expect(!fixture.service.completionStore.state.fullLines.contains {
+    $0.command == "source .venv/bin/activate" || $0.command == "git push"
+  })
 }
 
-@Test("按 ↑ 调出历史执行时，以屏幕上的命令行为准推断下一步")
+@Test("Shell 历史执行使用屏幕命令记录，剔除右侧提示符且不跨 prompt 复用")
 @MainActor
-func terminalAutocompleteUsesScreenCommandForFollowUp() throws {
+func terminalAutocompleteLearnsScreenCommandWithoutFollowUp() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
-  let cwd = fixture.directory.appendingPathComponent("cwd", isDirectory: true)
-  try FileManager.default.createDirectory(
-    at: cwd.appendingPathComponent("demo"), withIntermediateDirectories: true)
-  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
-  let controller = TerminalAutocompleteController(
-    service: fixture.service, sessionIdentifier: "session",
-    controls: { fixture.controls.value }, currentDirectory: { cwd.path })
-  controller.attach(to: view)
+  let controller = makeController(fixture)
+  for screenLine in ["mkdir demo", "mkdir demo            14:30:00 main"] {
+    controller.receive(.promptStart)
+    controller.receive(.inputStart)
+    controller.receiveInput(Array("\u{1B}[A\r".utf8)[...])
+    controller.receiveScreenCommand(screenLine)
+    controller.receive(.commandStart)
+    controller.receive(.commandFinished(exitStatus: 0))
+  }
+  let stored = fixture.service.completionStore.state
+  #expect(stored.fullLines.map(\.command) == ["mkdir demo"])
+  #expect(stored.fullLines.first?.count == 2)
 
-  // 键盘只收到 ↑ 和回车：tracker 重建出的命令是空的。
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.receiveInput(Array("\u{1B}[A\r".utf8)[...])
-  controller.receiveScreenCommand("mkdir demo")
-  controller.receive(.commandStart)
-  controller.receive(.commandFinished(exitStatus: 0))
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "cd demo")
-
-  // 右侧提示符与命令之间至少两个空格，只取命令段。
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.receiveInput(Array("\u{1B}[A\r".utf8)[...])
-  controller.receiveScreenCommand("mkdir demo            14:30:00 main")
-  controller.receive(.commandStart)
-  controller.receive(.commandFinished(exitStatus: 0))
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
-  controller.refreshNow()
-  #expect(controller.currentResult.ghostText == "cd demo")
-
-  // 屏幕文本在下一条 prompt 开始时清空，不会串到后一条命令。
-  controller.receive(.promptStart)
-  controller.receive(.inputStart)
+  #expect(controller.currentResult.candidates.isEmpty)
   controller.receiveInput(Array("\u{1B}[A\r".utf8)[...])
   controller.receive(.commandStart)
   controller.receive(.commandFinished(exitStatus: 0))
+  #expect(fixture.service.completionStore.state == stored)
+}
+
+@Test("Shell Tab 后等待屏幕完整命令，只记录最终文本而不记录键盘前缀")
+@MainActor
+func terminalAutocompleteLearnsScreenCommandAfterShellTab() throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  fixture.controls.value.autocompleteShortcut = .disabled
+  let controller = makeController(fixture)
   controller.receive(.promptStart)
   controller.receive(.inputStart)
-  controller.refreshNow()
-  #expect(controller.currentResult.ghostText != "cd demo")
+  controller.receiveInput(Array("git chec".utf8)[...])
+  #expect(!controller.handle(.tab))
+  controller.receiveInput([0x09][...])
+  controller.receiveInput([0x0D][...])
+  #expect(fixture.service.completionStore.state.fullLines.isEmpty)
+  #expect(fixture.service.completionStore.state.history.isEmpty)
+
+  controller.receiveScreenCommand("git checkout main")
+  controller.receive(.commandStart)
+  let submitted = fixture.service.completionStore.state
+  #expect(submitted.fullLines.map(\.command) == ["git checkout main"])
+  #expect(!submitted.history.contains { $0.token == "chec" })
+  controller.receive(.commandFinished(exitStatus: 0))
+  #expect(fixture.service.completionStore.state == submitted)
+}
+
+@Test("屏幕回读保留前导空格的不记录语义", arguments: [" git status", "  git status"])
+@MainActor
+func terminalAutocompleteSkipsScreenCommandWithLeadingSpace(command: String) throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let controller = makeController(fixture)
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.receiveInput(Array("\u{1B}[A\r".utf8)[...])
+  controller.receiveScreenCommand(command)
+  controller.receive(.commandStart)
+  controller.receive(.commandFinished(exitStatus: 0))
+  #expect(fixture.service.completionStore.state.fullLines.isEmpty)
+  #expect(fixture.service.completionStore.state.history.isEmpty)
+}
+
+@Test("旧控制器失效后的迟到事件不能清理或污染同会话的新提交")
+@MainActor
+func terminalAutocompleteInvalidatedControllerCannotChangeReplacementSubmission() throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let previous = makeController(fixture)
+  previous.receive(.promptStart)
+  previous.receive(.inputStart)
+  previous.receiveInput(Array("git status\r".utf8)[...])
+  previous.receive(.commandStart)
+  previous.invalidate()
+  previous.invalidate()
+
+  let replacement = makeController(fixture)
+  replacement.receive(.promptStart)
+  replacement.receive(.inputStart)
+  replacement.receiveInput(Array("git checkout main\r".utf8)[...])
+  let submitted = fixture.service.completionStore.state
+  #expect(submitted.fullLines.contains { $0.command == "git checkout main" })
+
+  previous.receive(.commandFinished(exitStatus: 127))
+  previous.receive(.promptStart)
+  previous.receive(.inputStart)
+  previous.receiveInput(Array("git branch pollution\r".utf8)[...])
+  previous.receiveScreenCommand("git branch pollution")
+  previous.receive(.commandStart)
+  previous.refreshNow()
+  #expect(!previous.handle(.tab))
+  #expect(previous.currentResult.candidates.isEmpty)
+  #expect(fixture.service.completionStore.state == submitted)
+
+  replacement.receive(.commandStart)
+  replacement.receive(.commandFinished(exitStatus: 0))
+  #expect(fixture.service.completionStore.state == submitted)
 }
 
 @MainActor
@@ -924,7 +896,7 @@ func terminalAutocompleteContextPreviewsSelectedCandidate() async throws {
   #expect(ghost.stringValue == "erry-pick")
 }
 
-@Test("开启跳过含凭据的命令后整条不进历史也不纠错；关闭时沿用旧行为")
+@Test("跳过敏感命令开关控制整行记录，关闭时保存原始文本")
 @MainActor
 func terminalAutocompleteSkipsSecretCommandsWhenEnabled() throws {
   let fixture = try makeTerminalAutocompleteFixture()
@@ -949,7 +921,7 @@ func terminalAutocompleteSkipsSecretCommandsWhenEnabled() throws {
   fixture.controls.value.autocompleteSkipSecrets = true
   run("export DEPLOY_TOKEN=abcdef123456")
   #expect(learned("export").isEmpty)
-  // 失败的凭据命令也不纠错：输出里可能带着秘密。
+  // 127 清除本次失败命令；输出不成为额外建议来源。
   run("gti push --token abcdef", exitStatus: 127, output: "zsh: command not found: gti")
   controller.receive(.promptStart)
   controller.receive(.inputStart)
@@ -961,28 +933,26 @@ func terminalAutocompleteSkipsSecretCommandsWhenEnabled() throws {
   #expect(learned("export") == ["export DEPLOY_TOKEN=abcdef123456"])
 }
 
-@Test("多条同样可能的历史整行只预览共同的下一个词，Tab 只接受这个词")
+@Test("同分历史无公共预览，需要方向键明确选中后接受整行")
 @MainActor
-func terminalAutocompletePreviewsSharedPrefixOfConflictingHistory() async throws {
+func terminalAutocompleteDoesNotPreviewSharedPrefixOfConflictingHistory() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  fixture.controls.value.autocompleteCandidatePanel = .automatic
   let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
   let controller = makeController(fixture)
   controller.attach(to: view)
   var sent: [UInt8] = []
   view.onEncodedInput = { sent.append(contentsOf: $0) }
   view.onAutocompleteOutput = { controller.receiveOutput($0) }
-  func run(_ command: String) {
-    controller.receive(.promptStart)
-    controller.receive(.inputStart)
-    controller.receiveInput(Array("\(command)\n".utf8)[...])
-    controller.receive(.commandStart)
-    controller.receive(.commandFinished(exitStatus: 0))
-  }
-  // 两条整行历史在同一目录各执行两次，分数相同，谁也不领先。
   for _ in 0..<2 {
-    run("git commit -m wip")
-    run("git commit --amend")
+    for command in ["git commit -m wip", "git commit --amend"] {
+      controller.receive(.promptStart)
+      controller.receive(.inputStart)
+      controller.receiveInput(Array("\(command)\n".utf8)[...])
+      controller.receive(.commandStart)
+      controller.receive(.commandFinished(exitStatus: 0))
+    }
   }
   controller.receive(.promptStart)
   controller.receive(.inputStart)
@@ -990,13 +960,19 @@ func terminalAutocompletePreviewsSharedPrefixOfConflictingHistory() async throws
   controller.refreshNow()
   let lines = controller.currentResult.candidates.filter { $0.kind == .learnedCommand }.map(\.insertText)
   #expect(lines.contains("git commit -m wip") && lines.contains("git commit --amend"))
-  #expect(controller.inlineSuggestion == .sharedPrefix("commit "))
-  #expect(controller.inlineGhostText == "commit ")
-
+  #expect(controller.inlineSuggestion == nil)
+  #expect(controller.inlineGhostText == nil)
+  let first = try #require(controller.currentResult.candidates.first)
+  let suffix = try #require(first.appendableSuffix(from: "git "))
   view.dataReceived(slice: Array("git ".utf8)[...])
   await Task.yield()
+  #expect(controller.handle(.down))
+  #expect(controller.hasUserSelection)
+  #expect(sent.isEmpty)
+  #expect(controller.inlineGhostText == suffix)
   #expect(controller.handle(.tab))
-  #expect(String(decoding: sent, as: UTF8.self) == "commit ")
+  #expect(sent == Array(repeating: UInt8(127), count: "git ".unicodeScalars.count) + Array(first.insertText.utf8))
+
 }
 
 @Test("多个候选时首条历史用得更多且最近用过，直接预览整行，Tab 接受它")
@@ -1034,12 +1010,12 @@ func terminalAutocompletePreviewsClearlyLeadingHistory() async throws {
   view.dataReceived(slice: Array("git commit -m ".utf8)[...])
   await Task.yield()
   #expect(controller.handle(.tab))
-  #expect(String(decoding: sent, as: UTF8.self) == "wip")
+  #expect(sent == Array(repeating: UInt8(127), count: "git commit -m ".unicodeScalars.count) + Array("git commit -m wip".utf8))
 }
 
-@Test("自动面板未选中时 Tab 接受已经可见的首项")
+@Test("自动多项无选择时Tab交给Shell，直到其他按键解除接管")
 @MainActor
-func terminalAutocompleteContextTabAcceptsVisibleFirstRow() throws {
+func terminalAutocompleteUnselectedMultipleTabHandsOffToShell() throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   fixture.controls.value.autocompleteCandidatePanel = .automatic
@@ -1053,8 +1029,16 @@ func terminalAutocompleteContextTabAcceptsVisibleFirstRow() throws {
   controller.receiveInput(Array("git ch".utf8)[...])
   controller.refreshNow()
   #expect(!controller.hasUserSelection)
-  #expect(controller.handle(.tab))
-  #expect(String(decoding: sent, as: UTF8.self) == "eckout")
+  #expect(!controller.handle(.tab))
+  #expect(controller.shellCompletionActive)
+  #expect(!controller.panelVisible)
+  #expect(!controller.handle(.tab))
+  #expect(!controller.handle(.down))
+  #expect(!controller.handle(.left))
+  #expect(sent.isEmpty)
+  #expect(!controller.handle(.other))
+  #expect(!controller.shellCompletionActive)
+
 }
 
 @Test("Ctrl-C 后立即输入的命令保留到新提示符，不丢前缀")
@@ -1123,11 +1107,12 @@ func terminalAutocompleteTabAcceptsVisibleShellSuffix() async throws {
   #expect(!controller.panelVisible)
 }
 
-@Test("手动面板收窄到一个候选后只显示行内建议")
+@Test("手动面板收窄到一个候选后保持打开并允许再次打开")
 @MainActor
-func terminalAutocompleteSingleCandidateNeverOpensPanel() async throws {
+func terminalAutocompleteSingleCandidateKeepsManualPanelOpen() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  fixture.controls.value.autocompleteCandidatePanel = .escape
   let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
   let controller = makeController(fixture)
   controller.attach(to: view)
@@ -1142,55 +1127,74 @@ func terminalAutocompleteSingleCandidateNeverOpensPanel() async throws {
   view.dataReceived(slice: Array("git chec".utf8)[...])
   await Task.yield()
   controller.refreshNow()
+  #expect(controller.currentResult.candidates.map(\.insertText) == ["checkout"])
+  #expect(controller.panelVisible)
+  #expect(controller.handle(.escape))
   #expect(!controller.panelVisible)
-  _ = controller.handle(.escape)
-  _ = controller.handle(.escape)
-  #expect(!controller.panelVisible)
+  #expect(controller.handle(.escape))
+  #expect(controller.panelVisible)
 }
 
-// 项目命令（最近一次 Agent 会话的 resume）必须是首个候选：空 prompt 时 ghost 就是整条命令，
-// 输入了前缀时仍排第一且 Tab 只补尚未输入的后缀；前缀不匹配时不出现。
-@Test("项目 resume 命令是补全首选项，空 prompt 与前缀都排第一")
+@Test("自动单项未选中Tab只清理，明确选择后才替换token")
 @MainActor
-func terminalAutocompleteRanksProjectCommandFirst() async throws {
+func terminalAutocompleteSingleAutomaticTabDismissesUntilSelected() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  fixture.controls.value.autocompleteCandidatePanel = .automatic
   let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
-  let controller = TerminalAutocompleteController(
-    service: fixture.service,
-    sessionIdentifier: "session",
-    controls: { fixture.controls.value },
-    currentDirectory: { "/project" }
-  )
-  var queriedDirectories: [String] = []
-  controller.projectCommandProvider = { directory in
-    queriedDirectories.append(directory)
-    return ProjectCommandSuggestion(command: "claude --resume sess-42", description: "恢复 Claude Code 会话")
-  }
+  let controller = makeController(fixture)
+  defer { controller.invalidate() }
   controller.attach(to: view)
-  view.onAutocompleteInput = { controller.receiveInput($0) }
+  var sent: [UInt8] = []
+  view.onEncodedInput = { sent.append(contentsOf: $0) }
   view.onAutocompleteOutput = { controller.receiveOutput($0) }
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.receiveInput(Array("git chec".utf8)[...])
+  controller.refreshNow()
+  view.dataReceived(slice: Array("git chec".utf8)[...])
+  await Task.yield()
+  #expect(controller.panelVisible)
+  #expect(controller.currentResult.candidates.map(\.displayText) == ["checkout"])
+  #expect(!controller.hasUserSelection)
+  #expect(controller.handle(.tab))
+  #expect(!controller.panelVisible)
+  #expect(!controller.hasUserSelection)
+  #expect(sent.isEmpty, "未选中单项不插入灰字")
+  controller.refreshNow()
+  #expect(controller.handle(.down))
+  #expect(controller.hasUserSelection)
+  #expect(controller.handle(.tab))
+  #expect(sent == Array(repeating: UInt8(127), count: 4) + Array("checkout ".utf8))
+  #expect(controller.lastSubmittedCommand == nil)
 
+}
+
+@Test("Agent resume 仅作为实际执行过的历史出现，不注入项目命令")
+@MainActor
+func terminalAutocompleteUsesRecordedResumeWithoutProjectInjection() throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  let controller = makeController(fixture)
+  let command = "claude --resume sess-42"
+  #expect(fixture.service.record(command: command, directory: "/project", exitStatus: 0,
+    ignorePatterns: [], knownOptions: [], sessionIdentifier: "session"))
   controller.receive(.promptStart)
   controller.receive(.inputStart)
   controller.refreshNow()
-  #expect(queriedDirectories == ["/project"])
-  #expect(controller.currentResult.candidates.first?.insertText == "claude --resume sess-42")
-  #expect(controller.currentResult.candidates.first?.kind == .snippet)
-  #expect(controller.currentResult.ghostText == "claude --resume sess-42")
+  #expect(controller.currentResult.candidates.isEmpty)
 
   controller.receiveInput(Array("cla".utf8)[...])
   controller.refreshNow()
-  #expect(controller.currentResult.candidates.first?.insertText == "claude --resume sess-42")
-  #expect(controller.currentResult.ghostText == "ude --resume sess-42")
+  #expect(controller.currentResult.candidates.first?.insertText == command)
+  #expect(controller.currentResult.candidates.first?.kind == .learnedCommand)
+  #expect(!controller.currentResult.candidates.contains { $0.kind == .snippet })
 
-  controller.receiveInput(Array("git ".utf8)[...])
+  fixture.controls.value.autocompleteOnDeviceLearning = false
   controller.refreshNow()
-  #expect(controller.currentResult.candidates.first?.insertText != "claude --resume sess-42")
+  #expect(!controller.currentResult.candidates.contains { $0.insertText == command })
 }
 
-// 用户反馈：把输入退格删空后，自动弹出的历史列表仍压在光标下。空 prompt 上的候选只是
-// 目录历史，与「空 prompt 不自动弹面板」同一语义，自动面板必须随之收起。
 @Test("自动弹出的候选面板在输入退格清空后收起，再输入时重新展开")
 @MainActor
 func terminalAutocompleteAutoPanelClosesWhenInputIsErased() throws {
@@ -1212,13 +1216,43 @@ func terminalAutocompleteAutoPanelClosesWhenInputIsErased() throws {
   controller.refreshNow()
   #expect(controller.panelVisible)
 
-  // 退格删到空行：候选（目录历史）仍 ≥ 2 条，但面板必须收起。
+  // 退格删到空行后候选与面板一起清空。
   controller.receiveInput([0x7F][...])
   controller.refreshNow()
-  #expect(controller.currentResult.candidates.count >= 2)
+  #expect(controller.currentResult.candidates.isEmpty)
   #expect(!controller.panelVisible)
 
   controller.receiveInput(Array("l".utf8)[...])
   controller.refreshNow()
   #expect(controller.panelVisible)
+}
+
+@Test("仅右箭头模式将Tab放行，无ghost时不自动替用户选择")
+@MainActor
+func terminalAutocompleteRightArrowModePassesTabThrough() throws {
+  let fixture = try makeTerminalAutocompleteFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.directory) }
+  fixture.controls.value.autocompleteShortcut = .rightArrow
+  fixture.controls.value.autocompleteCandidatePanel = .automatic
+  let view = AsterTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 320))
+  let controller = makeController(fixture)
+  controller.attach(to: view)
+  var sent: [UInt8] = []
+  view.onEncodedInput = { sent.append(contentsOf: $0) }
+  controller.receive(.promptStart)
+  controller.receive(.inputStart)
+  controller.receiveInput(Array("git ch".utf8)[...])
+  controller.refreshNow()
+  #expect(controller.panelVisible)
+  #expect(!controller.handle(.tab))
+  #expect(!controller.hasUserSelection)
+  #expect(sent.isEmpty)
+  #expect(!controller.handle(.right))
+  #expect(!controller.hasUserSelection)
+  #expect(sent.isEmpty)
+  #expect(controller.handle(.down))
+  #expect(!controller.handle(.tab))
+  #expect(controller.handle(.right))
+  #expect(sent == [127, 127] + Array("checkout ".utf8))
+
 }

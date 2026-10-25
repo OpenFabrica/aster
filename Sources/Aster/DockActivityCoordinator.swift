@@ -148,12 +148,13 @@ final class DockActivityCoordinator {
   }
 
   private func updateAgentSleepActivity() {
-    let shouldPreventSleep = preferences.configuration.agents.preventSleepWhileProcessing
-      && models.values.flatMap(\.tabs).contains(where: \.hasProcessingAgent)
+    let shouldPreventSleep = models.values.flatMap(\.tabs)
+      .flatMap { $0.runtimes.values }.compactMap(\.terminalSession)
+      .contains(where: \.shouldPreventSleep)
     if shouldPreventSleep, agentSleepActivity == nil {
       agentSleepActivity = ProcessInfo.processInfo.beginActivity(
         options: [.idleSystemSleepDisabled, .userInitiated],
-        reason: L("Aster Agent 正在处理任务")
+        reason: L("Aster 正在处理任务")
       )
     } else if !shouldPreventSleep, let activity = agentSleepActivity {
       ProcessInfo.processInfo.endActivity(activity)

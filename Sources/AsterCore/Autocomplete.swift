@@ -184,8 +184,8 @@ public struct AutocompleteArgumentSpec: Codable, Equatable, Sendable {
   }
 
   /// 是否期望文件路径(目录模板也接受文件系统候选)。
-  public var wantsFilesystemCandidates: Bool { !template.isEmpty }
-  public var wantsFoldersOnly: Bool { template == ["folders"] }
+  public var wantsFilesystemCandidates: Bool { template.contains("folders") || template.contains("filepaths") }
+  public var wantsFoldersOnly: Bool { template.contains("folders") && !template.contains("filepaths") }
 
   private enum CodingKeys: String, CodingKey {
     case name, description, template, suggestions, generatorScripts, isOptional, isVariadic
@@ -435,6 +435,9 @@ public enum AutocompleteSpecStore {
   /// 单个顶层命令(含全部嵌套子命令/选项/参数)允许的节点总数。
   public static let maximumNodesPerCommand = 20_000
   public static let maximumChildrenPerNode = 2_000
+  /// 已发布 Fig 的 pip/pipenv 静态参数各有 4,004 项，不沿用子命令数量限制截断它们。
+  public static let maximumSuggestionsPerArgument = 10_000
+  public static let maximumDescriptionBytes = 16 * 1_024
   public static let maximumDepth = 16
 
   public static func decode(_ data: Data) throws -> AutocompleteSpecDatabase {
@@ -474,9 +477,9 @@ public enum AutocompleteSpecStore {
   private static func isValid(_ command: AutocompleteCommandSpec, depth: Int, budget: inout Int) -> Bool {
     budget -= 1
     guard budget >= 0, depth <= maximumDepth,
-      validItemName(command.name),
+      validSpecName(command.name),
       validText(command.description.english), validText(command.description.chinese),
-      command.aliases.count <= 32, command.aliases.allSatisfy(validItemName),
+      command.aliases.count <= 32, command.aliases.allSatisfy(validSpecName),
       command.subcommands.count <= maximumChildrenPerNode,
       command.options.count <= maximumChildrenPerNode,
       command.arguments.count <= maximumChildrenPerNode
@@ -484,7 +487,7 @@ public enum AutocompleteSpecStore {
     for option in command.options {
       budget -= 1
       guard budget >= 0, !option.names.isEmpty, option.names.count <= 32,
-        option.names.allSatisfy(validItemName), validText(option.description),
+        option.names.allSatisfy(validSpecName), validText(option.description),
         option.args.count <= 64, option.args.allSatisfy(isValid)
       else { return false }
     }
@@ -495,14 +498,14 @@ public enum AutocompleteSpecStore {
     return true
   }
 
-  /// 参数名只是展示文本,允许空格和尖括号;静态候选会被插入命令行,必须是合法 token。
+  /// 参数和候选名称保留 Fig 字面值；插入时的 Shell 编码由终端适配层处理。
   private static func isValid(_ argument: AutocompleteArgumentSpec) -> Bool {
     !argument.name.isEmpty && argument.name.utf8.count <= 512 && validText(argument.name)
       && validText(argument.description)
       && argument.template.count <= 4
-      && argument.template.allSatisfy { $0 == "filepaths" || $0 == "folders" }
-      && argument.suggestions.count <= maximumChildrenPerNode
-      && argument.suggestions.allSatisfy { validItemName($0.name) && validText($0.description) }
+      && argument.template.allSatisfy { $0.utf8.count <= 512 && !containsControlCharacters($0) }
+      && argument.suggestions.count <= maximumSuggestionsPerArgument
+      && argument.suggestions.allSatisfy { validSpecName($0.name) && validText($0.description) }
       && argument.generatorScripts.count <= 8
       && argument.generatorScripts.allSatisfy { script in
         !script.isEmpty && script.count <= 32
@@ -511,11 +514,31 @@ public enum AutocompleteSpecStore {
   }
 
   private static func validText(_ value: String) -> Bool {
-    value.utf8.count <= 1_024 && !containsControlCharacters(value)
+    // 描述只用于显示，不作为命令输入；保留原始换行、连接符和 NUL 等发布数据。
+    value.utf8.count <= maximumDescriptionBytes
+  }
+
+  private static func validSpecName(_ value: String) -> Bool {
+    value.utf8.count <= 512
+      && !value.unicodeScalars.contains {
+        ($0.value < 32 && $0.value != 9) || $0.value == 127
+      }
   }
 
   fileprivate static func validCommandName(_ value: String) -> Bool {
-    validShellToken(
+    // Fig 顶级规格也包含 npm 的 @scope/name。仅开放这两个安全名称段，
+    // 不把任意路径、空段或相对目录当成可插入的命令名。
+    if value.hasPrefix("@"), value.contains("/") {
+      let segments = value.dropFirst().split(separator: "/", omittingEmptySubsequences: false)
+      return value.utf8.count <= 128 && segments.count == 2
+        && segments.allSatisfy { segment in
+          segment != "." && segment != ".."
+            && validShellToken(
+              String(segment), maximumBytes: 128,
+              punctuation: CharacterSet(charactersIn: "._+-"))
+        }
+    }
+    return validShellToken(
       value,
       maximumBytes: 128,
       punctuation: CharacterSet(charactersIn: "._+@-")
@@ -1165,6 +1188,10 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   public let description: String
   public let kind: AutocompleteCandidateKind
   public let score: Double
+  /// 原生恢复的词频分；nil表示没有词频证据，不与基础候选分混合。
+  public let historyScore: Double?
+  /// 查询引擎给出的明确领先标志；nil 供兼容调用方根据统计推导。
+  public let clearLeader: Bool?
   public let replacement: AutocompleteReplacementSpan
   /// 来自本机学习历史（整行或槽位值），面板里可用 ⇧⌫ 忘记；规格、文件、动态候选为 false。
   public let isLearned: Bool
@@ -1179,6 +1206,8 @@ public struct AutocompleteCandidate: Equatable, Sendable {
     description: String = "",
     kind: AutocompleteCandidateKind,
     score: Double = 0,
+    historyScore: Double? = nil,
+    clearLeader: Bool? = nil,
     replacement: AutocompleteReplacementSpan = .fullLine,
     isLearned: Bool = false,
     historyUsage: AutocompleteHistoryUsage? = nil
@@ -1188,6 +1217,8 @@ public struct AutocompleteCandidate: Equatable, Sendable {
     self.description = description
     self.kind = kind
     self.score = score
+    self.historyScore = historyScore
+    self.clearLeader = clearLeader
     self.replacement = replacement
     self.isLearned = isLearned
     self.historyUsage = historyUsage
@@ -1198,7 +1229,7 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   func prefixedWithSeparator() -> AutocompleteCandidate {
     AutocompleteCandidate(
       insertText: " " + insertText, displayText: displayText, description: description,
-      kind: kind, score: score, replacement: replacement, isLearned: isLearned,
+      kind: kind, score: score, historyScore: historyScore, clearLeader: clearLeader, replacement: replacement, isLearned: isLearned,
       historyUsage: historyUsage)
   }
 
@@ -1206,8 +1237,15 @@ public struct AutocompleteCandidate: Equatable, Sendable {
   public func withScore(_ score: Double) -> AutocompleteCandidate {
     AutocompleteCandidate(
       insertText: insertText, displayText: displayText, description: description,
-      kind: kind, score: score, replacement: replacement, isLearned: isLearned,
+      kind: kind, score: score, historyScore: historyScore, clearLeader: clearLeader, replacement: replacement, isLearned: isLearned,
       historyUsage: historyUsage)
+  }
+
+  /// 标记查询层计算的领先状态，不改变候选文本、替换范围或分数。
+  public func withClearLeader(_ clearLeader: Bool) -> AutocompleteCandidate {
+    AutocompleteCandidate(insertText: insertText, displayText: displayText,
+      description: description, kind: kind, score: score, historyScore: historyScore,
+      clearLeader: clearLeader, replacement: replacement, isLearned: isLearned, historyUsage: historyUsage)
   }
 
   /// 接受该候选后命令行的完整文本。跨来源去重与接受路径共用它,保证“同一条命令”

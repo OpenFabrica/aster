@@ -197,8 +197,30 @@ public enum TerminalScrollPastFirstLine: String, CaseIterable, Codable, Equatabl
 public enum AutocompleteShortcut: String, CaseIterable, Codable, Equatable, Sendable {
   case tab
   case tabAndRightArrow = "tab+right-arrow"
+  case rightArrow = "right-arrow"
   case controlSpace = "ctrl+space"
   case disabled = "disable"
+
+  /// 与原版配置解析一致：首尾 Unicode 空白忽略，别名不区分大小写。
+  public static func parse(_ raw: String) -> Self? {
+    switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "tab": .tab
+    case "tab+right-arrow", "tab+right", "tab+arrow": .tabAndRightArrow
+    case "right-arrow", "right", "rightarrow", "right_arrow": .rightArrow
+    case "ctrl+space", "ctrl-space", "ctrlspace": .controlSpace
+    case "disable", "disabled", "none", "off": .disabled
+    default: nil
+    }
+  }
+
+  public init(from decoder: Decoder) throws {
+    self = Self.parse(try decoder.singleValueContainer().decode(String.self)) ?? .tab
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
 }
 
 /// 候选面板的显示策略；inline suggestion 不受禁用面板影响。
@@ -207,6 +229,25 @@ public enum AutocompleteCandidatePanel: String, CaseIterable, Codable, Equatable
   case automatic = "auto"
   case escape
   case optionEscape = "option-escape"
+
+  public static func parse(_ raw: String) -> Self? {
+    switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "disable", "disabled", "off", "none", "false": .disabled
+    case "auto", "true": .automatic
+    case "escape", "esc": .escape
+    case "f5", "option-escape", "option+escape": .optionEscape
+    default: nil
+    }
+  }
+
+  public init(from decoder: Decoder) throws {
+    self = Self.parse(try decoder.singleValueContainer().decode(String.self)) ?? .escape
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
 }
 
 /// 内置规格描述的首选语言。`system` 由 UI 层根据当前语言环境解析。

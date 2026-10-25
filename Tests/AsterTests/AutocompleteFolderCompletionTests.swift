@@ -1,4 +1,4 @@
-// `cd` 等目录参数补全：符号链接目录、`..`/`~` 起点与失效历史目录的过滤。
+// `cd` 等目录参数补全：符号链接目录、`..`/`~` 起点与不依赖路径存在性的整行历史。
 import AsterCore
 import Foundation
 import Testing
@@ -46,9 +46,9 @@ func folderCompletionOffersParentAndHome() throws {
   #expect(query("cd ~").candidates.contains { $0.appendableSuffix(from: "cd ~") == "/" })
 }
 
-@Test("历史里已被删除的 cd 目录不再推荐，仍存在的目录和 cd - 保留")
+@Test("目录删除不改变整行历史，实时目录候选只列存在项")
 @MainActor
-func folderCompletionDropsMissingLearnedTargets() throws {
+func folderCompletionKeepsHistoryWhenTargetsDisappear() throws {
   let root = try makeFolderCompletionDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let project = root.appendingPathComponent("project")
@@ -66,11 +66,11 @@ func folderCompletionDropsMissingLearnedTargets() throws {
 
   let result = service.suggestions(
     line: "cd ", directory: project.path, sessionIdentifier: "s", controls: .init())
-  let texts = result.candidates.map(\.displayText)
-
-  #expect(texts.contains("cd kept"))
-  #expect(texts.contains("cd -"))
-  #expect(!texts.contains { $0.contains("gone") || $0.contains("typo-never-existed") })
+  let history = result.candidates.filter { $0.kind == .learnedCommand }.map(\.displayText)
+  #expect(Set(history) == ["cd gone", "cd kept", "cd -", "cd typo-never-existed"])
+  let folders = result.candidates.filter { $0.kind == .folder }.map(\.displayText)
+  #expect(folders.contains("kept/"))
+  #expect(!folders.contains("gone/") && !folders.contains("typo-never-existed/"))
 }
 
 @Test("当前目录在本机不存在（远端会话）时不校验历史目录")

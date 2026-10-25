@@ -287,7 +287,14 @@ extension GhosttySurfaceView {
     var scrollModifiers: ghostty_input_scroll_mods_t = 0
     if event.hasPreciseScrollingDeltas { scrollModifiers |= 1 }
     let deltas = ghosttyScrollDeltas(for: event)
-    ghostty_surface_mouse_scroll(surface, deltas.x, deltas.y, scrollModifiers)
+    if allowMouseCapture {
+      ghostty_surface_mouse_scroll(surface, deltas.x, deltas.y, scrollModifiers)
+    } else {
+      // 绕过 mouse_scroll 的 TUI 报告与 alternate-scroll 按键路径，仅移动本地视口。
+      let height = Double(ghostty_surface_size(surface).cell_height_px)
+      let rows = event.hasPreciseScrollingDeltas && height > 0 ? deltas.y / height : deltas.y
+      _ = ghostty_aster_surface_scroll_rows(surface, -rows)
+    }
     trackSmoothScrollGesture(event)
     // 滚动改变视口行，Command 下划线要跟着重扫。
     scheduleLinkUnderlineRefresh()

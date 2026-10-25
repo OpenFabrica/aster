@@ -33,13 +33,13 @@ func dockClickSelectsUnacknowledgedErrorTabOnlyOnce() async throws {
   }
 
   terminalView.onTerminalBadgeDirective?(.set(.error))
-  try await Task.sleep(for: .milliseconds(50))
+  try await waitForDockState(.error, coordinator: coordinator)
   #expect(coordinator.currentState == .error)
 
   // 新错误让图标变红，这一次点击跳到失败标签是用户预期的行为。
   #expect(coordinator.acknowledgeAndSelectNextError())
   #expect(model.selectedTab?.id == errorTab.id)
-  try await Task.sleep(for: .milliseconds(50))
+  try await waitForDockState(.idle, coordinator: coordinator)
   #expect(coordinator.currentState == .idle)
 
   // 用户回到自己正在用的标签后再切回 Aster：错误已确认，焦点必须留在原处。
@@ -78,6 +78,15 @@ func dockClickKeepsFocusWhenRedIconDisabled() async throws {
   #expect(coordinator.currentState == .idle)
   #expect(!coordinator.acknowledgeAndSelectNextError())
   #expect(model.selectedTab?.id == workingTab.id)
+}
+
+/// 聚合刷新合并到主队列；等待可观察结果，避免并发 AppKit 测试挤占固定的 50ms。
+@MainActor
+private func waitForDockState(_ state: DockActivityState, coordinator: DockActivityCoordinator) async throws {
+  let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+  while coordinator.currentState != state, ContinuousClock.now < deadline {
+    try await Task.sleep(for: .milliseconds(10))
+  }
 }
 
 @MainActor

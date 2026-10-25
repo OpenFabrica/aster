@@ -19,8 +19,7 @@ protocol TerminalAutocompleteHost: AnyObject {
   var autocompleteHasMarkedText: Bool { get }
 }
 
-/// 按目录推荐的整行「项目命令」（目前是该项目最近一次 Agent 会话的 resume 命令）。
-/// 它以最高分排在候选首位：空 prompt 时 ghost 直接显示整条命令，Tab 一次接受。
+/// 按目录保存的项目会话恢复命令。工作区仍维护此值，新补全不把它直接注入候选。
 struct ProjectCommandSuggestion: Equatable {
   let command: String
   let description: String
@@ -135,6 +134,7 @@ extension GhosttySurfaceView: TerminalAutocompleteHost {
 /// 导航键；Control-Space 等文字组合仍检查 modifier，避免吞掉普通空格。
 enum TerminalAutocompleteKey: Equatable {
   case tab
+  case left
   case right
   case up
   case down
@@ -151,6 +151,7 @@ enum TerminalAutocompleteKey: Equatable {
   static func resolve(_ event: NSEvent) -> TerminalAutocompleteKey {
     switch event.keyCode {
     case 48: return .tab
+    case 123: return .left
     case 124: return .right
     case 126: return .up
     case 125: return .down
@@ -196,8 +197,6 @@ final class TerminalAutocompleteController {
   private let sessionIdentifier: String
   private let controls: () -> ControlConfiguration
   private let currentDirectory: () -> String
-  /// 可注入的时钟，供测试跳过剪贴板建议的防误触延迟。
-  private let now: () -> ContinuousClock.Instant
   private let tracker = PromptInputTracker()
   private let overlay = TerminalAutocompleteOverlayView()
 
@@ -225,30 +224,19 @@ final class TerminalAutocompleteController {
   private var acceptsLateSubmittedInput = false
   /// 命令文本只在当前 Pane 内存中用于自动进度匹配，不进入工作区快照或日志。
   var onCommandSubmitted: ((String) -> Void)?
-  /// 目录 → 项目命令首选项。每次刷新按当前目录查询，返回 nil 时不插入任何候选。
-  var projectCommandProvider: ((String) -> ProjectCommandSuggestion?)?
-  /// 尚未被接受或忽略的剪贴板文本。返回 nil 表示当前没有可提示的新内容。
-  ///
-  /// 用闭包而不是直接持有监视器：键盘焦点、安全输入这些「该不该提示」的前置条件
-  /// 全部由提供方判断，控制器只关心「有没有可提示的文本」。测试因此既不必造真窗口，
-  /// 也不必碰真实的 `NSPasteboard`。
-  var clipboardSuggestionProvider: (() -> String?)?
-  /// 剪贴板建议被接受或被忽略时回调，由调用方标记同一份内容不再提示。
-  var onClipboardSuggestionConsumed: (() -> Void)?
-
   private var refreshTask: Task<Void, Never>?
+  private(set) var dynamicTask: Task<Void, Never>?
+  private(set) var fallbackTabTask: Task<Void, Never>?
+  private var dynamicGeneration: UInt64 = 0
+  private(set) var shellCompletionActive = false
   private var helpProbeTask: Task<Void, Never>?
   private var probedCommands: Set<String> = []
+  private var helpProbeGeneration: UInt64 = 0
+  private var isInvalidated = false
   private var runningCommand: String?
-  private var outputCapture = ShellCommandOutputCapture()
-  private var completedCommandOutput: ShellCapturedCommandOutput?
-  /// 上一条失败命令的修正建议，按确定性排序；首条作 ghost，其余进面板。
-  private var pendingCorrections: [CommandCorrection] = []
-  /// 上一条成功命令的「下一步」（`git clone` 后的 `cd <dir>`），在下一条空 prompt 作
-  /// ghost 首选。与 `pendingCorrections` 互斥：一个只在失败后出现，一个只在成功后出现。
-  private var pendingFollowUp: CommandFollowUp?
+  private var recordedCommandForPrompt = false
   /// OSC 133 C 时终端网格上真实的命令行。键盘重建（tracker）在用户按 ↑ 调历史、
-  /// 接受 shell 自身建议或 Tab 补全后会缺失/不完整，「下一步」推断以屏幕文本为准。
+  /// 接受 shell 自身建议或 Tab 补全后会缺失/不完整，学习以实际提交文本为准。
   private var screenCommand: String?
   private var aliases: [String] = []
   private var inlineDismissed = false
@@ -259,75 +247,36 @@ final class TerminalAutocompleteController {
   /// 跟踪器也必须保留它，不能因 prompt 尚未就绪而丢掉命令前缀。
   private var pendingPromptInput: [UInt8]?
   private var pendingPromptInputOverflowed = false
-  /// 剪贴板 ghost 真正画到屏幕上的时刻；未显示时为 nil。
-  private var clipboardSuggestionShownAt: ContinuousClock.Instant?
-  /// 应用重新激活时重算候选的观察者。用户通常是在别处复制完再切回来，
-  /// 这一刻剪贴板才有新内容，而终端侧没有任何事件会触发刷新。
-  nonisolated(unsafe) private var activationObserver: (any NSObjectProtocol)?
-  /// Aster 自己写剪贴板时重算候选的观察者。终端里「选中即复制」既不切换应用也不产生
-  /// OSC 133，没有它，用户在当前 Pane 复制完就等不到建议。
-  nonisolated(unsafe) private var localClipboardObserver: (any NSObjectProtocol)?
-
-  /// 剪贴板 ghost 出现后多久才允许被回车接受。
-  ///
-  /// 回车在空提示符上原本只是换一行，用户会连按。没有这段延迟，「恰好与 ghost 同时
-  /// 落下的那次回车」会被当成接受，紧接着的第二次回车就把剪贴板内容执行了——这是本
-  /// 功能唯一可能导致误执行命令的路径。
-  private static let clipboardSuggestionArmDelay = Duration.milliseconds(300)
-
-  /// 剪贴板 ghost 是否已显示足够久，可以被回车接受。
-  private var clipboardSuggestionArmed: Bool {
-    guard let shownAt = clipboardSuggestionShownAt else { return false }
-    return shownAt.duration(to: now()) >= Self.clipboardSuggestionArmDelay
-  }
-
   init(
     service: AutocompleteService,
     sessionIdentifier: String,
     controls: @escaping () -> ControlConfiguration,
-    currentDirectory: @escaping () -> String,
-    now: @escaping () -> ContinuousClock.Instant = { .now }
+    currentDirectory: @escaping () -> String
   ) {
     self.service = service
     self.sessionIdentifier = sessionIdentifier
     self.controls = controls
     self.currentDirectory = currentDirectory
-    self.now = now
+    helpProbeGeneration = service.helpProbeGeneration
     overlay.onCandidateSelected = { [weak self] index in
       self?.acceptCandidate(at: index)
-    }
-    activationObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in self?.refreshForClipboardChange() }
-    }
-    localClipboardObserver = NotificationCenter.default.addObserver(
-      forName: ClipboardSuggestionMonitor.clipboardDidChangeLocally, object: nil, queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in self?.refreshForClipboardChange() }
     }
   }
 
   deinit {
     refreshTask?.cancel()
+    dynamicTask?.cancel()
+    fallbackTabTask?.cancel()
     helpProbeTask?.cancel()
-    // deinit 不在 MainActor 上，观察者句柄因此标记 nonisolated：它只在 init 写入、
-    // 在这里读取一次，`NotificationCenter` 本身线程安全。
-    if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
-    if let localClipboardObserver {
-      NotificationCenter.default.removeObserver(localClipboardObserver)
-    }
   }
 
-  /// 剪贴板可能在终端之外发生变化，那时没有任何输入或 OSC 事件会触发刷新。
-  ///
-  /// 只有「正停在空提示符上、且功能开着」才值得重算：其它状态下剪贴板建议根本不会
-  /// 显示，白跑一轮候选计算只会在应用启动、切换窗口这些本就忙碌的时刻抢占主线程。
-  private func refreshForClipboardChange() {
-    guard promptActive, tracker.line.isEmpty, controls().resolvedClipboardSuggestion else {
-      return
-    }
-    scheduleRefresh()
+  /// Pane 替换或关闭控制器时同步撤销所属 pending，避免异步析构清掉新控制器的命令。
+  func invalidate() {
+    guard !isInvalidated else { return }
+    isInvalidated = true
+    helpProbeTask?.cancel()
+    service.cancelPending(sessionIdentifier: sessionIdentifier)
+    dismiss()
   }
 
   func attach(to terminalView: any TerminalAutocompleteHost) {
@@ -340,6 +289,7 @@ final class TerminalAutocompleteController {
   }
 
   func receive(_ event: ShellIntegrationEvent) {
+    guard !isInvalidated else { return }
     switch event {
     case .promptStart:
       // A 只表示 prompt 即将开始；必须等 B 确认输入区已出现，避免慢 prompt 绘制期间
@@ -363,6 +313,7 @@ final class TerminalAutocompleteController {
         tracker.beginPrompt()
       }
       lastSubmittedCommand = nil
+      recordedCommandForPrompt = false
       acceptsLateSubmittedInput = true
       awaitingInputEcho = false
       panelSuppressedForPrompt = false
@@ -374,9 +325,6 @@ final class TerminalAutocompleteController {
       } else if !buffered.isEmpty {
         receiveInput(buffered[...])
       } else {
-        // 上一条命令的「下一步」不必等 150ms 防抖和整套候选计算：prompt 一就绪就先把
-        // ghost 画出来，完整候选随后照常刷新并保留同一首选。
-        presentPendingFollowUpImmediately()
         scheduleRefresh()
       }
       pendingPromptInputOverflowed = false
@@ -384,28 +332,32 @@ final class TerminalAutocompleteController {
       pendingPromptInput = nil
       pendingPromptInputOverflowed = false
       promptActive = false
-      runningCommand = lastSubmittedCommand
+      runningCommand = screenCommand ?? lastSubmittedCommand
+      if let runningCommand { submitForLearning(runningCommand) }
       // 正常顺序下提交回调已经给出命令，无需继续接收；只有 nil 才表示 PTY write
       // 仍排在主线程队列中，允许它补齐到第一个换行。
-      acceptsLateSubmittedInput = lastSubmittedCommand == nil
+      acceptsLateSubmittedInput = runningCommand == nil
       dismiss()
     case .commandFinished(let exitStatus):
       acceptsLateSubmittedInput = false
       finishCommand(exitStatus: exitStatus)
       runningCommand = nil
-      completedCommandOutput = nil
       dismiss()
     }
   }
 
   /// 终端在 commandStart 时读到的命令行文本；规范化失败时视为没有。
   func receiveScreenCommand(_ text: String) {
-    screenCommand = Self.normalizedScreenCommand(text)
+    guard !isInvalidated else { return }
+    screenCommand = Self.normalizedScreenCommand(text).map {
+      // 共享规范化用于 Agent/SSH，学习另外保留前导空格的“不记录”语义。
+      text.hasPrefix(" ") ? " " + $0 : $0
+    }
   }
 
   /// 把网格上读到的命令行规范化为可信命令文本。只取第一段（右侧提示符与命令之间
   /// 至少两个空格），并拒绝控制字符与超长内容；空文本返回 nil。Session 的 SSH
-  /// 分组与补全的「下一步」推断共用这一条规则，避免两处对屏幕文本解释不一致。
+  /// 分组与补全学习共用这一条规则，避免两处对屏幕文本解释不一致。
   static func normalizedScreenCommand(_ text: String) -> String? {
     let firstSegment = text.components(separatedBy: "  ").first ?? text
     let trimmed = firstSegment.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -416,6 +368,7 @@ final class TerminalAutocompleteController {
   }
 
   func receiveInput(_ bytes: ArraySlice<UInt8>) {
+    guard !isInvalidated else { return }
     if promptActive || pendingPromptInput != nil,
       let interrupt = bytes.lastIndex(of: 0x03)
     {
@@ -435,11 +388,13 @@ final class TerminalAutocompleteController {
     guard promptActive || acceptsLateSubmittedInput else { return }
     let submitted = tracker.receive(Array(bytes))
     if let command = submitted.last {
-      lastSubmittedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
-      if let lastSubmittedCommand {
+      // ↑ 历史和 Shell Tab 的最终文本不在输入字节里；等待 OSC C 的屏幕回读。
+      if tracker.isReliable {
+        lastSubmittedCommand = command
         // commandStart 已抢先时补回 runningCommand，后续完成学习仍消费同一条真值。
-        if runningCommand == nil { runningCommand = lastSubmittedCommand }
-        onCommandSubmitted?(lastSubmittedCommand)
+        if runningCommand == nil { runningCommand = command }
+        submitForLearning(command)
+        onCommandSubmitted?(command.trimmingCharacters(in: .whitespacesAndNewlines))
       }
       promptActive = false
       acceptsLateSubmittedInput = false
@@ -460,9 +415,6 @@ final class TerminalAutocompleteController {
     if case .open(.automatic, _) = panelState {
       panelState = .open(origin: .automatic, userSelected: false)
     }
-    // 用户开始打字，说明他此刻不要剪贴板里那份内容。标记为已忽略，否则他退格回空行
-    // 时同一条建议又会跳出来。
-    if currentResult.candidates.first?.kind == .clipboard { onClipboardSuggestionConsumed?() }
     // 候选重算有 debounce，而 PTY 回显会在这段窗口内继续推进终端网格。若保留上一轮
     // ghost，旧后缀会短暂覆盖新输入；先清空可见候选，待新输入回显并重算后再显示。
     clearCandidatesForRefilter()
@@ -481,16 +433,14 @@ final class TerminalAutocompleteController {
   }
 
   func receiveOutput(_ bytes: ArraySlice<UInt8>) {
-    if let completed = outputCapture.consume(bytes).last {
-      completedCommandOutput = completed
-    }
+    guard !isInvalidated else { return }
     guard promptActive else { return }
     // 输出可能是 Shell 异步建议或重绘。有待回显的本地输入时立即撤下旧 ghost，避免它
     // 锚定旧 caretFrame 与新输入叠字；没有待回显输入（空 prompt 上的时钟/异步提示符
     // 重绘）时不先隐藏，否则每次重绘 ghost 都会闪一下，看起来像窗口在抖动。
     let previouslyAwaiting = awaitingInputEcho
-    // 输出捕获需先于同分片内的 OSC 命令完成事件，但 ghost 布局必须等终端 surface
-    // 消费完回显并更新 caretFrame。终端的状态报告、光标控制等同样会走 PTY 输出，
+    // ghost 布局必须等终端 surface 消费完回显并更新 caretFrame。
+    // 终端的状态报告、光标控制等同样会走 PTY 输出，
     // 因此不能把“收到任意输出”当成回显完成，否则 ghost 会锚定旧光标并覆盖输入。
     Task { @MainActor [weak self] in
       guard let self, self.promptActive else { return }
@@ -502,6 +452,7 @@ final class TerminalAutocompleteController {
   }
 
   func receiveAliases(_ names: [String]) {
+    guard !isInvalidated else { return }
     guard aliases != names else { return }
     aliases = names
     if promptActive { scheduleRefresh() }
@@ -509,24 +460,23 @@ final class TerminalAutocompleteController {
 
   /// Shell 上报的 `$PATH`：交给服务重建可执行文件索引，索引是全局的、不按 Pane 保存。
   func receiveSearchPath(_ directories: [String]) {
+    guard !isInvalidated else { return }
     service.updateSearchPath(directories)
   }
 
   @discardableResult
   func handleKeyDown(_ event: NSEvent) -> Bool {
-    // 只有「干净的一次回车」才可能被剪贴板建议接受：带修饰键的 Return 属于 Shell 或
-    // 应用快捷键（Cmd-Return 尤其——Command 分支在本回调之后才执行），长按重复的回车
-    // 是用户在刷屏，输入法组字中的回车是上屏。这三种都必须原样放行。
-    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    let plain = modifiers.isEmpty && !event.isARepeat
-      && terminalView?.autocompleteHasMarkedText != true
-    return handle(TerminalAutocompleteKey.resolve(event), plainKeyPress: plain)
+    guard terminalView?.autocompleteHasMarkedText != true else { return false }
+    return handle(TerminalAutocompleteKey.resolve(event))
   }
 
-  /// - Parameter plainKeyPress: 该按键是否为无修饰、非重复、非组字状态下的单次按下。
-  ///   仅剪贴板建议的回车接受依赖它；其余分支的语义不受影响。
   @discardableResult
-  func handle(_ key: TerminalAutocompleteKey, plainKeyPress: Bool = true) -> Bool {
+  func handle(_ key: TerminalAutocompleteKey) -> Bool {
+    guard !isInvalidated else { return false }
+    if shellCompletionActive {
+      if [.tab, .left, .right, .up, .down].contains(key) { return false }
+      shellCompletionActive = false
+    }
     if key == .shiftDelete { return forgetSelectedCandidate() }
     if key == .backspace {
       // Backspace 本身仍交给 Shell；这里只清掉旧候选，输入回调随后按新文本重算。
@@ -536,6 +486,15 @@ final class TerminalAutocompleteController {
       return false
     }
 
+    let configuration = controls()
+    if key == .controlSpace, configuration.resolvedAutocompleteShortcut == .controlSpace {
+      // 原版 Ctrl-Space 触发重新查询，不向 PTY 写候选。
+      if case .open(let origin, _) = panelState { panelState = .open(origin: origin, userSelected: false) }
+      inlineDismissed = false
+      refreshNow()
+      return true
+    }
+    if key == .tab, configuration.resolvedAutocompleteShortcut == .rightArrow { return false }
     if case .open(let origin, let userSelected) = panelState {
       switch key {
       case .up, .down:
@@ -554,12 +513,27 @@ final class TerminalAutocompleteController {
         render()
         return true
       case .enter:
-        guard userSelected else { return false }
+        guard userSelected else { dismiss(); return false }
         return acceptCandidate(at: selectedIndex)
-      case .tab:
-        // 与 Otty 一致：可见列表中的首项可由 Tab 接受，不要求先画出 inline。
-        // 小 Pane 隐藏面板的情况仍由 acceptCandidate 的实际可见性守卫拒绝。
-        return acceptCandidate(at: selectedIndex)
+      case .tab, .right:
+        guard Self.accepts(key, shortcut: configuration.resolvedAutocompleteShortcut) else { return false }
+        if userSelected {
+          return acceptCandidate(at: selectedIndex)
+        }
+        if currentResult.candidates.count == 1 {
+          // 原版 show 将索引重置为 -1；单项会进入 accept，但 selectedItem 为 nil。
+          // 该分支仅清理且吞掉按键，不补选首项，也不插入 ghost。
+          dismiss()
+          return true
+        }
+        let firstIsWholeLine = currentResult.candidates.first.map {
+          $0.kind == .learnedCommand || $0.kind == .correction
+        } ?? false
+        if inlineGhostText != nil, key == .right || firstIsWholeLine {
+          return acceptCandidate(at: 0)
+        }
+        if key == .tab { shellCompletionActive = true; dismiss() }
+        return false
       case .escape, .optionEscape:
         panelState = .hidden
         panelSuppressedForPrompt = true
@@ -571,25 +545,7 @@ final class TerminalAutocompleteController {
       }
     }
 
-    // 剪贴板建议由回车接受：只把内容写进输入行，**不发送换行**，执行仍需用户再按一次。
-    // 这里吞掉的回车原本只会在空 prompt 上换一行，代价极小；ghost 不可见、行已有内容、
-    // 或 ghost 刚出现还没「解除保险」时，回车一律照常交给 Shell。
-    if key == .enter, plainKeyPress, tracker.line.isEmpty, clipboardSuggestionArmed,
-      currentResult.candidates.first?.kind == .clipboard, inlineCandidateIndex == 0,
-      inlineSuggestionDisplayable
-    {
-      onClipboardSuggestionConsumed?()
-      return acceptCandidate(at: 0)
-    }
-
-    let configuration = controls()
-    let acceptsInline: Bool
-    switch configuration.resolvedAutocompleteShortcut {
-    case .tab: acceptsInline = key == .tab
-    case .tabAndRightArrow: acceptsInline = key == .tab || key == .right
-    case .controlSpace: acceptsInline = key == .controlSpace
-    case .disabled: acceptsInline = false
-    }
+    let acceptsInline = Self.accepts(key, shortcut: configuration.resolvedAutocompleteShortcut)
     // 只允许接受屏幕上真正显示的 ghost。等待回显期间（含 zsh-autosuggestions 等
     // shell 端建议占据行尾、导致回显校验一直不通过的场景）候选是不可见的；此时吞掉
     // Tab 会插入用户从未见过的文本，必须把按键放行给 Shell 自己的补全。
@@ -597,11 +553,6 @@ final class TerminalAutocompleteController {
       switch inlineSuggestion {
       case .candidate(let index) where currentResult.ghostText != nil:
         return acceptCandidate(at: index)
-      case .sharedPrefix(let shared):
-        // 共同前缀不是某一条候选：只写入这一个词，面板与剩余候选在下一轮按新前缀重算。
-        guard let terminalView else { return false }
-        dismiss()
-        return terminalView.sendAutocompleteBytes(Array(shared.utf8)[...])
       default:
         break
       }
@@ -614,28 +565,11 @@ final class TerminalAutocompleteController {
       dismiss()
       return terminalView.sendAutocompleteBytes(Array(suffix.utf8)[...])
     }
-    // ghost 不可见但确实有候选时，接受键改为**打开候选面板**而不是放行给 Shell。
-    //
-    // 这是 zsh-autosuggestions 场景的关键分支：插件把自己的灰色建议画在行尾，回显
-    // 校验因此一直不通过，Aster 的 ghost 保持隐藏。旧行为是把 Tab 原样交给 Shell，
-    // 于是用户完全看不到 Aster 算出的候选（Shell 只会补第一个词）。打开面板既能
-    // 展示候选，又不违反“绝不插入用户没看见的文本”——面板里的每一行都是可见凭据，
-    // 真正的插入仍然要用户再按一次键。Aster 没有候选时依旧放行，Shell 自己的
-    // 补全（`_docker` 之类）继续可用。
-    if acceptsInline, currentResult.candidates.count > 1,
-      configuration.resolvedAutocompleteCandidatePanel != .disabled
-    {
-      panelState = .open(origin: .manual, userSelected: true)
-      panelSuppressedForPrompt = false
-      selectedIndex = 0
-      updateVisibleWindow()
-      render()
-      return true
+    if key == .tab, acceptsInline {
+      return queryWithFallbackTab(configuration: configuration)
     }
 
     if key == .escape, inlineGhostText != nil, inlineSuggestionDisplayable {
-      // Esc 关掉剪贴板 ghost 就是「我不要这份内容」，同一份内容不再在任何 Pane 上出现。
-      if currentResult.candidates.first?.kind == .clipboard { onClipboardSuggestionConsumed?() }
       inlineDismissed = true
       render()
       return true
@@ -649,8 +583,8 @@ final class TerminalAutocompleteController {
     case .automatic, .escape: opensPanel = key == .escape
     case .optionEscape: opensPanel = key == .optionEscape || key == .functionFive
     }
-    if opensPanel, currentResult.candidates.count > 1 {
-      panelState = .open(origin: .manual, userSelected: true)
+    if opensPanel, !currentResult.candidates.isEmpty {
+      panelState = .open(origin: .manual, userSelected: false)
       panelSuppressedForPrompt = false
       selectedIndex = 0
       updateVisibleWindow()
@@ -660,149 +594,73 @@ final class TerminalAutocompleteController {
     return false
   }
 
-  /// 当前 prompt 文本前缀下可用的「下一步」候选；没有或前缀不匹配时为 nil。
-  private func pendingFollowUpCandidate() -> AutocompleteCandidate? {
-    guard let followUp = pendingFollowUp,
-      followUp.command.hasPrefix(tracker.line), followUp.command != tracker.line
-    else { return nil }
-    return AutocompleteCandidate(
-      insertText: followUp.command,
-      description: Self.followUpDescription(followUp.kind),
-      kind: .followUp,
-      score: Double.greatestFiniteMagnitude,
-      replacement: .fullLine
-    )
-  }
-
-  /// 只用「下一步」这一条候选立刻渲染 ghost，跳过整套候选查询；面板保持关闭。
-  private func presentPendingFollowUpImmediately() {
-    guard promptActive, tracker.isReliable, tracker.isCursorAtEnd,
-      let candidate = pendingFollowUpCandidate()
-    else { return }
-    let configuration = controls()
-    guard configuration.resolvedAutocompleteInlineSuggestion
-      || configuration.resolvedAutocompleteCandidatePanel != .disabled
-    else { return }
-    currentResult = AutocompleteResult(
-      candidates: [candidate],
-      ghostText: String(candidate.insertText.dropFirst(tracker.line.count)),
-      replacementStart: 0
-    )
-    selectedIndex = 0
-    firstVisibleIndex = 0
-    render()
+  private static func accepts(_ key: TerminalAutocompleteKey, shortcut: AutocompleteShortcut) -> Bool {
+    switch shortcut {
+    case .tab: key == .tab
+    case .tabAndRightArrow: key == .tab || key == .right
+    case .rightArrow: key == .right
+    case .controlSpace: key == .controlSpace
+    case .disabled: false
+    }
   }
 
   /// 测试和立即设置变更使用的同步刷新 seam；正常输入通过 150ms debounce 调用。
   func refreshNow() {
     refreshTask?.cancel()
-    guard promptActive, tracker.isReliable, tracker.isCursorAtEnd else {
+    cancelDynamicQuery()
+    guard !isInvalidated, promptActive, tracker.isReliable, tracker.isCursorAtEnd else {
       dismiss()
       return
     }
     let configuration = controls()
     // Otty:inline suggestion 与候选面板同时关闭 = 整个功能停用,连内置规格库都不
-    // 查询。本机学习是另一个开关,命令记录与纠错不受这里影响。
+    // 查询。本机学习是另一个开关，命令记录不受这里影响。
     guard configuration.resolvedAutocompleteInlineSuggestion
       || configuration.resolvedAutocompleteCandidatePanel != .disabled
     else {
       dismiss()
       return
     }
-    var result = service.suggestions(
+    let result = service.suggestions(
       line: tracker.line,
       directory: currentDirectory(),
       sessionIdentifier: sessionIdentifier,
       controls: configuration,
       aliases: aliases
     )
-    // 失败纠错可在下一条空 prompt 推荐；是否能画 ghost 由实时网格校验决定。
-    // 多条建议按确定性排序插在最前：首条画 ghost，其余留在面板里供上下键选择。
-    if configuration.resolvedAutocompleteOnDeviceLearning {
-      let corrections = pendingCorrections
-        .filter { $0.command.hasPrefix(tracker.line) && $0.command != tracker.line }
-        .map { correction in
-          AutocompleteCandidate(
-            insertText: correction.command,
-            description: Self.correctionDescription(correction.kind),
-            kind: .correction,
-            score: Double.greatestFiniteMagnitude,
-            replacement: .fullLine
-          )
-        }
-      if let first = corrections.first {
-        let commands = Set(corrections.map(\.insertText))
-        result = AutocompleteResult(
-          candidates: corrections + result.candidates.filter { !commands.contains($0.insertText) },
-          ghostText: String(first.insertText.dropFirst(tracker.line.count)),
-          replacementStart: 0
-        )
+    applyResult(result, configuration: configuration)
+    scheduleDynamicQuery(configuration: configuration)
+    scheduleHelpProbeIfNeeded(configuration: configuration)
+  }
+
+  private func applyResult(_ result: AutocompleteResult, configuration: ControlConfiguration) {
+    // 查询完成时可能已经通过方向键选择。保留该候选身份，不让新排序把 Tab 指向别项。
+    let selected = hasUserSelection && currentResult.candidates.indices.contains(selectedIndex)
+      ? currentResult.candidates[selectedIndex] : nil
+    currentResult = result
+    if let selected {
+      if let index = result.candidates.firstIndex(where: {
+        $0.insertText == selected.insertText && $0.replacement == selected.replacement
+      }) {
+        selectedIndex = index
+      } else if case .open(let origin, _) = panelState {
+        // 来源改变或候选达到上限可能移除选中项；旧索引不等于用户选择了新项。
+        panelState = .open(origin: origin, userSelected: false)
+        selectedIndex = 0
       }
     }
-    // 上一条成功命令的「下一步」（clone 后 cd、commit 后 push 等）是用户此刻最可能
-    // 的意图，排在最前。
-    if let candidate = pendingFollowUpCandidate() {
-      result = AutocompleteResult(
-        candidates: [candidate] + result.candidates.filter { $0.insertText != candidate.insertText },
-        ghostText: String(candidate.insertText.dropFirst(tracker.line.count)),
-        replacementStart: 0
-      )
-    }
-    // 用户几秒前显式复制的内容，是此刻最明确的意图，只让位给「上条命令刚打错」的纠错。
-    // 只在空 prompt 上出现；「是否该由本 Pane 提示」由 provider 判断（见其注释）。
-    // 还要看得出这确实是条命令：复制一段话、一个 URL、一段日志时提示「回车粘贴」毫无
-    // 意义。写法自证（选项、管道、赋值、路径、单个词）的直接放行，剩下「几个普通单词」
-    // 的情况才回去查规格库 / 别名 / 历史 / PATH。
-    if configuration.resolvedClipboardSuggestion,
-      let clipboard = clipboardSuggestionProvider?(),
-      let text = ClipboardSuggestionPolicy.suggestion(clipboard: clipboard, line: tracker.line),
-      let token = ClipboardSuggestionPolicy.commandToken(in: text),
-      ClipboardSuggestionPolicy.isSelfEvidentCommand(text)
-        || service.knowsCommand(token, aliases: aliases)
-    {
-      let candidate = AutocompleteCandidate(
-        insertText: text,
-        description: L("粘贴剪贴板内容"),
-        kind: .clipboard,
-        score: Double.greatestFiniteMagnitude,
-        replacement: .fullLine
-      )
-      var candidates = result.candidates.filter { $0.insertText != text }
-      let insertionIndex = candidates.first?.kind == .correction ? 1 : 0
-      candidates.insert(candidate, at: min(insertionIndex, candidates.count))
-      result = AutocompleteResult.make(candidates: candidates, line: tracker.line)
-    }
-    // 项目命令（最近一次 Agent 会话的 resume）排在首位；上一条命令的纠错意图更强，
-    // 两者同时存在时纠错保持第一，项目命令紧随其后。
-    if let project = projectCommandProvider?(currentDirectory()),
-      project.command.hasPrefix(tracker.line), project.command != tracker.line
-    {
-      let candidate = AutocompleteCandidate(
-        insertText: project.command,
-        description: project.description,
-        kind: .snippet,
-        score: Double.greatestFiniteMagnitude,
-        replacement: .fullLine
-      )
-      var candidates = result.candidates.filter { $0.insertText != project.command }
-      let insertionIndex = candidates.prefix(while: { Self.isStrongIntentKind($0.kind) }).count
-      candidates.insert(candidate, at: insertionIndex)
-      result = AutocompleteResult.make(candidates: candidates, line: tracker.line)
-    }
-    currentResult = result
     selectedIndex = min(selectedIndex, max(0, result.candidates.count - 1))
     // 面板可见性的唯一迁移点。旧实现在这里无条件重算、又在 receiveInput 里置 false,
     // 两处互相覆写;所有其它路径现在只读 `panelState`。
     switch (panelState, configuration.resolvedAutocompleteCandidatePanel) {
-    case _ where result.candidates.count < 2:
+    case _ where result.candidates.isEmpty:
       panelState = .hidden
     case (_, .disabled):
       panelState = .hidden
     case (.hidden, .automatic):
       // 空 prompt 不自动弹面板：新开 Pane 或命令刚结束时用户还没表达任何意图，
-      // 一整列目录历史直接压在光标下只会打扰。候选仍然计算（resume/纠错 ghost 照常
-      // 显示），用户敲第一个字符或按 Esc/Tab 主动打开时再展开。
-      if !panelSuppressedForPrompt, !tracker.line.isEmpty, result.candidates.count >= 2 {
+      // 候选仍然计算；用户输入或按 Esc/Tab 主动打开时再展开。
+      if !panelSuppressedForPrompt, !tracker.line.isEmpty, !result.candidates.isEmpty {
         panelState = .open(origin: .automatic, userSelected: false)
       }
     case (.hidden, _):
@@ -811,7 +669,7 @@ final class TerminalAutocompleteController {
       // 自动面板随输入退格清空而收起：空 prompt 上的候选只是目录历史，与上面
       // 「空 prompt 不自动弹面板」同一语义；用户再敲字符会重新展开。手动打开的面板
       // 不受影响（下面的 .manual 分支）。
-      if result.candidates.count < 2 || tracker.line.isEmpty { panelState = .hidden }
+      if result.candidates.isEmpty || tracker.line.isEmpty { panelState = .hidden }
     case (.open(.automatic, _), _):
       // 配置从 auto 改掉时,收起此前自动弹出的面板。
       panelState = .hidden
@@ -821,8 +679,65 @@ final class TerminalAutocompleteController {
     }
     updateVisibleWindow()
     render()
-    scheduleHelpProbeIfNeeded(configuration: configuration)
   }
+
+  /// 异步结果只属于发起它的 prompt、输入、目录、别名和设置快照。取消本身不足以
+  /// 保证隔离，因为文件读取和被注入的提供器可能在取消之后才返回。
+  private func scheduleDynamicQuery(configuration: ControlConfiguration) {
+    let line = tracker.line
+    let directory = currentDirectory()
+    let capturedAliases = aliases
+    let generation = dynamicGeneration
+    dynamicTask = Task { @MainActor [weak self, service] in
+      let items = await service.dynamicCandidates(line: line, directory: directory)
+      guard !Task.isCancelled, !items.isEmpty, let self,
+        !self.isInvalidated, self.dynamicGeneration == generation,
+        self.promptActive, self.tracker.isReliable, self.tracker.isCursorAtEnd,
+        self.tracker.line == line, self.currentDirectory() == directory,
+        self.aliases == capturedAliases, self.controls() == configuration
+      else { return }
+      let result = service.suggestions(line: line, directory: directory,
+        sessionIdentifier: self.sessionIdentifier, controls: configuration,
+        aliases: capturedAliases, dynamic: items)
+      self.applyResult(result, configuration: configuration)
+    }
+  }
+
+  private func cancelDynamicQuery() {
+    dynamicGeneration &+= 1
+    dynamicTask?.cancel()
+    dynamicTask = nil
+    fallbackTabTask?.cancel()
+    fallbackTabTask = nil
+  }
+
+  /// 无可接受 ghost 时先查询；120ms 后仍无面板/预览才向 Shell 发送一次 Tab。
+  /// 所有输入和生命周期变更都会撤销这次回退，避免在新命令上补发旧按键。
+  private func queryWithFallbackTab(configuration: ControlConfiguration) -> Bool {
+    guard promptActive, tracker.isReliable, tracker.isCursorAtEnd, !tracker.line.isEmpty,
+      configuration.resolvedAutocompleteInlineSuggestion
+        || configuration.resolvedAutocompleteCandidatePanel != .disabled
+    else { return false }
+    refreshNow()
+    let generation = dynamicGeneration
+    let line = tracker.line
+    let directory = currentDirectory()
+    fallbackTabTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .milliseconds(120))
+      guard !Task.isCancelled, let self, !self.isInvalidated,
+        self.dynamicGeneration == generation, self.promptActive, self.tracker.line == line,
+        self.currentDirectory() == directory, self.controls() == configuration,
+        !self.panelVisible, self.inlineGhostText == nil, let terminalView = self.terminalView
+      else { return }
+      self.shellCompletionActive = true
+      self.dismiss()
+      _ = terminalView.sendAutocompleteBytes([UInt8(9)][...])
+    }
+    return true
+  }
+
+  /// 等待当前查询收口，供生命周期测试核对取消和迟到结果，不启动额外查询。
+  func dynamicQuerySettled() async { await dynamicTask?.value }
 
   /// 让 8 行视窗以最小移动跟上选中项。
   ///
@@ -848,6 +763,7 @@ final class TerminalAutocompleteController {
 
   private func scheduleRefresh() {
     refreshTask?.cancel()
+    cancelDynamicQuery()
     refreshTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .milliseconds(150))
       guard !Task.isCancelled else { return }
@@ -858,6 +774,11 @@ final class TerminalAutocompleteController {
   /// 只有用户已经输入“未知可执行文件 + 空格”后才探测 help；输入中的命令前缀不会
   /// 触发进程。每个会话每个命令最多一次，关闭本地学习时完全跳过。
   private func scheduleHelpProbeIfNeeded(configuration: ControlConfiguration) {
+    if helpProbeGeneration != service.helpProbeGeneration {
+      helpProbeTask?.cancel()
+      probedCommands.removeAll()
+      helpProbeGeneration = service.helpProbeGeneration
+    }
     guard configuration.resolvedAutocompleteOnDeviceLearning,
       currentDirectory().hasPrefix("/"),
       tracker.line.contains(where: \.isWhitespace),
@@ -865,10 +786,13 @@ final class TerminalAutocompleteController {
       probedCommands.insert(target.cacheKey).inserted
     else { return }
     helpProbeTask?.cancel()
+    let generation = helpProbeGeneration
     helpProbeTask = Task { @MainActor [weak self] in
       guard let spec = await AutocompleteHelpProbe.probe(
         command: target.command, subcommandPath: target.subcommandPath),
-        !Task.isCancelled, let self
+        !Task.isCancelled, let self,
+        self.service.helpProbeGeneration == generation,
+        self.controls().resolvedAutocompleteOnDeviceLearning
       else { return }
       do {
         try service.installLocalSpec(
@@ -887,146 +811,36 @@ final class TerminalAutocompleteController {
     guard !overlay.panelContainer.isHidden
       || (index == inlineCandidateIndex && currentResult.ghostText != nil && inlineSuggestionDisplayable)
     else { return false }
-    // 后缀由候选自带的替换范围唯一决定,与 ghost 的计算共用同一实现。过去这里独立
-    // 推断一次“整行还是 token”,与引擎的判定可能不一致。
-    guard let suffix = currentResult.candidates[index].appendableSuffix(from: tracker.line)
+    // 原版先按Unicode scalar数量删除原始token，再写候选；普通项另加空格。
+    // ghost是视觉预览，不能用它的后缀替代完整接受协议。
+    guard let bytes = CompletionAcceptance.bytes(candidate: currentResult.candidates[index], line: tracker.line)
     else { return false }
     dismiss()
-    return terminalView.sendAutocompleteBytes(Array(suffix.utf8)[...])
+    return terminalView.sendAutocompleteBytes(bytes[...])
+  }
+
+  /// 在提交时保存，完成事件只清理失败参数；同一 prompt 的 OSC/输入回调只记录一次。
+  private func submitForLearning(_ command: String) {
+    guard !recordedCommandForPrompt else { return }
+    recordedCommandForPrompt = true
+    let configuration = controls()
+    _ = service.submit(
+      command: command, directory: currentDirectory(),
+      ignorePatterns: configuration.resolvedAutocompleteHistoryIgnore,
+      sessionIdentifier: sessionIdentifier,
+      learningEnabled: configuration.resolvedAutocompleteOnDeviceLearning,
+      skipSecrets: configuration.resolvedAutocompleteSkipSecrets)
   }
 
   private func finishCommand(exitStatus: Int?) {
-    let status = exitStatus ?? 0
-    // 「下一步」建议只看命令文本，不属于历史学习，因此不受本机学习开关约束；
-    // 但目录必须真实存在（本地 cwd 可校验时），否则 Tab 进去只会得到一条报错。
-    // 屏幕上的命令行是真值；键盘重建只在读屏失败时兜底。
-    let followUpSource = screenCommand ?? runningCommand
+    _ = service.commandFinished(exitStatus: exitStatus ?? 0, sessionIdentifier: sessionIdentifier)
     screenCommand = nil
-    pendingFollowUp = followUpSource.flatMap {
-      CommandFollowUpParser.suggestion(command: $0, exitStatus: status)
-    }.flatMap { Self.followUpTargetExists($0, in: currentDirectory()) ? $0 : nil }
-    guard let command = runningCommand, !command.isEmpty else { return }
-    let configuration = controls()
-    guard configuration.resolvedAutocompleteOnDeviceLearning else {
-      pendingCorrections = []
-      return
-    }
-    // 开启「跳过含凭据的命令」时整条不进历史，也不纠错：纠错要读输出，输出可能回显秘密。
-    if configuration.resolvedAutocompleteSkipSecrets, AutocompleteSecretDetector.containsSecret(command) {
-      pendingCorrections = []
-      return
-    }
-    let executable = ShellCommandTokenizer.tokenize(command).tokens.first ?? ""
-    let output = ANSICleaner.visibleText(from: completedCommandOutput?.text ?? "")
-    // 只学习真正执行过的命令：`runningCommand` 本身只来自回车提交的行，这里再把
-    // shell 根本没能执行的（找不到命令 126/127、或输出里明说 command not found /
-    // 无法执行）挡在历史之外，避免打错的词进入补全污染后续候选。
-    let unexecutable = Self.commandWasNotExecutable(exitStatus: status, output: output)
-    _ = service.record(
-      command: command,
-      directory: currentDirectory(),
-      exitStatus: unexecutable ? 127 : status,
-      ignorePatterns: configuration.resolvedAutocompleteHistoryIgnore,
-      knownOptions: service.knownOptions(for: executable),
-      sessionIdentifier: sessionIdentifier
-    )
-    pendingCorrections = status == 0 ? [] : CommandCorrectionParser.suggestions(
-      command: command,
-      output: output,
-      context: Self.correctionContext(exitStatus: status, directory: currentDirectory(), service: service)
-    )
-  }
-
-  /// 纠错规则需要的磁盘事实。只在 cwd 是本地绝对路径时列目录；列表有界，
-  /// 远端 Shell 的 cwd 不可读，规则拿到空数组后自然不会给出目录建议。
-  static func correctionContext(
-    exitStatus: Int, directory: String, service: AutocompleteService
-  ) -> CommandCorrectionContext {
-    let knownCommands = Set(service.specDatabase.commands.map(\.name))
-    let localRoot = directory.hasPrefix("/") ? directory : nil
-    // 闭包要跨到纠错规则的 @Sendable 上下文里，只捕获不可变的 String?。
-    let resolve: @Sendable (String) -> String? = { relative in
-      guard let localRoot else { return nil }
-      if relative.hasPrefix("/") { return relative }
-      return relative.isEmpty ? localRoot : (localRoot as NSString).appendingPathComponent(relative)
-    }
-    return CommandCorrectionContext(
-      exitStatus: exitStatus,
-      knownCommands: knownCommands,
-      directoryEntries: { parent in
-        guard let path = resolve(parent),
-          let names = try? FileManager.default.contentsOfDirectory(atPath: path)
-        else { return [] }
-        var directories: [String] = []
-        for name in names.sorted() where directories.count < 500 {
-          var isDirectory: ObjCBool = false
-          let full = (path as NSString).appendingPathComponent(name)
-          if FileManager.default.fileExists(atPath: full, isDirectory: &isDirectory), isDirectory.boolValue {
-            directories.append(name)
-          }
-        }
-        return directories
-      },
-      fileExists: { relative in
-        guard let path = resolve(relative) else { return false }
-        return FileManager.default.fileExists(atPath: path)
-      }
-    )
-  }
-
-  /// 建议依赖的路径（目录或文件）是否真实存在。cwd 不是本地绝对路径（远端 Shell）
-  /// 时无法校验，保留建议；`~` 开头的目标按用户主目录展开。
-  static func followUpTargetExists(_ followUp: CommandFollowUp, in directory: String) -> Bool {
-    guard let target = followUp.requiredPath else { return true }
-    guard directory.hasPrefix("/") else { return true }
-    let expanded = (target as NSString).expandingTildeInPath
-    let path = expanded.hasPrefix("/")
-      ? expanded : (directory as NSString).appendingPathComponent(expanded)
-    var isDirectory: ObjCBool = false
-    return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
-      && isDirectory.boolValue == followUp.requiresDirectory
-  }
-
-  /// 面板里给纠错候选的说明文案；按规则类别区分，让用户一眼看出建议改了什么。
-  static func correctionDescription(_ kind: CommandCorrection.Kind) -> String {
-    switch kind {
-    case .typoCommand, .typoSubcommand: L("修正上一条命令")
-    case .pullBeforePush: L("先拉取远端提交再推送")
-    case .switchExistingBranch: L("切换到已存在的分支")
-    case .nearestDirectory: L("进入名称最接近的目录")
-    case .terraformInit: L("先初始化 Terraform 再重试")
-    case .elevatePrivileges: L("以管理员权限重试")
-    case .packageRunner: L("用包运行器执行缺失的命令")
-    }
-  }
-
-  /// 面板里给「下一步」候选的说明文案。
-  static func followUpDescription(_ kind: CommandFollowUp.Kind) -> String {
-    switch kind {
-    case .enterClonedRepository: L("进入刚克隆的仓库")
-    case .enterCreatedDirectory: L("进入刚创建的目录")
-    case .enterExtractedDirectory: L("进入刚解压出的目录")
-    case .activateVirtualEnvironment: L("激活刚创建的虚拟环境")
-    case .extractDownloadedArchive: L("解压刚下载的压缩包")
-    case .pushCommit: L("推送刚才的提交")
-    case .runExecutable: L("运行刚准备好的程序")
-    case .runImage: L("运行刚构建的镜像")
-    }
-  }
-
-  /// shell 报告「没能执行」的判定：126（不可执行）/127（找不到命令）是 POSIX 约定；
-  /// 非零退出且输出含 not found / cannot execute 兜住自定义 command_not_found_handler
-  /// 返回其它状态码的 shell。成功（0）的命令一律视为可执行，不看输出。
-  static func commandWasNotExecutable(exitStatus: Int, output: String) -> Bool {
-    if exitStatus == 126 || exitStatus == 127 { return true }
-    guard exitStatus != 0 else { return false }
-    let lowered = output.lowercased()
-    return lowered.contains("command not found") || lowered.contains("cannot execute")
   }
 
   /// 彻底收起补全:关面板、清候选、取消待执行的刷新。
   private func dismiss() {
     refreshTask?.cancel()
+    cancelDynamicQuery()
     panelState = .hidden
     currentResult = .empty
     selectedIndex = 0
@@ -1061,6 +875,7 @@ final class TerminalAutocompleteController {
   /// 收窄而不是消失。debounce 窗口内候选为空,`render` 会暂时隐藏面板视图、
   /// `acceptCandidate` 因索引不存在返回 false,回车照常交给 shell。
   private func clearCandidatesForRefilter() {
+    cancelDynamicQuery()
     currentResult = .empty
     selectedIndex = 0
     firstVisibleIndex = 0
@@ -1080,38 +895,18 @@ final class TerminalAutocompleteController {
     return terminalView.visiblePromptEnds(with: tracker.line)
   }
 
-  /// 「一定是用户想要的整行」这一类候选：纠错、剪贴板、下一步。它们即使旁边还有
-  /// 历史候选也直接画 ghost，并按此顺序占据候选表开头。
-  private static func isStrongIntentKind(_ kind: AutocompleteCandidateKind) -> Bool {
-    kind == .correction || kind == .clipboard || kind == .followUp
-  }
-
-  /// 行内 ghost 的来源：某一条候选的后缀，或多条冲突历史共同的下一个词。
+  /// 内联预览来自一条明确候选，不合成多条历史的公共前缀。
   enum InlineSuggestion: Equatable {
     case candidate(Int)
-    case sharedPrefix(String)
   }
 
-  /// Otty 的预览语义：只有一个候选、首项明显领先，或用户已明确选中某条候选时，才画
-  /// 那条候选的灰色后缀；多条同样可能的整行历史只预览共同的下一个词，不替用户挑一条。
+  /// 唯一候选、明确领先的候选或用户选中的候选才显示后缀。
   var inlineSuggestion: InlineSuggestion? {
     if panelVisible, hasUserSelection, currentResult.candidates.indices.contains(selectedIndex) {
       return .candidate(selectedIndex)
     }
-    // 工具明确给出的失败纠错是一个确定建议，不被同时存在的历史候选稀释。
-    if let kind = currentResult.candidates.first?.kind, Self.isStrongIntentKind(kind) {
-      return .candidate(0)
-    }
-    let candidates = currentResult.candidates
-    let shared = AutocompleteSharedPrefix.ghost(candidates: candidates, line: tracker.line)
-    // 只剩一个候选，或首项明显领先其余候选（Otty 的 clear_leader）时直接预览首项。
-    // 首项是单个 token 时，共同前缀与它是同一个词且多带一个空格，优先用共同前缀。
-    if AutocompleteInlineLead.leaderIsClear(candidates),
-      shared == nil || candidates.first.map(AutocompleteInlineLead.isHistoryLine) == true
-    {
-      return .candidate(0)
-    }
-    return shared.map(InlineSuggestion.sharedPrefix)
+    return currentResult.candidates.count == 1 || CompletionPresentation.leaderIsClear(currentResult.candidates)
+      ? .candidate(0) : nil
   }
 
   private var inlineCandidateIndex: Int? {
@@ -1122,7 +917,6 @@ final class TerminalAutocompleteController {
   var inlineGhostText: String? {
     switch inlineSuggestion {
     case .candidate(let index): currentResult.candidates[index].appendableSuffix(from: tracker.line)
-    case .sharedPrefix(let shared): shared
     case nil: nil
     }
   }
@@ -1140,16 +934,14 @@ final class TerminalAutocompleteController {
   private func render() {
     guard let terminalView else { return }
     let candidate = inlineCandidateIndex.map { currentResult.candidates[$0] }
-    let showsClipboard = candidate?.kind == .clipboard && inlineSuggestionDisplayable
     let displayResult = AutocompleteResult(
       candidates: currentResult.candidates,
       ghostText: inlineGhostText,
       replacementStart: candidate?.replacement.start ?? currentResult.replacementStart)
-    let inlineFits = overlay.render(
+    _ = overlay.render(
       result: displayResult,
       showInline: inlineSuggestionDisplayable,
-      // 灰字本身说不清该按哪个键；剪贴板建议的接受键与其它候选不同，必须显式标注。
-      inlineHint: showsClipboard ? L("⏎ 粘贴") : nil,
+      inlineHint: nil,
       showPanel: panelVisible,
       selectedIndex: selectedIndex,
       showsSelection: hasUserSelection,
@@ -1163,14 +955,7 @@ final class TerminalAutocompleteController {
         ? terminalView.autocompleteBackgroundColor : AsterTheme.panel,
       accent: AsterTheme.accent
     )
-    // 防误触延迟从 ghost **完整画出来**那一刻起算：等待回显期间 ghost 是隐藏的，
-    // Pane 太窄放不下整行时 ghost 又会被裁掉，两种情况下用户都没真正看见内容，
-    // 回车就不该把它当作已确认的建议接受。
-    if showsClipboard, inlineFits {
-      if clipboardSuggestionShownAt == nil { clipboardSuggestionShownAt = now() }
-    } else {
-      clipboardSuggestionShownAt = nil
-    }
+
   }
 }
 
@@ -1316,7 +1101,7 @@ final class TerminalAutocompleteOverlayView: NSView {
       panel.removeArrangedSubview($0)
       $0.removeFromSuperview()
     }
-    guard showPanel, result.candidates.count > 1 else {
+    guard showPanel, !result.candidates.isEmpty else {
       panelContainer.isHidden = true
       return inlineFits
     }

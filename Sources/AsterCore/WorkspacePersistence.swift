@@ -179,6 +179,8 @@ public struct WorkspaceTabSnapshot: Identifiable, Codable, Equatable, Sendable {
   public var layout: PaneLayout
   /// OSC 动态标题与用户固定名称/前缀。可选字段保证旧快照继续按 `title` 恢复。
   public var titleState: TerminalTitleState?
+  /// Retains the inactive naming field; optional for snapshots written before the pane editor.
+  public var titleEditorState: TabTitleEditorState?
   /// 可选时间戳兼容 0.4.1 之前的工作区快照；缺失时恢复层使用当前时间。
   public var createdAt: Date?
   public var updatedAt: Date?
@@ -201,6 +203,7 @@ public struct WorkspaceTabSnapshot: Identifiable, Codable, Equatable, Sendable {
     title: String,
     layout: PaneLayout,
     titleState: TerminalTitleState? = nil,
+    titleEditorState: TabTitleEditorState? = nil,
     createdAt: Date? = nil,
     updatedAt: Date? = nil,
     agentSessions: [WorkspacePaneAgentSession]? = nil,
@@ -213,6 +216,7 @@ public struct WorkspaceTabSnapshot: Identifiable, Codable, Equatable, Sendable {
     self.title = title
     self.layout = layout
     self.titleState = titleState
+    self.titleEditorState = titleEditorState
     self.createdAt = createdAt
     self.updatedAt = updatedAt
     self.agentSessions = agentSessions

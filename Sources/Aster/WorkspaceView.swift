@@ -139,9 +139,9 @@ final class WorkspaceViewController: NSViewController {
   private var inspectorToggleRevealDeadline: ContinuousClock.Instant?
   private var inspectorToggleHideTask: Task<Void, Never>?
   private var inspectorTitleBarIsHovered = false
-  /// `NSPopover` 不会被视图层级强持有。控制器持有到关闭回调，避免点击标题后弹层
+  /// 无箭头菜单窗口由工作区持有到关闭回调，避免点击标题后弹层
   /// 在下一轮 run loop 立刻释放。
-  private var workspaceTitlePopover: NSPopover?
+  private var workspaceTitlePopover: WorkspaceTitlePanel?
   /// 详情面板在同一标签的常规状态刷新与收起/重开之间保持实例稳定，避免 Files 树和
   /// 搜索框先被销毁再创建。切换标签后按新 Tab ID 替换，防止订阅继续指向旧标签。
   private var detailsPanelController: DetailsPanelViewController?
@@ -2457,15 +2457,17 @@ final class WorkspaceViewController: NSViewController {
       preferences: preferences,
       tab: tab
     )
-    let popover = NSPopover()
-    popover.behavior = .transient
-    popover.animates = true
-    popover.delegate = self
-    popover.contentViewController = content
-    popover.contentSize = WorkspaceTitlePopoverViewController.preferredSize
+    let popover = WorkspaceTitlePanel(content: content)
+    content.ownerWindow = anchor.window
+    content.toggleAnchor = anchor
+    content.onDismiss = { [weak popover] in popover?.close() }
+    popover.onClose = { [weak self, weak anchor] in
+      anchor?.setPopoverPresented(false)
+      self?.workspaceTitlePopover = nil
+    }
     workspaceTitlePopover = popover
     anchor.setPopoverPresented(true)
-    popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    popover.show(relativeTo: anchor)
   }
 
   /// 终端缓冲区查找条：搜索框、大小写与正则开关、匹配计数。
@@ -3130,11 +3132,4 @@ final class WorkspaceViewController: NSViewController {
   @objc private func insertSidebarDivider() { model.insertDividerAfterSelectedTab() }
   @objc private func removeAllSidebarDividers() { model.removeAllTabDividers() }
   @objc private func showSettings() { (NSApp.delegate as? AsterAppDelegate)?.showSettings(nil) }
-}
-
-extension WorkspaceViewController: NSPopoverDelegate {
-  func popoverDidClose(_ notification: Notification) {
-    workspaceTitleButton?.setPopoverPresented(false)
-    workspaceTitlePopover = nil
-  }
 }

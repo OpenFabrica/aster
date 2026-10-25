@@ -54,7 +54,18 @@ Copyright (c) 2021 Hercules Labs Inc. (Fig)
 
 Fig Autocomplete is distributed under the MIT License. The full license is available in the upstream repository at <https://github.com/withfig/autocomplete/blob/master/LICENSE>.
 
-Aster derives its bundled command-name index from the 715 direct command specifications at revision `aef52acff84c45edde61ae610cc2c964802b9a38`. Aster's local ranking, privacy filters, UI, file completion, help parsing, persistence, and manual update implementation are independent code.
+Aster's bundled `Resources/autocomplete/fig-specs.json` is a static conversion of 711 public Fig command specifications from the upstream-only SQLite snapshot distributed with Otty 1.6.2. The snapshot identifies Fig revision `aef52acff84c` (upstream revision `aef52acff84c45edde61ae610cc2c964802b9a38`), current date `2026-10-05`, base date `2026-05-23`, and schema version 2. Every exported row has `source=upstream`; the translation overlay table is empty. Otty application code, learned data, and other sources are excluded.
+
+The source snapshot's compressed SHA-256 is `0ea06150edc4857f6cc6e21bce34f3d2d1b33293521c5cb25cebb62a6b78963d`; its decompressed SQLite SHA-256 is `bf24a178e384484e28ceb31e68e627b5d58e0d2725d1092e8c6d9c8e56d5e615`. The converted Aster JSON SHA-256 is `33944e4598eb2e425fa6740a19f7b433696ac01ca001532b2a7703ca07819ba6`.
+
+Reproduce from the same local snapshot with a fresh export path:
+
+```sh
+python3 scripts/export-fig-upstream.py /Applications/Otty.app/Contents/Resources/completions-client.db.lzma /tmp/aster-fig-upstream.json
+node scripts/build-fig-specs.mjs --input /tmp/aster-fig-upstream.json --out Resources/autocomplete/fig-specs.json
+```
+
+The exporter validates provenance and SQLite integrity without changing the source file. The converter preserves all 17,517 command nodes, 67,994 options, 40,173 arguments and 40,435 static suggestions consumed by the recovered native model. Fig parser directives, dependencies, option priorities and generator cache/timeout metadata are outside that native model. Fixed native dynamic providers are implemented separately from the Fig DSL. Offline conversion does not merge older local translation overlays. Aster's ranking, privacy filters, UI, file completion, help parsing, persistence, and manual update implementation are independent code.
 
 ## Tally
 

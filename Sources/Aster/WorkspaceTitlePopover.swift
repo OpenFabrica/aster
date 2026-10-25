@@ -1,5 +1,6 @@
 import AppKit
 import AsterCore
+import Combine
 
 /// 内容区顶条（`makeWorkspaceHeader` 的 `background`）：承载路径胶囊与安全输入指示器。
 /// 隐藏原生标题栏后（`titleVisibility = .hidden`）这条 28pt 区域失去了系统自带的
@@ -199,125 +200,34 @@ private final class WorkspaceTitleModeControl: NSSegmentedControl {
   }
 }
 
-/// 标题弹层里的整行动作。按钮本身覆盖整行，文字、快捷键和箭头仍保持原生可访问控件，
-/// 悬停反馈使用产品现有中性色，不引入标题区域专属主题颜色。
+/// Otty 式标题工作区弹层。非模态级联保留 hover 与键盘交互；
+/// Git 使用独立异步流程，其余操作绑定打开时的标签和 Pane。
 @MainActor
-private final class WorkspaceTitleRowButton: NSButton {
-  private let handler: (WorkspaceTitleRowButton) -> Void
-  private var hoverTrackingArea: NSTrackingArea?
-  private var isHovered = false
-
-  /// 构建整行动作按钮：左侧标题，右侧可选快捷键、子菜单箭头或状态图标。
-  init(
-    title: String,
-    symbol: String? = nil,
-    shortcut: String? = nil,
-    trailingSymbols: [String] = [],
-    showsSubmenu: Bool = false,
-    handler: @escaping (WorkspaceTitleRowButton) -> Void
-  ) {
-    self.handler = handler
-    super.init(frame: .zero)
-    self.title = title
-    isBordered = false
-    alignment = .left
-    font = NSFont.interface(ofSize: 13.5)
-    contentTintColor = AsterTheme.ink
-    wantsLayer = true
-    layer?.cornerRadius = 6
-    layer?.cornerCurve = .continuous
-    target = self
-    action = #selector(invoke)
-
-    if let symbol {
-      image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)?
-        .withSymbolConfiguration(.init(pointSize: InterfaceScale.font(13), weight: .regular))
-      imagePosition = .imageLeading
-    }
-
-    let trailingText = shortcut ?? (showsSubmenu ? "›" : nil)
-    if let trailingText {
-      let label = makeLabel(trailingText, size: 11.5, color: AsterTheme.tertiaryInk)
-      label.alignment = .right
-      addSubview(label)
-      label.translatesAutoresizingMaskIntoConstraints = false
-      NSLayoutConstraint.activate([
-        label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      ])
-    }
-    if !trailingSymbols.isEmpty {
-      let icons = trailingSymbols.map { name -> NSImageView in
-        let image = NSImageView(image: NSImage(systemSymbolName: name,
-          accessibilityDescription: title) ?? NSImage())
-        image.contentTintColor = AsterTheme.tertiaryInk
-        image.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-          image.widthAnchor.constraint(equalToConstant: InterfaceScale.length(14)),
-          image.heightAnchor.constraint(equalToConstant: InterfaceScale.length(14)),
-        ])
-        return image
-      }
-      let stack = NSStackView(views: icons)
-      stack.orientation = .horizontal
-      stack.spacing = 8
-      addSubview(stack)
-      stack.translatesAutoresizingMaskIntoConstraints = false
-      NSLayoutConstraint.activate([
-        stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-        stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: showsSubmenu ? -24 : -8),
-      ])
-    }
-  }
-
-  required init?(coder: NSCoder) { nil }
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
-    let area = NSTrackingArea(
-      rect: .zero,
-      options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-      owner: self
-    )
-    addTrackingArea(area)
-    hoverTrackingArea = area
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    isHovered = true
-    updateBackground()
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    isHovered = false
-    updateBackground()
-  }
-
-  private func updateBackground() {
-    layer?.backgroundColor = isHovered
-      ? AsterTheme.ink.withAlphaComponent(0.075).cgColor : NSColor.clear.cgColor
-  }
-
-  @objc private func invoke() { handler(self) }
-}
-
-/// Otty 式标题工作区弹层。所有会修改仓库的 Git 动作只预填到终端，仍由用户回车确认；
-/// Finder、编辑器、分屏与搜索动作直接复用主工作区的正式入口。
-@MainActor
-final class WorkspaceTitlePopoverViewController: NSViewController {
-  private let model: AppModel
-  private let preferences: AppPreferences
-  private weak var tab: TerminalTabItem?
+final class WorkspaceTitlePopoverViewController: NSViewController, NSTextFieldDelegate {
+  let model: AppModel
+  let preferences: AppPreferences
+  weak var tab: TerminalTabItem?
+  let paneID: UUID
+  let menuPresenter = PaneMenuPresenter()
+  var onDismiss: (() -> Void)?
+  weak var ownerWindow: NSWindow?
+  weak var toggleAnchor: NSView?
+  var isDismissing = false
+  private var isChangingMode = false
+  private var editingMode: TabTitleEditorState.Mode
+  private var dismissalMonitor: PaneMenuDismissalMonitor?
+  private var navigationRows: [WorkspaceTitleRowButton] = []
+  var pasteboard = NSPasteboard.general
+  var gitLoadTask: Task<Void, Never>?
+  var gitMenuController: PaneGitMenu?
+  private var contextSubscriptions: Set<AnyCancellable> = []
   private weak var modeControl: NSSegmentedControl?
   private weak var titleField: NSTextField?
 
-  /// 弹层尺寸（默认档 280×462）。行高与行宽都随界面字号放大，弹层整体同比放大；
-  /// 1.5 倍约 420×693，常见屏幕放得下，所以不设上限，否则底部的行会被裁掉。
+  /// 弹层尺寸（默认档 280×492）。行高与行宽都随界面字号放大，弹层整体同比放大；
+  /// 1.5 倍约 420×738，常见屏幕放得下，所以不设上限，否则底部的行会被裁掉。
   static let preferredSize = NSSize(
-    width: InterfaceScale.length(280), height: InterfaceScale.length(462))
+    width: InterfaceScale.length(280), height: InterfaceScale.length(492))
   /// 内容列宽：弹层宽度减去左右各 14pt 内边距（内边距不缩放）。
   private static let rowWidth = preferredSize.width - 28
 
@@ -326,11 +236,30 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
     self.model = model
     self.preferences = preferences
     self.tab = tab
+    paneID = tab.activePaneID
+    editingMode = tab.titleEditorState.mode
     super.init(nibName: nil, bundle: nil)
     preferredContentSize = Self.preferredSize
+    tab.activePaneChanged.sink { [weak self] _ in self?.dismiss() }
+      .store(in: &contextSubscriptions)
+    model.$selectedTabID.dropFirst().sink { [weak self] _ in self?.dismiss() }
+      .store(in: &contextSubscriptions)
   }
 
   required init?(coder: NSCoder) { nil }
+
+  override func viewDidAppear() {
+    super.viewDidAppear()
+    guard let window = view.window, !isDismissing else { return }
+    dismissalMonitor = PaneMenuDismissalMonitor(window: window, menus: menuPresenter,
+      toggleAnchor: toggleAnchor) { [weak self] in
+      self?.dismiss()
+    }
+  }
+
+  func stopDismissalMonitoring() { dismissalMonitor = nil }
+
+  func focusNameField() { view.window?.makeFirstResponder(titleField) }
 
   /// 自上而下排列命名区、工作目录与各组动作行。
   override func loadView() {
@@ -356,13 +285,13 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
     content.addArrangedSubview(makeDivider())
     content.addArrangedSubview(makeWorkingDirectoryBlock())
     content.addArrangedSubview(makeRow(
-      "Copy Path", identifier: "workspace-title-copy-path"
+      L("复制路径"), identifier: "workspace-title-copy-path"
     ) { [weak self] _ in self?.copyPath() })
     content.addArrangedSubview(makeRow(
-      "Reveal in Finder", identifier: "workspace-title-reveal-finder"
+      L("在 Finder 中显示"), identifier: "workspace-title-reveal-finder"
     ) { [weak self] _ in self?.revealInFinder() })
     content.addArrangedSubview(makeRow(
-      "Open in", identifier: "workspace-title-open-in", showsSubmenu: true
+      L("打开方式"), identifier: "workspace-title-open-in", showsSubmenu: true
     ) { [weak self] sender in self?.showOpenInMenu(from: sender) })
     content.addArrangedSubview(makeDivider())
     content.addArrangedSubview(makeRow(
@@ -370,26 +299,29 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
     ) { [weak self] sender in self?.showGitMenu(from: sender) })
     content.addArrangedSubview(makeDivider())
     content.addArrangedSubview(makeRow(
-      "Notifications & Privileges", identifier: "workspace-title-notifications",
-      trailingSymbols: ["speaker.wave.2", "bell"], showsSubmenu: true
-    ) { [weak self] _ in self?.openNotificationSettings() })
+      L("通知与权限"), identifier: "workspace-title-notifications",
+      trailingSymbols: privilegeSymbols, showsSubmenu: true
+    ) { [weak self] sender in self?.showPrivilegesMenu(from: sender) })
     content.addArrangedSubview(makeDivider())
     content.addArrangedSubview(makeRow(
-      "Split View", identifier: "workspace-title-split", showsSubmenu: true
+      L("分屏"), identifier: "workspace-title-split", showsSubmenu: true
     ) { [weak self] sender in self?.showSplitMenu(from: sender) })
+    content.addArrangedSubview(makeRow(
+      L("关于此 Pane"), identifier: "workspace-title-about", showsSubmenu: true
+    ) { [weak self] sender in self?.showAboutMenu(from: sender) })
     content.addArrangedSubview(makeDivider())
     content.addArrangedSubview(makeRow(
-      "Find", identifier: "workspace-title-find", shortcut: "⌘F"
-    ) { [weak self] _ in self?.model.presentFind() })
+      L("查找"), identifier: "workspace-title-find", shortcut: "⌘F"
+    ) { [weak self] _ in self?.performNavigation { $0.presentFind() } })
     content.addArrangedSubview(makeRow(
-      "Find in All Tabs", identifier: "workspace-title-global-find", shortcut: "⌘⇧F"
-    ) { [weak self] _ in self?.model.toggleGlobalFind() })
+      L("在所有标签中查找"), identifier: "workspace-title-global-find", shortcut: "⌘⇧F"
+    ) { [weak self] _ in self?.performNavigation { $0.toggleGlobalFind() } })
     content.addArrangedSubview(makeRow(
-      "Jump to", identifier: "workspace-title-jump", shortcut: "⌘J"
-    ) { [weak self] _ in self?.model.toggleOpenQuickly() })
+      L("跳转到"), identifier: "workspace-title-jump", shortcut: "⌘J"
+    ) { [weak self] _ in self?.performNavigation { $0.toggleOpenQuickly() } })
     content.addArrangedSubview(makeRow(
-      "Command Palette", identifier: "workspace-title-palette", shortcut: "⌘⇧P"
-    ) { [weak self] _ in self?.model.togglePalette() })
+      L("命令面板"), identifier: "workspace-title-palette", shortcut: "⌘⇧P"
+    ) { [weak self] _ in self?.performNavigation { $0.togglePalette() } })
   }
 
   /// 命名区：名称/前缀切换、恢复自动标题按钮与输入框。
@@ -399,7 +331,7 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
     host.heightAnchor.constraint(equalToConstant: InterfaceScale.length(76)).isActive = true
 
     let segmented = WorkspaceTitleModeControl(
-      labels: ["Name", "Prefix"], trackingMode: .selectOne,
+      labels: [L("名称"), L("前缀")], trackingMode: .selectOne,
       target: self, action: #selector(modeChanged(_:)))
     segmented.selectedSegment = selectedMode
     segmented.segmentStyle = .capsule
@@ -414,14 +346,18 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
 
     let field = NSTextField(string: currentOverrideText)
     field.identifier = NSUserInterfaceItemIdentifier("workspace-title-name-field")
-    field.placeholderString = selectedMode == 0 ? "Tab name" : "Tab prefix"
+    field.placeholderString = selectedMode == 0 ? L("标签名称") : L("标签前缀")
     field.font = NSFont.interface(ofSize: 13)
     field.isBezeled = false
     field.drawsBackground = true
-    field.backgroundColor = AsterTheme.ink.withAlphaComponent(0.08)
+    field.backgroundColor = .textBackgroundColor
     field.wantsLayer = true
     field.layer?.cornerRadius = 6
     field.layer?.cornerCurve = .continuous
+    field.layer?.borderWidth = 1
+    field.layer?.borderColor = NSColor.separatorColor.cgColor
+    field.setAccessibilityLabel(L("标签名称或前缀"))
+    field.delegate = self
     field.target = self
     field.action = #selector(commitName(_:))
     field.translatesAutoresizingMaskIntoConstraints = false
@@ -454,10 +390,10 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
     let host = NSView()
     host.translatesAutoresizingMaskIntoConstraints = false
     host.heightAnchor.constraint(equalToConstant: InterfaceScale.length(54)).isActive = true
-    let heading = makeLabel("WORKING DIRECTORY", size: 10.5, weight: .semibold,
+    let heading = makeLabel(L("工作目录"), size: 10.5, weight: .semibold,
       color: AsterTheme.tertiaryInk)
-    let path = makeLabel(abbreviatedDirectory + "/", size: 12.5, color: AsterTheme.secondaryInk)
-    path.toolTip = tab?.workingDirectory
+    let path = makeLabel(displayDirectory, size: 12.5, color: AsterTheme.secondaryInk)
+    path.toolTip = directory
     let icon = NSImageView(image: NSImage(systemSymbolName: "folder.fill",
       accessibilityDescription: L("工作目录")) ?? NSImage())
     icon.symbolConfiguration = .init(pointSize: InterfaceScale.font(13), weight: .regular)
@@ -496,10 +432,36 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
       showsSubmenu: showsSubmenu,
       handler: handler)
     button.identifier = NSUserInterfaceItemIdentifier(identifier)
+    navigationRows.append(button)
+    button.onKey = { [weak self, weak button] event in
+      guard let self, let button else { return false }
+      if self.menuPresenter.handleKey(event) { return true }
+      if event.keyCode == 53 { self.dismiss(); return true }
+      guard [48, 125, 126].contains(event.keyCode),
+        let index = self.navigationRows.firstIndex(where: { $0 === button }) else { return false }
+      let backwards = event.keyCode == 126
+        || (event.keyCode == 48 && event.modifierFlags.contains(.shift))
+      let indices = backwards ? Array(self.navigationRows.indices.prefix(index).reversed())
+        : Array(self.navigationRows.indices.dropFirst(index + 1))
+      let next = indices.first { self.navigationRows[$0].isEnabled }
+      self.menuPresenter.close()
+      let responder: NSResponder? = next.map { self.navigationRows[$0] as NSResponder } ?? self.titleField
+      self.view.window?.makeFirstResponder(responder)
+      return true
+    }
+    button.onHover = { [weak self] row in
+      if showsSubmenu { handler(row) } else { self?.menuPresenter.close() }
+    }
+    if ["workspace-title-reveal-finder", "workspace-title-open-in"].contains(identifier) {
+      button.isEnabled = localDirectoryIsAvailable
+    }
+    if ["workspace-title-git", "workspace-title-notifications"].contains(identifier) {
+      button.isEnabled = session != nil
+    }
     button.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
       button.widthAnchor.constraint(equalToConstant: Self.rowWidth),
-      button.heightAnchor.constraint(equalToConstant: InterfaceScale.length(30)),
+      button.heightAnchor.constraint(equalToConstant: InterfaceScale.length(28)),
     ])
     return button
   }
@@ -517,83 +479,66 @@ final class WorkspaceTitlePopoverViewController: NSViewController {
     return divider
   }
 
-  private var selectedMode: Int {
-    if case .prefix = tab?.tabTitleOverride { return 1 }
-    return 0
-  }
+  private var selectedMode: Int { tab?.titleEditorState.mode == .prefix ? 1 : 0 }
 
   private var currentOverrideText: String {
-    switch tab?.tabTitleOverride {
-    case .name(let value), .prefix(let value): value
-    case .automatic, .none: ""
-    }
-  }
-
-  private var abbreviatedDirectory: String {
-    ((tab?.workingDirectory ?? NSHomeDirectory()) as NSString).abbreviatingWithTildeInPath
+    tab?.titleEditorState.text(for: selectedMode == 1 ? .prefix : .name) ?? ""
   }
 
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
-    titleField?.placeholderString = sender.selectedSegment == 0 ? "Tab name" : "Tab prefix"
-    titleField?.stringValue = ""
+    let mode: TabTitleEditorState.Mode = sender.selectedSegment == 1 ? .prefix : .name
+    guard mode != editingMode else { return }
+    editingMode = mode
+    isChangingMode = true
+    defer { isChangingMode = false }
+    titleField?.placeholderString = mode == .name ? L("标签名称") : L("标签前缀")
+    if mode == .name, let tab, case .name(let value) = tab.tabTitleOverride {
+      titleField?.stringValue = value
+    } else if mode == .name {
+      titleField?.stringValue = tab?.automaticTitleForNaming ?? ""
+    } else {
+      titleField?.stringValue = tab?.titleEditorState.prefix ?? ""
+    }
     view.window?.makeFirstResponder(titleField)
   }
 
   @objc private func commitName(_ sender: NSTextField) {
+    guard !isChangingMode, !isDismissing else { return }
+    guard targetIsCurrent else { dismiss(); return }
     let override: TerminalTitleOverride = modeControl?.selectedSegment == 1
       ? .prefix(sender.stringValue) : .name(sender.stringValue)
     tab?.setTabTitleOverride(override)
+    sender.stringValue = tab?.titleEditorState.text(
+      for: modeControl?.selectedSegment == 1 ? .prefix : .name) ?? ""
     model.persistWorkspace()
   }
 
   private func resetName() {
+    guard targetIsCurrent else { dismiss(); return }
     tab?.setTabTitleOverride(.automatic)
+    editingMode = .name
+    modeControl?.selectedSegment = 0
+    modeControl?.needsDisplay = true
     titleField?.stringValue = ""
+    titleField?.placeholderString = L("标签名称")
     model.persistWorkspace()
   }
 
-  private func copyPath() {
-    guard let directory = tab?.workingDirectory else { return }
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(directory, forType: .string)
-  }
-
-  private func revealInFinder() {
-    guard let directory = tab?.workingDirectory else { return }
-    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: directory)])
-  }
-
-  /// 「打开方式」与菜单栏 Shell 菜单共用 `ShellDirectoryMenuBuilder`，保证条目一致。
-  private func showOpenInMenu(from sender: NSView) {
-    guard let directory = tab?.workingDirectory else { return }
-    let menu = ShellDirectoryMenuBuilder.openInMenu(
-      directory: directory, model: model, tab: tab, preferences: preferences)
-    popUp(menu, from: sender)
-  }
-
-  /// 「Git」与菜单栏 Shell 菜单共用 `ShellDirectoryMenuBuilder`，保证条目与注入语义一致。
-  private func showGitMenu(from sender: NSView) {
-    popUp(ShellDirectoryMenuBuilder.gitMenu(tab: tab, preferences: preferences), from: sender)
-  }
-
-  private func showSplitMenu(from sender: NSView) {
-    let menu = NSMenu()
-    for (title, direction) in [
-      ("Split Left", SplitDirection.left), ("Split Right", .right),
-      ("Split Up", .up), ("Split Down", .down),
-    ] {
-      menu.addItem(ActionMenuItem(title: title) { [weak self] in
-        self?.model.splitSelectedTab(direction)
-      })
+  func control(_ control: NSControl, textView: NSTextView, doCommandBy command: Selector) -> Bool {
+    if command == #selector(NSResponder.cancelOperation(_:)) { dismiss(); return true }
+    if command == #selector(NSResponder.insertTab(_:)) {
+      menuPresenter.close()
+      view.window?.makeFirstResponder(navigationRows.first(where: \.isEnabled))
+      return true
     }
-    popUp(menu, from: sender)
+    return false
   }
 
-  private func openNotificationSettings() {
-    (NSApp.delegate as? AsterAppDelegate)?.showSettings(section: .shell)
-  }
-
-  private func popUp(_ menu: NSMenu, from sender: NSView) {
-    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY - 2), in: sender)
+  override func viewWillDisappear() {
+    isDismissing = true
+    stopDismissalMonitoring()
+    gitLoadTask?.cancel()
+    menuPresenter.close()
+    super.viewWillDisappear()
   }
 }

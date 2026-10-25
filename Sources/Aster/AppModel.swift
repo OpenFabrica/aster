@@ -177,6 +177,7 @@ enum WorkflowRecipeWorkspaceMapper {
 final class WorkspacePaneRuntime: ObservableObject, Identifiable {
   let id: UUID
   private(set) var descriptor: PaneDescriptor
+  let openedAt = Date()
   let terminalSession: TerminalSession?
   @Published var documentText = ""
   @Published private(set) var documentError: String?
@@ -370,6 +371,9 @@ final class TerminalTabItem: ObservableObject, Identifiable {
   /// 去刷新窗口标题、Dock 或 Agent 会话名。
   let titleColorChanged = PassthroughSubject<Void, Never>()
   private var titleState: TerminalTitleState
+  private(set) var titleEditorState: TabTitleEditorState
+  /// Otty privileges belong to the tab and are shared by its split terminal panes.
+  let privilegesState = PanePrivilegesState()
   /// 各 Pane 精确绑定的 Agent 会话标题（运行态，不进快照；恢复会话后由绑定事件重建）。
   /// 有值时标签行与标题栏胶囊优先显示它；用户显式固定名（`.name` 覆盖）仍然最高优先。
   private var paneAgentSessionTitles: [UUID: String] = [:]
@@ -469,7 +473,9 @@ final class TerminalTabItem: ObservableObject, Identifiable {
 
     // Agent 前台进程跨越多个 turn；权威 idle 到达后不能被普通进程探针重新标成运行中。
     let ordinarySessions = sessions.filter { $0.activeAgentProvider == nil }
-    if ordinarySessions.contains(where: { $0.progressState.reportsError }) { return .error }
+    if ordinarySessions.contains(where: {
+      $0.resolvedPrivileges.badgeCommandFailure && $0.progressState.reportsError
+    }) { return .error }
     if ordinarySessions.contains(where: \.awaitingInput) { return .awaitingInput }
     if let active = runtimes[activePaneID]?.terminalSession, active.activeAgentProvider == nil {
       switch active.progressState {
@@ -481,12 +487,16 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     if ordinarySessions.contains(where: { $0.progressState.isWorking || $0.hasRunningCommand }) {
       return .running(percent: nil)
     }
-    if ordinarySessions.contains(where: \.showsCompletedFlash) { return .completed }
     if ordinarySessions.contains(where: {
+      $0.resolvedPrivileges.badgeCommandFinish && $0.showsCompletedFlash
+    }) { return .completed }
+    if ordinarySessions.contains(where: {
+      guard $0.resolvedPrivileges.badgeCommandFinish else { return false }
       if case .finished = $0.progressState { return true }
       return $0.lastCommandExitStatus == 0
     }) { return .finished }
     if ordinarySessions.contains(where: {
+      guard $0.resolvedPrivileges.badgeCommandFailure else { return false }
       if case .error = $0.progressState { return true }
       return $0.lastCommandExitStatus.map { $0 != 0 } == true
     }) { return .error }
@@ -539,6 +549,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     self.autoTitleColorIndex = autoTitleColorIndex
     let initialTitleState = (titleState ?? TerminalTitleState(fallback: title)).normalized()
     self.titleState = initialTitleState
+    self.titleEditorState = TabTitleEditorState(override: initialTitleState.tabOverride)
     self.title = initialTitleState.tabTitle
     let initial =
       layout
@@ -594,6 +605,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
       autoTitleColorIndex: snapshot.autoTitleColorIndex
     )
     workspaceGroupID = snapshot.workspaceGroupID
+    titleEditorState = snapshot.titleEditorState ?? titleEditorState
   }
 
   var activeRuntime: WorkspacePaneRuntime? { runtimes[activePaneID] }
@@ -608,6 +620,13 @@ final class TerminalTabItem: ObservableObject, Identifiable {
   }
   var windowTitle: String { titleState.windowTitle }
   var tabTitleOverride: TerminalTitleOverride { titleState.tabOverride }
+
+  /// 命名编辑器切回 Name 时使用未加前缀的程序标题；未收到标题时允许为空。
+  /// 不取展示层的目录回退或固定名称，否则会把它们误提交成新的固定名称。
+  var automaticTitleForNaming: String {
+    paneAgentSessionTitles[activePaneID]
+      ?? (titleState.programIconName.isEmpty ? titleState.programWindowTitle : titleState.programIconName)
+  }
 
   /// 活动 Pane 的 Agent 会话标题。用户显式固定名优先级更高，此时返回 nil，
   /// 标题胶囊与标签行回落到固定名/自动标题。
@@ -679,8 +698,12 @@ final class TerminalTabItem: ObservableObject, Identifiable {
 
   /// 固定名称、动态前缀和自动模式的统一入口；空固定名按领域规则回退为自动标题。
   func setTabTitleOverride(_ override: TerminalTitleOverride) {
-    let normalized = override.normalized()
-    guard titleState.tabOverride != normalized else { return }
+    titleEditorState.apply(override)
+    let normalized = titleEditorState.effectiveOverride
+    guard titleState.tabOverride != normalized else {
+      onWorkspaceChanged?()
+      return
+    }
     titleState.tabOverride = normalized
     for paneID in paneTitleStates.keys {
       paneTitleStates[paneID]?.tabOverride = normalized
@@ -1161,6 +1184,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
       title: title,
       layout: layout,
       titleState: titleState,
+      titleEditorState: titleEditorState,
       createdAt: createdAt,
       updatedAt: updatedAt,
       agentSessions: agentSessions.isEmpty ? nil : agentSessions,
@@ -1236,6 +1260,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
   /// 订阅进入该 Pane 自己的桶，因此对同一个 runtime 重复接线不会叠加旧标签的监听。
   private func attach(_ runtime: WorkspacePaneRuntime) {
     let descriptor = runtime.descriptor
+    runtime.terminalSession?.privilegesState = privilegesState
     runtimes[descriptor.id] = runtime
     var cancellables: Set<AnyCancellable> = []
     defer { paneCancellables[descriptor.id] = cancellables }
@@ -1308,6 +1333,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
       // 普通进度、显式徽章、Agent lifecycle 与完成未读只改变 Tab 行尾和 Dock。
       // `@Published` 在 willSet 发出值，延后一轮读取聚合徽章，避免显示上一状态。
       Publishers.MergeMany(
+        session.privilegesState.didChange.eraseToAnyPublisher(),
         session.$hasRunningCommand.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
         session.$lastCommandExitStatus.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
         session.$progressState.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
@@ -4089,7 +4115,7 @@ final class AppModel: ObservableObject {
             return
           }
           do {
-            try service.installLocalSpec(spec)
+            try service.installLocalSpec(spec, learned: true)
             completion(
               .success("已学习 \(name)：\(spec.subcommands.count) 个子命令、\(spec.options.count) 个选项\n"))
           } catch {

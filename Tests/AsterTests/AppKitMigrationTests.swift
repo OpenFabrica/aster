@@ -1499,7 +1499,7 @@ func workspaceTitlePopoverExposesWorkingActions() throws {
   RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
   let popover = try #require(
-    NSApp.windows.compactMap(\.contentView).first {
+    NSApp.windows.filter(\.isVisible).compactMap(\.contentView).first {
       $0.identifier?.rawValue == "workspace-title-popover"
         || $0.descendants.contains {
           $0.identifier?.rawValue == "workspace-title-popover"
@@ -1513,11 +1513,12 @@ func workspaceTitlePopoverExposesWorkingActions() throws {
     })
   let labels = root.descendants.compactMap { ($0 as? NSTextField)?.stringValue }
   let buttons = root.descendants.compactMap { $0 as? NSButton }
-  #expect(labels.contains("WORKING DIRECTORY"))
+  #expect(labels.contains(L("工作目录")))
   #expect(labels.contains((directory as NSString).abbreviatingWithTildeInPath + "/"))
   for identifier in [
     "workspace-title-copy-path", "workspace-title-reveal-finder", "workspace-title-open-in",
     "workspace-title-git", "workspace-title-notifications", "workspace-title-split",
+    "workspace-title-about",
     "workspace-title-find", "workspace-title-global-find", "workspace-title-jump",
     "workspace-title-palette",
   ] {

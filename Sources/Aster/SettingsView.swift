@@ -107,6 +107,10 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
   /// 测试需要驱动 scope 切换,保持 internal;界面仍只经分段控件修改。
   var fontScope: FontScope = .computed
   private var message: String?
+  /// 数据库更新的瞬时展示状态；规格内容仍由 AutocompleteService 持有。
+  private var autocompleteUpdateState = "idle"
+  private var autocompleteUpdateMessage: String?
+  private var autocompleteLastCheckedAt: Date?
   private var cancellables: Set<AnyCancellable> = []
   private var refreshScheduled = false
   /// 原生控件已经在点击时就地更新自己的视觉状态。控件回调同步写配置期间，忽略这次
@@ -1194,12 +1198,6 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
           self?.preferences.configuration.controls.autocompleteInlineSuggestion = value
         },
         toggleRow(
-          L("剪贴板建议"), L("复制内容后，在空提示符上以灰字提示剪贴板内容，回车只粘贴不执行"),
-          value: preferences.configuration.controls.resolvedClipboardSuggestion
-        ) { [weak self] value in
-          self?.preferences.configuration.controls.clipboardSuggestion = value
-        },
-        toggleRow(
           L("本机学习"), L("在本机脱敏记录命令，并允许 README 与沙箱 help 规格学习"),
           value: preferences.configuration.controls.resolvedAutocompleteOnDeviceLearning
         ) { [weak self] value in
@@ -1237,7 +1235,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
         actionRow(
           L("本机学习数据"), L("清除历史、固定命令及 frecency；内置和本地规格保留"),
           title: L("清除")
-        ) { [weak self] in self?.clearAutocompleteLearning() },
+        ) { [weak self] in self?.sendWebMessage(["type": "openAutocompleteClear"]) },
       ]),
       sectionTitle(L("鼠标")),
       card([
@@ -1400,63 +1398,86 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     return L("v\(version) · \(String(database.commands.count)) 条命令")
   }
 
+  private var autocompleteCompletionStatus: [String: Any] {
+    let database = AutocompleteService.shared?.specDatabase
+    let startupError = database == nil ? AutocompleteService.startupError : nil
+    var status: [String: Any] = [
+      "state": startupError == nil ? autocompleteUpdateState : "failure",
+      "currentDate": database?.sourceDate ?? "",
+      "specCount": database?.commands.count ?? 0,
+      "progress": 0,
+    ]
+    if let detail = startupError?.localizedDescription ?? autocompleteUpdateMessage {
+      status["message"] = detail
+    }
+    if let autocompleteLastCheckedAt {
+      status["lastCheckedAt"] = ISO8601DateFormatter().string(from: autocompleteLastCheckedAt)
+    }
+    return status
+  }
+
+  private func pushAutocompleteStatus() {
+    sendWebMessage(["type": "autocompleteStatus", "status": autocompleteCompletionStatus])
+  }
+
   private func updateAutocompleteSpecs() {
-    guard let service = AutocompleteService.shared else {
-      message = L("Autocomplete 规格服务不可用。")
-      refresh()
+    guard autocompleteUpdateState != "running" else { return }
+    guard let service = AutocompleteService.shared ?? AutocompleteService.retrySharedInitialization() else {
+      autocompleteUpdateState = "failure"
+      autocompleteUpdateMessage = AutocompleteService.startupError?.localizedDescription
+        ?? L("Autocomplete 规格服务不可用。")
+      pushAutocompleteStatus()
       return
     }
-    message = L("正在更新补全数据库…")
-    refresh()
+    autocompleteUpdateState = "running"
+    autocompleteUpdateMessage = nil
+    pushAutocompleteStatus()
     Task { @MainActor [weak self, service] in
       do {
         _ = try await service.updateNow()
-        self?.message = L("补全数据库已更新：\(Self.autocompleteDatabaseStatus(service))。")
+        self?.autocompleteUpdateState = "idle"
+        self?.autocompleteUpdateMessage = nil
+        self?.autocompleteLastCheckedAt = Date()
       } catch {
-        self?.message = L("命令规格更新失败：\(error.localizedDescription)")
+        self?.autocompleteUpdateState = "failure"
+        self?.autocompleteUpdateMessage = L("命令规格更新失败：\(error.localizedDescription)")
       }
-      self?.refresh()
+      self?.pushAutocompleteStatus()
     }
   }
 
-  private func clearAutocompleteLearning() {
-    guard let service = AutocompleteService.shared else {
-      message = L("Autocomplete 规格服务不可用。")
-      refresh()
-      return
+  /// 网页必须显式提交五个布尔值。拒绝缺项、附加项或数值，防止清理范围悄然扩大。
+  static func autocompleteClearSelection(_ payload: [String: Any]) throws -> AutocompleteClearSelection {
+    let fields: [(String, AutocompleteClearSelection)] = [
+      ("history", .history), ("fullLines", .fullLines), ("helpProbe", .helpProbe),
+      ("learnedFolder", .learnedFolder), ("learnedSpecs", .learnedSpecs),
+    ]
+    guard Set(payload.keys) == Set(fields.map(\.0)) else { throw SettingsWebBridgeError.invalidValue }
+    var selection: AutocompleteClearSelection = []
+    for (key, category) in fields {
+      guard let value = payload[key] as? NSNumber,
+        CFGetTypeID(value) == CFBooleanGetTypeID()
+      else { throw SettingsWebBridgeError.invalidValue }
+      if value.boolValue { selection.insert(category) }
     }
-    let history = NSButton(checkboxWithTitle: L("命令历史"), target: nil, action: nil)
-    let pinned = NSButton(checkboxWithTitle: L("固定命令"), target: nil, action: nil)
-    let folders = NSButton(checkboxWithTitle: L("目录频率数据"), target: nil, action: nil)
-    history.state = .on
-    pinned.state = .on
-    folders.state = .on
-    let stack = NSStackView(views: [history, pinned, folders])
-    stack.orientation = .vertical
-    stack.alignment = .leading
-    stack.spacing = 7
-    stack.frame.size = NSSize(width: 260, height: 72)
-    let alert = NSAlert()
-    alert.messageText = L("清除补全数据")
-    alert.informativeText = L("内置规格和手动更新的命令数据库不会被删除。")
-    alert.accessoryView = stack
-    alert.addButton(withTitle: L("清除"))
-    alert.addButton(withTitle: L("取消"))
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
-    var selection: AutocompleteService.LearningClearSelection = []
-    if history.state == .on { selection.insert(.history) }
-    if pinned.state == .on { selection.insert(.pinnedCommands) }
-    guard !selection.isEmpty || folders.state == .on else { return }
+    return selection
+  }
+
+  private func clearAutocompleteLearning(_ payload: [String: Any]) {
     do {
-      try service.clearLearning(selection)
-      if folders.state == .on {
-        NotificationCenter.default.post(name: .asterClearFrequentFolders, object: nil)
+      let selection = try Self.autocompleteClearSelection(payload)
+      guard !selection.isEmpty else { return }
+      guard let service = AutocompleteService.shared ?? AutocompleteService.retrySharedInitialization() else {
+        sendWebToast(AutocompleteService.startupError?.localizedDescription
+          ?? L("Autocomplete 规格服务不可用。"), level: "error")
+        return
       }
-      message = L("已清除选中的本机补全数据。")
+      try service.clearData(selection: selection)
+      pushAutocompleteStatus()
+      sendWebToast(L("已清除选中的本机补全数据。"))
     } catch {
-      message = L("清除失败：\(error.localizedDescription)")
+      sendWebToast(L("清除失败：\(error.localizedDescription)"), level: "error")
     }
-    refresh()
   }
 
   private func editorViews() -> [NSView] {
@@ -3368,6 +3389,7 @@ extension SettingsViewController: WKNavigationDelegate {
       "controls.autocompleteOnDeviceLearning": configuration.controls.resolvedAutocompleteOnDeviceLearning,
       "controls.autocompleteSkipSecrets": configuration.controls.resolvedAutocompleteSkipSecrets,
       "controls.autocompleteDatabaseStatus": autocompleteDatabaseStatus,
+      "controls.autocompleteCompletionStatus": autocompleteCompletionStatus,
       "controls.autocompleteHistoryIgnore": configuration.controls.resolvedAutocompleteHistoryIgnore.joined(separator: ", "),
       "controls.autocompleteDescriptionLanguage": configuration.controls.resolvedAutocompleteDescriptionLanguage.rawValue,
       "controls.ipcAllowSendKeys": configuration.controls.resolvedIPCAllowSendKeys,
@@ -4317,7 +4339,7 @@ extension SettingsViewController: WKNavigationDelegate {
       completeWebMutation(request, succeeded: true)
     case "updateAutocomplete": updateAutocompleteSpecs()
     case "checkForUpdates": checkForUpdatesNow()
-    case "clearAutocomplete": clearAutocompleteLearning()
+    case "clearAutocomplete": clearAutocompleteLearning(payload)
     case "installAgent", "uninstallAgent":
       guard let id = payload["provider"] as? String, let provider = AgentProvider(rawValue: id) else {
         sendWebToast(L("智能体标识无效"), level: "error"); return
@@ -6500,6 +6522,7 @@ extension AutocompleteShortcut: SettingsEnumOption {
     switch self {
     case .tab: "Tab"
     case .tabAndRightArrow: L("Tab 或 →")
+    case .rightArrow: "→"
     case .controlSpace: "Control-Space"
     case .disabled: L("关闭")
     }

@@ -1,8 +1,8 @@
 import AppKit
 import AsterCore
 
-/// Shell 菜单与工作区标题 popover 共用的「打开方式 / Git」菜单构建器。
-/// 单一真值来源：菜单栏与 popover 展示的条目集合、可用性与注入语义必须一致。
+/// 菜单栏 Shell 的「打开方式 / Git」菜单构建器，保留终端命令预填语义。
+/// Pane 顶部菜单独立使用 PaneDirectoryApplications / PaneGitMenu 的应用启动和 Git 流程。
 @MainActor
 enum ShellDirectoryMenuBuilder {
 

@@ -1,169 +1,146 @@
-// 使用频次（全局 / 目录两层）、命令间上下文转移与脏历史过滤对补全排序的影响。
+// 词频跨目录复用；整行历史按目录保存；上一个命令不额外改变候选排序。
 import Foundation
 import Testing
 
 @testable import Aster
 @testable import AsterCore
 
-@Test("其它目录的使用习惯让新目录里的命令名优先补常用命令")
+@Test("全局命令词频可以影响其它目录排序，但不让多个命令名自动预览")
 @MainActor
 func usageRankingPrefersGloballyUsedCommandName() throws {
   let root = try makeUsageRankingDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let service = try makeUsageRankingService(root)
-  let fresh = root.appendingPathComponent("fresh").path
-  let before = service.suggestions(
-    line: "cl", directory: fresh, sessionIdentifier: "s", controls: .init())
-  #expect(before.candidates.first?.insertText != "claude")
-
   for _ in 0..<3 {
-    service.record(
-      command: "claude --continue", directory: root.appendingPathComponent("other").path,
-      exitStatus: 0, ignorePatterns: [], knownOptions: [], sessionIdentifier: "s")
+    #expect(service.record(
+      command: "git status", directory: root.appendingPathComponent("other").path,
+      exitStatus: 0, ignorePatterns: [], knownOptions: [], sessionIdentifier: "s"))
   }
-  let after = service.suggestions(
-    line: "cl", directory: fresh, sessionIdentifier: "s", controls: .init())
-
-  #expect(after.candidates.first?.insertText == "claude")
-  #expect(after.ghostText == "aude")
+  let result = service.suggestions(
+    line: "gi", directory: root.appendingPathComponent("fresh").path,
+    sessionIdentifier: "s", controls: .init())
+  let first = try #require(result.candidates.first)
+  #expect(first.insertText == "git")
+  #expect(first.kind == .command)
+  #expect((first.historyScore ?? 0) > 0)
+  #expect(result.candidates.count > 1)
+  #expect(!CompletionPresentation.leaderIsClear(result.candidates))
 }
 
-@Test("常用子命令在同前缀子命令中靠前")
+@Test("识别过的子命令不额外记录词频，静态候选保留原顺序")
 @MainActor
-func usageRankingPrefersUsedSubcommand() throws {
+func usageRankingKeepsKnownSubcommandOrder() throws {
   let root = try makeUsageRankingDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let service = try makeUsageRankingService(root)
   let fresh = root.appendingPathComponent("fresh").path
   let before = service.suggestions(
     line: "git ch", directory: fresh, sessionIdentifier: "s", controls: .init())
-  #expect(before.candidates.first?.insertText != "cherry-pick")
-
+  #expect(before.candidates.map(\.insertText) == ["checkout", "cherry-pick"])
   for hash in ["a1", "b2"] {
-    service.record(
+    #expect(service.record(
       command: "git cherry-pick \(hash)", directory: root.appendingPathComponent("other").path,
-      exitStatus: 0, ignorePatterns: [], knownOptions: [], sessionIdentifier: "s")
+      exitStatus: 0, ignorePatterns: [], knownOptions: [], sessionIdentifier: "s"))
   }
   let after = service.suggestions(
     line: "git ch", directory: fresh, sessionIdentifier: "s", controls: .init())
-
-  #expect(after.candidates.first?.insertText == "cherry-pick")
+  #expect(after.candidates.map(\.insertText) == before.candidates.map(\.insertText))
+  #expect(!service.completionStore.state.history.contains { $0.token == "cherry-pick" })
+  #expect(service.completionStore.state.history.contains { $0.command == "git cherry-pick" && $0.token == "a1" })
+  #expect(after.candidates.first?.clearLeader == false)
+  #expect(!CompletionPresentation.leaderIsClear(after.candidates))
 }
 
-@Test("用过的参数值跨目录补出，有活数据的槽位（git 分支）不混入别的仓库的值")
+@Test("无规格命令的参数词频跨目录复用，并按命令上下文隔离")
 @MainActor
-func usageRankingOffersGlobalArgumentValues() throws {
+func usageRankingOffersGlobalArgumentValuesForUnknownCommands() throws {
   let root = try makeUsageRankingDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let service = try makeUsageRankingService(root)
   let other = root.appendingPathComponent("other").path
-  for command in ["ssh build-mac", "git checkout feat/elsewhere"] {
-    service.record(
-      command: command, directory: other, exitStatus: 0, ignorePatterns: [],
-      knownOptions: [], sessionIdentifier: "s")
+  for command in ["zzhistorytool alpha", "zzhistorytool beta", "zzotherhistorytool aardvark"] {
+    #expect(service.record(command: command, directory: other, exitStatus: 0,
+      ignorePatterns: [], knownOptions: [], sessionIdentifier: "s"))
   }
   let fresh = root.appendingPathComponent("fresh").path
   func query(_ line: String) -> AutocompleteResult {
     service.suggestions(line: line, directory: fresh, sessionIdentifier: "s", controls: .init())
   }
-
-  #expect(query("ssh b").candidates.contains { $0.displayText == "build-mac" })
-  #expect(!query("git checkout f").candidates.contains { $0.displayText == "feat/elsewhere" })
+  #expect(query("zzhistorytool a").candidates.contains { $0.displayText == "alpha" })
+  #expect(query("zzhistorytool b").candidates.contains { $0.displayText == "beta" })
+  #expect(!query("zzhistorytool a").candidates.contains { $0.displayText == "aardvark" })
+  #expect(query("zzotherhistorytool a").candidates.contains { $0.displayText == "aardvark" })
+  #expect(!query("zzotherhistorytool a").candidates.contains { $0.displayText == "alpha" })
+  #expect(!query("zzhistorytool a").candidates.contains { $0.kind == .learnedCommand })
 }
 
-@Test("上一条命令决定下一条的推荐：git add 之后先推荐 git commit")
+@Test("会话上一条命令不同也使用相同历史排序，不产生命令转移加分")
 @MainActor
-func usageRankingUsesPreviousCommandContext() throws {
+func usageRankingDoesNotUsePreviousCommandContext() throws {
   let root = try makeUsageRankingDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let service = try makeUsageRankingService(root)
   let project = root.appendingPathComponent("project").path
-  func run(_ command: String, exitStatus: Int = 0) {
-    service.record(
-      command: command, directory: project, exitStatus: exitStatus, ignorePatterns: [],
-      knownOptions: [], sessionIdentifier: "s")
-  }
   for _ in 0..<3 {
-    run("git add .")
-    run("git commit -m wip")
+    #expect(service.record(command: "git add .", directory: project, exitStatus: 0,
+      ignorePatterns: [], knownOptions: [], sessionIdentifier: "after-add"))
+    #expect(service.record(command: "git commit -m wip", directory: project, exitStatus: 0,
+      ignorePatterns: [], knownOptions: [], sessionIdentifier: "after-commit"))
   }
-  run("git add .")
-
+  let stored = service.completionStore.state
   let afterAdd = service.suggestions(
-    line: "git ", directory: project, sessionIdentifier: "s", controls: .init())
-  #expect(afterAdd.candidates.first?.resultingLine(from: "git ")?.hasPrefix("git commit") == true)
-
-  // 失败的命令断开上下文：不再按 git add 的转移加分。
-  run("git add missing-file", exitStatus: 1)
-  let afterFailure = service.suggestions(
-    line: "git ", directory: project, sessionIdentifier: "s", controls: .init())
-  let commitScore = afterFailure.candidates.first {
-    $0.resultingLine(from: "git ") == "git commit -m wip"
-  }?.score
-  let addScore = afterAdd.candidates.first {
-    $0.resultingLine(from: "git ") == "git commit -m wip"
-  }?.score
-  #expect(commitScore != nil && addScore != nil && commitScore! < addScore!)
+    line: "git ", directory: project, sessionIdentifier: "after-add", controls: .init())
+  let afterCommit = service.suggestions(
+    line: "git ", directory: project, sessionIdentifier: "after-commit", controls: .init())
+  #expect(afterAdd.candidates.map(\.insertText) == afterCommit.candidates.map(\.insertText))
+  #expect(afterAdd.candidates.map(\.kind) == afterCommit.candidates.map(\.kind))
+  #expect(afterAdd.ghostText == afterCommit.ghostText)
+  #expect(service.completionStore.state == stored)
+  #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("state/transitions.json").path))
 }
 
-@Test("清空历史同时清空命令转移")
+@Test("清除词频与整行历史分别生效，重载后保留对应结果")
 @MainActor
-func usageRankingClearsTransitionsWithHistory() throws {
+func usageRankingClearsHistoryAndFullLinesIndependently() throws {
   let root = try makeUsageRankingDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let service = try makeUsageRankingService(root)
   let project = root.appendingPathComponent("project").path
-  for command in ["ls", "pwd", "ls", "pwd", "ls"] {
-    service.record(
-      command: command, directory: project, exitStatus: 0, ignorePatterns: [],
-      knownOptions: [], sessionIdentifier: "s")
-  }
-  let transitionsURL = root.appendingPathComponent("state/transitions.json")
-  #expect(FileManager.default.fileExists(atPath: transitionsURL.path))
+  #expect(service.record(command: "git cherry-pick a1", directory: project, exitStatus: 0,
+    ignorePatterns: [], knownOptions: [], sessionIdentifier: "s"))
+  #expect(!service.completionStore.state.history.isEmpty)
+  try service.clearData(selection: .history)
+  #expect(service.completionStore.state.history.isEmpty)
+  #expect(service.completionStore.state.fullLines.map(\.command) == ["git cherry-pick a1"])
+  #expect(service.suggestions(line: "git ch", directory: project, sessionIdentifier: "s", controls: .init())
+    .candidates.contains { $0.kind == .learnedCommand && $0.insertText == "git cherry-pick a1" })
 
-  try service.clearLearning()
+  try service.clearData(selection: .fullLines)
   let reloaded = try makeUsageRankingService(root)
-
-  let data = try Data(contentsOf: transitionsURL)
-  let table = try JSONDecoder().decode(AutocompleteTransitionTable.self, from: data)
-  #expect(table.counts.isEmpty)
-  #expect(reloaded.suggestions(
-    line: "", directory: project, sessionIdentifier: "s", controls: .init()
-  ).candidates.isEmpty)
+  #expect(reloaded.completionStore.state.history.isEmpty)
+  #expect(reloaded.completionStore.state.fullLines.isEmpty)
+  let result = reloaded.suggestions(line: "git ch", directory: project, sessionIdentifier: "s", controls: .init())
+  #expect(result.candidates.map(\.insertText) == ["checkout", "cherry-pick"])
 }
 
-@Test("终端应答残留与 TUI 的 ! 前缀不进入学习")
+@Test("提交拒绝空行、前导空格和控制字符，并保留合法命令名称")
 @MainActor
-func usageRankingRejectsImplausibleCommands() throws {
+func usageRankingRejectsInvalidSubmission() throws {
   let root = try makeUsageRankingDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
   let service = try makeUsageRankingService(root)
   func record(_ command: String) -> Bool {
-    service.record(
-      command: command, directory: root.path, exitStatus: 0, ignorePatterns: [],
-      knownOptions: [], sessionIdentifier: "s")
+    service.record(command: command, directory: root.path, exitStatus: 0,
+      ignorePatterns: [], knownOptions: [], sessionIdentifier: "s")
   }
-
-  #expect(!record("11;rgb:ffff/ffff/ffff>|ghostty 1.3.2"))
-  #expect(!record("! ssh host uptime"))
+  #expect(!record(""))
+  #expect(!record(" ls -la"))
+  #expect(!record("ls\nwhoami"))
+  #expect(!record("\u{1B}[0mwhoami"))
   #expect(record("ls -la"))
-  #expect(AutocompleteLearningDatabase.isPlausibleCommand("7z x archive.7z"))
-  #expect(AutocompleteLearningDatabase.isPlausibleCommand("2to3 script.py"))
-}
-
-@Test("转移加分：只出现一次的巧合不加分，重复出现才加分且有上限")
-func transitionTableDiscountsSingleObservation() throws {
-  let spec = AutocompleteSpecDatabase(sourceRevision: "test", commands: [])
-  var table = AutocompleteTransitionTable()
-  table.record(previous: "make", next: "ls", specDatabase: spec)
-  let once = table.bonus(previous: "make", candidateLine: "ls -la", specDatabase: spec)
-  for _ in 0..<50 { table.record(previous: "make", next: "ls", specDatabase: spec) }
-  let many = table.bonus(previous: "make", candidateLine: "ls", specDatabase: spec)
-
-  #expect(once < 20)
-  #expect(many > once)
-  #expect(many <= AutocompleteTransitionTable.maximumBonus)
-  #expect(table.bonus(previous: "pwd", candidateLine: "ls", specDatabase: spec) == 0)
+  #expect(record("7z x archive.7z"))
+  #expect(record("2to3 script.py"))
+  #expect(Set(service.completionStore.state.fullLines.map(\.command)) == ["ls -la", "7z x archive.7z", "2to3 script.py"])
 }
 
 @MainActor

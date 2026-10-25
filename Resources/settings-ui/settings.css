@@ -538,6 +538,37 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .settings-dialog-list { box-sizing: border-box; width: 100%; min-height: 180px; padding: 10px; resize: vertical; text-align: left; font-family: "SF Mono", Menlo, monospace; }
 .settings-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .settings-dialog-actions.split { justify-content: space-between; }
+.autocomplete-settings .card { border-radius: 12px; }
+.autocomplete-settings .group-title { color: var(--text-primary); font-size: 12px; font-weight: 400; letter-spacing: 0; margin-bottom: 14px; }
+.autocomplete-settings .setting-row { position: relative; min-height: 54px; padding: 10px 16px; border-top: 0; }
+.autocomplete-settings .setting-row + .setting-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 1px; background: var(--border-subtle); }
+.autocomplete-settings .setting-label { font-weight: 400; }
+.autocomplete-subheading { margin: 0; padding: 14px 16px 6px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.autocomplete-subheading:not(:first-child) { border-top: 1px solid var(--border-subtle); padding-top: 14px; }
+.autocomplete-subheading + .setting-row { border-top: 0; }
+.autocomplete-settings .setting-control select { appearance: none; width: 120px; height: 28px; padding: 0 28px 0 14px; border-radius: 20px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='14' viewBox='0 0 10 14'%3E%3Cpath d='M1 5l4-4 4 4M1 9l4 4 4-4' fill='none' stroke='%23808080' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-position: right 12px center; background-repeat: no-repeat; background-size: 8px 12px; }
+.autocomplete-settings .control, .autocomplete-settings .action-button { border: 0; border-radius: 20px; box-shadow: none; font-weight: 400; }
+@media (prefers-color-scheme: light) {
+  .autocomplete-settings .control, .autocomplete-settings .action-button { background-color: #eee; }
+}
+.autocomplete-settings .toggle { --toggle-checked: #007aff; --toggle-knob: #fff; }
+.autocomplete-progress { width: 120px; height: 5px; overflow: hidden; border-radius: 3px; background: var(--bg-hover); }
+.autocomplete-progress > div { height: 100%; background: var(--accent); transition: width 100ms linear; }
+.autocomplete-error { color: var(--danger); }
+.autocomplete-clear-overlay { padding: 24px; background: rgb(0 0 0 / 25%); }
+.autocomplete-clear-dialog { width: 460px; max-width: calc(100vw - 48px); padding: 18px 22px 16px; overflow-y: auto; }
+.autocomplete-clear-dialog h2 { font-size: 13.5px; }
+.autocomplete-clear-dialog p { margin-top: 6px; font-size: 11.5px; }
+.autocomplete-clear-choice { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; cursor: pointer; }
+.autocomplete-clear-choice input { margin: 2px 0 0; }
+.autocomplete-clear-choice span { display: flex; flex-direction: column; gap: 2px; }
+.autocomplete-clear-choice strong { font-weight: 400; }
+.autocomplete-clear-choice small { color: var(--text-secondary); font-size: 10.5px; }
+.autocomplete-clear-confirm:disabled { opacity: .5; cursor: not-allowed; }
+.autocomplete-clear-dialog .action-button { border: 0; border-radius: 20px; background: var(--bg-hover); box-shadow: none; font-weight: 400; }
+.autocomplete-help { display: inline-block; position: relative; margin-left: 7px; vertical-align: 1px; }
+.autocomplete-help button { width: 13px; height: 13px; padding: 0; border: 1.3px solid var(--text-tertiary); border-radius: 50%; background: transparent; color: var(--text-tertiary); font: 600 10px/11px -apple-system, sans-serif; cursor: help; }
+.autocomplete-help-text { position: absolute; z-index: 20; top: 19px; left: -20px; width: min(300px, 55vw); padding: 9px 11px; border: 1px solid var(--border-active); border-radius: 6px; background: var(--bg-window); color: var(--text-primary); font-size: 11px; font-weight: 400; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); }
 .protocol-dialog { display: flex; flex-direction: column; overflow: hidden; }
 .protocol-dialog > :not(.protocol-list) { flex-shrink: 0; }
 .protocol-list { min-height: 0; max-height: 45vh; overflow-y: auto; margin-bottom: 10px; }

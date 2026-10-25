@@ -565,7 +565,7 @@ final class AutocompleteDynamicCache {
 }
 
 /// Autocomplete 的应用级边界：组合签名 Bundle 规格、用户手动更新、本地 help 规格、
-/// README 和脱敏学习库。除 `updateNow()` 外不发起网络请求，也不会自动扫描项目脚本。
+/// README 和五类独立学习数据。除 `updateNow()` 外不发起网络请求，也不会自动扫描项目脚本。
 @MainActor
 final class AutocompleteService {
   struct LearningClearSelection: OptionSet {
@@ -580,29 +580,12 @@ final class AutocompleteService {
 
   private let baseDirectory: URL
   private let fileManager: FileManager
-  private let learningURL: URL
+  let completionStore: CompletionStore
   private let updatedSpecURL: URL
-  private let localSpecURL: URL
   private let cliTokenURL: URL
   private var baseSpecDatabase: AutocompleteSpecDatabase
   private var localSpecDatabase: AutocompleteSpecDatabase
-  private let transitionsURL: URL
-  /// 历史整体变化（清空、固定、加载）时由调用方置空使用频次缓存；逐条执行的命令
-  /// 走增量更新，见 `record`。
-  private var learningDatabase: AutocompleteLearningDatabase
-
-  private(set) var specDatabase: AutocompleteSpecDatabase {
-    didSet { cachedUsageModel = nil }
-  }
-  /// 由学习历史推导的 token 使用频次。历史或规格变化时置空，下次查询惰性重建。
-  private var cachedUsageModel: AutocompleteUsageModel?
-  /// 命令间转移统计，单独存 `transitions.json`，不改变 `learning.json` 的格式。
-  private var transitions = AutocompleteTransitionTable()
-  /// 无规格命令是否接受路径参数的习惯，单独存 `path-habits.json`。
-  private var pathHabits = AutocompletePathHabits()
-  private let pathHabitsURL: URL
-  /// 每个会话上一条成功执行的命令，只在内存中保留；失败或重启即断开上下文。
-  private var lastCommandBySession: [String: String] = [:]
+  private(set) var specDatabase: AutocompleteSpecDatabase
   /// Shell 上报的 `$PATH` 目录建成的可执行文件名索引；没上报前用 path_helper 规则
   /// 重建的 PATH 兜底。索引在后台线程构建，建好后整体换入。
   private(set) var executableIndex = AutocompleteExecutableIndex.empty
@@ -613,24 +596,43 @@ final class AutocompleteService {
   let cliRequestService: AsterCLIRequestService
   /// 动态候选(git 分支、npm script、Homebrew formula …)的按目录缓存。
   let dynamicCache: AutocompleteDynamicCache
+  typealias DynamicQuery = @Sendable (
+    String, String, [String], AutocompleteSpecDatabase
+  ) async -> [CompletionDynamicItem]
+  private let nativeDynamicQuery: DynamicQuery
+  private var updateTask: Task<String, Error>?
+  private(set) var lastLearningError: Error?
+  /// 清除自动探测后使旧请求和各 Pane 的去重集合失效。
+  private(set) var helpProbeGeneration: UInt64 = 0
+  /// 仅本次运行中成功写入的词频获得 +10；重启后不恢复该集合。
+  private(set) var seenTokens: Set<String> = []
+  private struct PendingLearning {
+    let command: String
+    let directory: String
+    let tokens: [String]
+    let context: CompletionHistoryContext
+  }
+  private var pendingLearningBySession: [String: PendingLearning] = [:]
 
   init(
     baseDirectory: URL,
     bundledSpecURL: URL,
     fileManager: FileManager = .default,
-    dynamicReader: (any AutocompleteDynamicReader)? = nil
+    dynamicReader: (any AutocompleteDynamicReader)? = nil,
+    nativeDynamicQuery: DynamicQuery? = nil
   ) throws {
     self.baseDirectory = baseDirectory.standardizedFileURL
     self.fileManager = fileManager
+    self.nativeDynamicQuery = nativeDynamicQuery ?? { line, directory, executables, specifications in
+      await AutocompleteNativeDynamicProvider().candidates(
+        line: line, directory: directory, executables: executables, specifications: specifications)
+    }
     dynamicCache = AutocompleteDynamicCache(
       reader: dynamicReader
         ?? AutocompleteDiskDynamicReader(environment: ProcessInfo.processInfo.environment))
-    learningURL = self.baseDirectory.appendingPathComponent("learning.json")
-    updatedSpecURL = self.baseDirectory.appendingPathComponent("fig-specs.json")
-    localSpecURL = self.baseDirectory.appendingPathComponent("local-specs.json")
+    completionStore = try CompletionStore(baseDirectory: self.baseDirectory, fileManager: fileManager)
+    updatedSpecURL = completionStore.directory.appendingPathComponent("fig-specs.json")
     cliTokenURL = self.baseDirectory.appendingPathComponent("cli-token")
-    transitionsURL = self.baseDirectory.appendingPathComponent("transitions.json")
-    pathHabitsURL = self.baseDirectory.appendingPathComponent("path-habits.json")
 
     try Self.prepareStateDirectory(self.baseDirectory, fileManager: fileManager)
     cliToken = try Self.loadOrCreateCLIToken(at: cliTokenURL, fileManager: fileManager)
@@ -654,42 +656,9 @@ final class AutocompleteService {
     } else {
       baseSpecDatabase = bundled
     }
-    if let data = try? Self.readOptionalStateFile(
-      at: localSpecURL,
-      maximumBytes: AutocompleteSpecStore.maximumEncodedBytes,
-      fileManager: fileManager
-    ), let decoded = try? AutocompleteSpecStore.decode(data) {
-      localSpecDatabase = decoded
-    } else {
-      localSpecDatabase = AutocompleteSpecDatabase(sourceRevision: "local", commands: [])
-    }
-    if let data = try? Self.readOptionalStateFile(
-      at: learningURL,
-      maximumBytes: AutocompleteLearningStore.maximumEncodedBytes,
-      fileManager: fileManager
-    ), var decoded = try? AutocompleteLearningStore.decode(data) {
-      decoded.removeImplausibleEntries()
-      learningDatabase = decoded
-    } else {
-      learningDatabase = AutocompleteLearningDatabase()
-    }
+    localSpecDatabase = Self.localDatabase(from: completionStore.state)
     specDatabase = Self.merged(base: baseSpecDatabase, local: localSpecDatabase)
-    // 转移表损坏或超量时丢弃重来：它只是排序信号，不值得阻止补全启动。
-    if let data = try? Self.readOptionalStateFile(
-      at: transitionsURL, maximumBytes: 512 * 1_024, fileManager: fileManager),
-      let decoded = try? JSONDecoder().decode(AutocompleteTransitionTable.self, from: data),
-      let valid = decoded.validated()
-    {
-      transitions = valid
-    }
-    // 路径习惯同理：坏了就重学，没有证据时文件候选按原样列出。
-    if let data = try? Self.readOptionalStateFile(
-      at: pathHabitsURL, maximumBytes: 512 * 1_024, fileManager: fileManager),
-      let decoded = try? JSONDecoder().decode(AutocompletePathHabits.self, from: data),
-      let valid = decoded.validated()
-    {
-      pathHabits = valid
-    }
+    refreshLocalSpecs()
     // 首个 prompt 之前先用进程自己能推出的 PATH 建一份索引，Shell 上报后再按真实 PATH 重建。
     executableIndexDirectories = AutocompleteHelpProbe.searchPath().split(separator: ":").map(String.init)
     rebuildExecutableIndex()
@@ -735,31 +704,47 @@ final class AutocompleteService {
 
   /// 生产环境的惰性单例。测试可注入临时目录；`swift test`/`swift run` 使用进程级
   /// 临时状态，避免自动化写入真实用户的 Application Support。
-  static let shared: AutocompleteService? = {
+  private(set) static var startupError: Error?
+  private(set) static var shared: AutocompleteService? = makeShared()
+
+  /// 设置页的显式动作可在路径或备份问题修复后重试；已有实例保持原身份。
+  @discardableResult
+  static func retrySharedInitialization() -> AutocompleteService? {
+    if let shared { return shared }
+    shared = makeShared()
+    return shared
+  }
+
+  private static func makeShared() -> AutocompleteService? {
     let fileManager = FileManager.default
     let isPackagedApplication = Bundle.main.bundleURL.pathExtension == "app"
-    let base: URL
-    if isPackagedApplication,
-      let support = try? fileManager.url(
-        for: .applicationSupportDirectory,
-        in: .userDomainMask,
-        appropriateFor: nil,
-        create: true)
-    {
-      base = support.appendingPathComponent(AsterAppIdentity.current.dataDirectoryName, isDirectory: true)
-        .appendingPathComponent("Autocomplete", isDirectory: true)
-    } else {
-      base = fileManager.temporaryDirectory.appendingPathComponent(
-        "Aster-Autocomplete-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    do {
+      let base: URL
+      if isPackagedApplication {
+        let support = try fileManager.url(
+          for: .applicationSupportDirectory,
+          in: .userDomainMask,
+          appropriateFor: nil,
+          create: true)
+        base = support.appendingPathComponent(AsterAppIdentity.current.dataDirectoryName, isDirectory: true)
+          .appendingPathComponent("Autocomplete", isDirectory: true)
+      } else {
+        base = fileManager.temporaryDirectory.appendingPathComponent(
+          "Aster-Autocomplete-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+      }
+      guard let resources = AsterResourceLocations.resourcesDirectory(bundle: .main, fileManager: fileManager)
+      else { throw AutocompleteServiceError.bundledDatabaseUnavailable }
+      let service = try AutocompleteService(
+        baseDirectory: base,
+        bundledSpecURL: resources.appendingPathComponent("autocomplete/fig-specs.json"),
+        fileManager: fileManager)
+      startupError = nil
+      return service
+    } catch {
+      startupError = error
+      return nil
     }
-    guard let resources = AsterResourceLocations.resourcesDirectory(bundle: .main, fileManager: fileManager)
-    else { return nil }
-    return try? AutocompleteService(
-      baseDirectory: base,
-      bundledSpecURL: resources.appendingPathComponent("autocomplete/fig-specs.json"),
-      fileManager: fileManager
-    )
-  }()
+  }
 
   /// 首词是不是本机认得的一条命令：内置/更新/本机探测的规格库、Shell 别名、学过的
   /// 历史命令、写成路径形式的可执行文件，或 `PATH` 里确实存在的程序。
@@ -770,7 +755,7 @@ final class AutocompleteService {
     if ClipboardSuggestionPolicy.isPathLikeCommand(token) { return true }
     if specDatabase.command(named: token) != nil { return true }
     if aliases.contains(token) { return true }
-    if learningDatabase.entries.contains(where: {
+    if completionStore.state.fullLines.contains(where: {
       $0.command == token || $0.command.hasPrefix(token + " ")
     }) { return true }
     // PATH 查找走索引而不是逐次 stat：索引由 Shell 上报的真实 PATH 建成。
@@ -782,96 +767,131 @@ final class AutocompleteService {
     directory: String,
     sessionIdentifier: String,
     controls: ControlConfiguration,
-    aliases: [String] = []
+    aliases: [String] = [],
+    dynamic: [CompletionDynamicItem] = []
   ) -> AutocompleteResult {
-    let localLearningEnabled = controls.resolvedAutocompleteOnDeviceLearning
     refreshExecutableIndexIfStale()
+    let input = CompletionInput(line)
     let normalizedDirectory = directory.hasPrefix("/")
       ? URL(fileURLWithPath: directory).standardizedFileURL.path : ""
-    let folderTargets = AutocompleteFolderTargets(
-      specDatabase: specDatabase, fileManager: fileManager, directory: normalizedDirectory)
-    // 历史里 `cd` 过、但现在已被删除或改名的目录不再推荐。
-    let ranked = localLearningEnabled
-      ? learningDatabase.suggestions(
-        prefix: line,
-        directory: normalizedDirectory,
-        sessionIdentifier: sessionIdentifier
-      ).filter { !folderTargets.hasMissingTarget(command: $0.command) } : []
-    let pinnedCommands = Set(
-      learningDatabase.entries.lazy.filter {
-        $0.directory == normalizedDirectory && $0.pinCount > 0
-      }
-        .map(\.command))
-    let pinned = ranked.filter { pinnedCommands.contains($0.command) }
-    let learned = ranked.filter { !pinnedCommands.contains($0.command) }
-    let readme = localLearningEnabled ? readmeCommands(in: directory) : []
-    let descriptionLanguage = controls.resolvedAutocompleteDescriptionLanguage.resolved(
+    let state = controls.resolvedAutocompleteOnDeviceLearning ? completionStore.state : CompletionLearningState()
+    let language = controls.resolvedAutocompleteDescriptionLanguage.resolved(
       preferredLanguageIdentifiers: Locale.preferredLanguages)
-    let base = AutocompleteEngine(specDatabase: specDatabase).suggestions(
-      for: AutocompleteQuery(line: line, directory: directory),
-      learned: learned,
-      pinned: pinned,
-      readmeCommands: readme,
-      aliases: aliases,
-      dynamic: dynamicProvider(directory: normalizedDirectory),
-      language: descriptionLanguage,
-      executables: executableIndex
-    )
-    let files = fileCandidates(for: line, directory: directory)
-    var learnedArguments = localLearningEnabled ? learningDatabase.argumentCandidates(
-      line: line, directory: normalizedDirectory, sessionIdentifier: sessionIdentifier,
-      specDatabase: specDatabase) : []
-    // 历史参数同理：当前槽位要目录时，只保留仍然存在的目录。
-    let parsedLine = ShellCommandTokenizer.tokenize(line)
-    let leadingTokens = parsedLine.currentToken.isEmpty
-      ? parsedLine.tokens : Array(parsedLine.tokens.dropLast())
-    if !learnedArguments.isEmpty, folderTargets.expectsFolder(after: leadingTokens) {
-      learnedArguments.removeAll { folderTargets.isMissingFolder($0.displayText) }
+    let files = fileCandidates(for: input.segment, directory: normalizedDirectory).map { candidate in
+      AutocompleteCandidate(
+        insertText: candidate.insertText, displayText: candidate.displayText,
+        description: candidate.description, kind: candidate.kind, score: candidate.score,
+        replacement: .currentToken(start: candidate.replacement.start + input.segmentStart))
     }
-    // 使用频次与上下文加分在所有来源归并之后统一叠加，再重排一次。没有新增候选、
-    // 分数也没变时直接沿用引擎已排好的结果，避免对上千个动态候选重复排序。
-    let usage = localLearningEnabled ? usageModel() : AutocompleteUsageModel()
-    let extras = files + learnedArguments
-      + usage.learnedValueCandidates(line: line, specDatabase: specDatabase)
-    let adjusted = AutocompleteUsageModel.applyingBonuses(
-      base.candidates + extras,
-      line: line,
-      directory: normalizedDirectory,
-      usage: usage,
-      transitions: transitions,
-      previousCommand: localLearningEnabled ? lastCommandBySession[sessionIdentifier] : nil,
-      specDatabase: specDatabase)
-    guard adjusted != nil || !extras.isEmpty else { return base }
-    // 文件候选参与统一重排,而不是无条件追加在规格候选之后。旧实现让文件永远排在
-    // 最后、且只有在没有其它候选时才可能成为 ghost,于是 `cat REA<Tab>` 补不出
-    // README——只要有任何一条别的候选,文件就沉底了。
-    let combined = AutocompleteEngine.rank(adjusted ?? base.candidates + extras, line: line)
-    return .make(candidates: Array(combined.prefix(200)), line: line)
+    return CommandCompletionEngine(specifications: specDatabase).complete(
+      line: line, directory: normalizedDirectory, learning: state, aliases: aliases,
+      seenTokens: controls.resolvedAutocompleteOnDeviceLearning ? seenTokens : [],
+      executables: executableIndex,
+      readme: controls.resolvedAutocompleteOnDeviceLearning ? readmeCommands(in: normalizedDirectory) : [],
+      files: files, dynamic: dynamic, language: language)
   }
 
-  /// 惰性构建 token 使用频次模型；历史不变时每次按键复用同一份。时间衰减只在构建时
-  /// 计算，所以超过 6 小时重建一次。
-  private func usageModel() -> AutocompleteUsageModel {
-    if let cachedUsageModel, Date().timeIntervalSince(cachedUsageModel.builtAt) < 6 * 3_600 {
-      return cachedUsageModel
-    }
-    let model = AutocompleteUsageModel(
-      entries: learningDatabase.entries, specDatabase: specDatabase,
-      suppressed: learningDatabase.suppressedValues ?? [:])
-    cachedUsageModel = model
-    return model
+  /// 只对本机的完整命令位置启动原生动态查询；远端目录不会读取本机文件或执行本机程序。
+  /// 查询返回纯值，调用方必须再次核对输入、目录和生命周期后才能展示。
+  func dynamicCandidates(line: String, directory: String) async -> [CompletionDynamicItem] {
+    let input = CompletionInput(line)
+    guard directory.hasPrefix("/"), line.utf8.count <= 4_096,
+      input.parsed.tokens.count > 1 || input.parsed.currentToken.isEmpty,
+      !input.parsed.tokens.isEmpty, !Task.isCancelled
+    else { return [] }
+    let result = await nativeDynamicQuery(input.segment,
+      URL(fileURLWithPath: directory).standardizedFileURL.path, executableIndex.names, specDatabase)
+    return Task.isCancelled ? [] : result
   }
 
-  /// 为一次补全查询构造动态候选提供者。引擎只在解析到参数槽位时才回调,因此这里
-  /// 传闭包而不是提前把所有来源都读一遍。
-  private func dynamicProvider(directory: String) -> AutocompleteDynamicProvider {
-    guard directory.hasPrefix("/") else { return .empty }
-    let cache = dynamicCache
-    return AutocompleteDynamicProvider { source in
-      MainActor.assumeIsolated { cache.items(for: source, directory: directory) }
+  /// 在命令提交时记录，结束事件只负责失败清理。关闭学习会撤销该会话旧 pending。
+  @discardableResult
+  func submit(
+    command: String,
+    directory: String,
+    ignorePatterns: [String],
+    sessionIdentifier: String,
+    learningEnabled: Bool = true,
+    skipSecrets: Bool = false,
+    at date: Date = Date()
+  ) -> Bool {
+    pendingLearningBySession.removeValue(forKey: sessionIdentifier)
+    guard learningEnabled, !command.hasPrefix(" "),
+      let line = Self.learningLine(command), let folder = Self.learningDirectory(directory),
+      !ignorePatterns.contains(where: { CompletionIgnorePattern.matches(command: command, pattern: $0) })
+    else { return false }
+    let tokens = ShellCommandTokenizer.tokenize(line).tokens
+    guard let executable = tokens.first else { return false }
+    let context = CompletionHistoryContext.resolve(tokens: tokens, database: specDatabase)
+    let commandContext = CompletionHistoryContext.commandContext(command: executable, directory: folder)
+    var seen = seenTokens
+    do {
+      try completionStore.transaction { state in
+        Self.recordToken(executable, context: commandContext, at: date, state: &state, seen: &seen)
+        let arguments = Array(tokens.dropFirst(context.startIndex))
+        for token in CompletionPrivacy.recordableArguments(arguments) {
+          Self.recordToken(token, context: context.context, at: date, state: &state, seen: &seen)
+        }
+        if !folder.isEmpty && line.unicodeScalars.count <= 2_048,
+          !skipSecrets || !CompletionPrivacy.containsSecret(line)
+        {
+          Self.recordLine(line, directory: folder, at: date, in: &state.fullLines)
+        }
+      }
+      seenTokens = seen
+      pendingLearningBySession[sessionIdentifier] = PendingLearning(
+        command: line, directory: folder, tokens: tokens, context: context)
+      lastLearningError = nil
+      return true
+    } catch {
+      lastLearningError = error
+      return false
     }
   }
 
+  /// 每次提交最多处理一次结束事件；其它会话的 pending、频率和历史不被重置。
+  @discardableResult
+  func commandFinished(
+    exitStatus: Int, sessionIdentifier: String, knownOptions: Set<String>? = nil
+  ) -> Bool {
+    guard let pending = pendingLearningBySession.removeValue(forKey: sessionIdentifier) else { return false }
+    guard exitStatus != 0 else { return true }
+    var seen = seenTokens
+    let flags = knownOptions ?? self.knownOptions(forCommandLine: pending.command)
+    do {
+      try completionStore.transaction { state in
+        if exitStatus == 127 {
+          state.fullLines.removeAll { $0.command == pending.command && $0.directory == pending.directory }
+          for token in pending.tokens where !token.hasPrefix("-") {
+            Self.removeToken(token, context: pending.context.context, state: &state, seen: &seen)
+          }
+          // 原版在此使用空上下文，连相对命令也如此；不能改成其 cwd 记录上下文。
+          if let executable = pending.tokens.first {
+            Self.removeToken(executable, context: "", state: &state, seen: &seen)
+          }
+        } else if !flags.isEmpty {
+          for token in pending.tokens where token.utf8.count > 2 && token.hasPrefix("--") {
+            let name = token.split(separator: "=", maxSplits: 1).first.map(String.init) ?? token
+            if !flags.contains(name) {
+              Self.removeToken(token, context: pending.context.context, state: &state, seen: &seen)
+            }
+          }
+        }
+      }
+      seenTokens = seen
+      lastLearningError = nil
+      return true
+    } catch {
+      lastLearningError = error
+      return false
+    }
+  }
+
+  func cancelPending(sessionIdentifier: String) {
+    pendingLearningBySession.removeValue(forKey: sessionIdentifier)
+  }
+
+  /// 保留同步提交与结束的组合入口，供无需观察运行中状态的调用者使用。
   @discardableResult
   func record(
     command: String,
@@ -882,233 +902,233 @@ final class AutocompleteService {
     sessionIdentifier: String,
     at date: Date = Date()
   ) -> Bool {
-    let previous = learningDatabase
-    guard learningDatabase.complete(
-      command: command,
-      directory: directory,
-      exitStatus: exitStatus,
-      ignorePatterns: ignorePatterns,
-      knownOptions: knownOptions,
-      sessionIdentifier: sessionIdentifier,
-      at: date
-    ) else {
-      lastCommandBySession[sessionIdentifier] = nil
-      return false
-    }
-    // 派生统计只用脱敏后的文本，与学习库保存的内容一致。
-    let sanitized = AutocompleteLearningDatabase.sanitizedCommand(command)
-    // 用户又执行了被 ⇧⌫ 忘记的值：解除压制，和这次写盘一起落地。
-    if let sanitized, learningDatabase.suppressedValues != nil {
-      learningDatabase.unsuppress(slots: AutocompleteUsageModel.slots(of: sanitized, specDatabase: specDatabase))
-      if learningDatabase.suppressedValues != previous.suppressedValues { cachedUsageModel = nil }
-    }
-    do {
-      try persistLearning()
-    } catch {
-      learningDatabase = previous
-      return false
-    }
-    if let sanitized {
-      cachedUsageModel?.add(
-        command: sanitized,
-        directory: URL(fileURLWithPath: directory).standardizedFileURL.path,
-        specDatabase: specDatabase)
-      recordTransition(
-        command: sanitized, succeeded: exitStatus == 0, sessionIdentifier: sessionIdentifier)
-      if exitStatus == 0 { recordPathHabit(command: sanitized, directory: directory, at: date) }
-    }
-    return true
-  }
-
-  /// 学习无规格命令的参数是否为路径。有规格的命令以规格为准，不记录。
-  /// 探测只对本机绝对目录做 `fileExists`，参数最多 64 字节以内的几个 stat，不列目录。
-  private func recordPathHabit(command: String, directory: String, at date: Date) {
-    guard let executable = ShellCommandTokenizer.tokenize(command).tokens.first,
-      specDatabase.command(named: executable) == nil
-    else { return }
-    let root = directory.hasPrefix("/") ? directory : nil
-    let before = pathHabits
-    pathHabits.record(
-      command: command,
-      pathProbe: { argument in
-        guard let root, argument.utf8.count <= 1_024 else { return false }
-        return self.fileManager.fileExists(atPath: "\(root)/\(argument)")
-      }, at: date)
-    guard pathHabits != before else { return }
-    do {
-      try persistPathHabits()
-    } catch {
-      pathHabits = before
-    }
-  }
-
-  private func persistPathHabits() throws {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    try Self.writeStateFile(try encoder.encode(pathHabits), to: pathHabitsURL, fileManager: fileManager)
-  }
-
-  /// 更新同一会话里「上一条 → 这一条」的转移。失败的命令断开上下文，不作为下一条的前文。
-  /// 转移表写盘失败只丢这一次统计，不影响历史学习结果。
-  private func recordTransition(command: String, succeeded: Bool, sessionIdentifier: String) {
-    guard succeeded else {
-      lastCommandBySession[sessionIdentifier] = nil
-      return
-    }
-    if let previousCommand = lastCommandBySession[sessionIdentifier] {
-      let before = transitions
-      transitions.record(previous: previousCommand, next: command, specDatabase: specDatabase)
-      if transitions != before {
-        do {
-          try persistTransitions()
-        } catch {
-          transitions = before
-        }
-      }
-    }
-    lastCommandBySession[sessionIdentifier] = command
-  }
-
-  private func persistTransitions() throws {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    try Self.writeStateFile(try encoder.encode(transitions), to: transitionsURL, fileManager: fileManager)
+    guard submit(command: command, directory: directory, ignorePatterns: ignorePatterns,
+      sessionIdentifier: sessionIdentifier, at: date) else { return false }
+    let finished = commandFinished(exitStatus: exitStatus, sessionIdentifier: sessionIdentifier, knownOptions: knownOptions)
+    return finished && exitStatus != 127
   }
 
   @discardableResult
   func pin(command: String, directory: String, at date: Date = Date()) -> Bool {
-    let previous = learningDatabase
-    guard learningDatabase.pin(command: command, directory: directory, at: date) else {
-      return false
-    }
+    guard let line = Self.learningLine(command), let folder = Self.learningDirectory(directory) else { return false }
     do {
-      try persistLearning()
+      try completionStore.transaction { state in
+        Self.recordLine(line, directory: folder, at: date, in: &state.learnedFolder)
+      }
+      lastLearningError = nil
       return true
     } catch {
-      learningDatabase = previous
+      lastLearningError = error
       return false
     }
   }
 
-  /// 面板 ⇧⌫「从历史中删除」。整行历史直接删记录；槽位值（历史参数、用户词）按当前
-  /// 命令行推导槽位后压制。写盘失败回滚；返回 false 表示没有东西可忘（钉住的条目、
-  /// 规格候选、推不出槽位）。
+  /// 只删除对应学习类别，写盘失败时保留全部旧记录。
   @discardableResult
   func forget(candidate: AutocompleteCandidate, line: String, directory: String) -> Bool {
     guard candidate.isLearned else { return false }
-    let previous = learningDatabase
-    let changed: Bool
-    switch candidate.replacement {
-    case .fullLine:
-      changed = learningDatabase.remove(command: candidate.insertText, directory: directory)
-    case .currentToken:
-      guard let slot = AutocompleteUsageModel.currentSlot(
-        line: line, value: candidate.displayText, specDatabase: specDatabase)
-      else { return false }
-      changed = learningDatabase.suppress(slot: slot, value: candidate.displayText)
-    }
-    guard changed else { return false }
     do {
-      try persistLearning()
+      var changed = false
+      var seen = seenTokens
+      try completionStore.transaction { state in
+        switch candidate.replacement {
+        case .fullLine:
+          let previous = state.fullLines.count
+          state.fullLines.removeAll { $0.command == candidate.insertText && $0.directory == directory }
+          changed = previous != state.fullLines.count
+        case .currentToken:
+          let input = CompletionInput(line)
+          let tokens = input.parsed.tokens
+          let context: String
+          if tokens.count <= 1 && !input.segment.hasSuffix(" ") {
+            context = CompletionHistoryContext.commandContext(command: candidate.displayText, directory: directory)
+          } else {
+            let completed = input.parsed.currentToken.isEmpty ? tokens : Array(tokens.dropLast())
+            context = CompletionHistoryContext.resolve(tokens: completed, database: specDatabase).context
+          }
+          let previous = state.history.count
+          Self.removeToken(candidate.displayText, context: context, state: &state, seen: &seen)
+          changed = previous != state.history.count
+        }
+      }
+      seenTokens = seen
+      lastLearningError = nil
+      return changed
     } catch {
-      learningDatabase = previous
+      lastLearningError = error
       return false
     }
-    cachedUsageModel = nil
-    return true
   }
 
-  /// 撤销一次 `pin`（`aster ignore '<命令>'`）。写盘失败时回滚内存状态，与 `pin`
-  /// 对称，避免磁盘和内存分叉。
   @discardableResult
   func unpin(command: String, directory: String) -> Bool {
-    let previous = learningDatabase
-    guard learningDatabase.unpin(command: command, directory: directory) else { return false }
+    guard let line = Self.learningLine(command), let folder = Self.learningDirectory(directory) else { return false }
     do {
-      try persistLearning()
-      return true
+      let previous = completionStore.state.learnedFolder.count
+      try completionStore.transaction { state in
+        state.learnedFolder.removeAll { $0.command == line && $0.directory == folder }
+      }
+      lastLearningError = nil
+      return previous != completionStore.state.learnedFolder.count
     } catch {
-      learningDatabase = previous
+      lastLearningError = error
       return false
     }
   }
 
   func isPinned(command: String, directory: String) -> Bool {
-    learningDatabase.isPinned(command: command, directory: directory)
+    completionStore.state.learnedFolder.contains { $0.command == command && $0.directory == directory }
   }
 
-  /// 移除一条本机 `--help` 探测生成的规格（`aster ignore <二进制名>`）。内置 Fig
-  /// 规格不受影响——它不是用户学出来的，删掉只会让补全变差且无法恢复。
+  /// 仅撤销本地自动识别或手动学习的规格；内置和下载规格保持不变。
   @discardableResult
   func removeLocalSpec(named name: String) -> Bool {
-    guard localSpecDatabase.command(named: name) != nil else { return false }
-    let previousLocal = localSpecDatabase
-    let previousMerged = specDatabase
-    let updated = AutocompleteSpecDatabase(
-      sourceRevision: "local",
-      commands: localSpecDatabase.commands.filter { $0.name != name })
+    guard hasLocalSpec(named: name) else { return false }
     do {
-      let data = try AutocompleteSpecStore.encode(updated)
-      try Self.writeStateFile(data, to: localSpecURL, fileManager: fileManager)
-      localSpecDatabase = updated
-      specDatabase = Self.merged(base: baseSpecDatabase, local: localSpecDatabase)
+      try completionStore.transaction { state in
+        state.helpProbe.removeAll { $0.name == name }
+        state.learnedSpecs.removeAll { $0.name == name }
+      }
+      refreshLocalSpecs()
+      lastLearningError = nil
       return true
     } catch {
-      localSpecDatabase = previousLocal
-      specDatabase = previousMerged
+      lastLearningError = error
       return false
     }
   }
 
-  /// 本机是否存在该命令的 help 规格。内置规格不算——`ignore` 只撤销用户学到的东西。
   func hasLocalSpec(named name: String) -> Bool {
     localSpecDatabase.command(named: name) != nil
   }
 
-  func clearLearning() throws {
-    try clearLearning([.history, .pinnedCommands])
-  }
+  /// 旧内部调用保留为显式映射；设置页使用五类 clearData 接口。
+  func clearLearning() throws { try clearData(selection: [.history, .fullLines, .learnedFolder]) }
 
   func clearLearning(_ selection: LearningClearSelection) throws {
-    guard !selection.isEmpty else { return }
-    let previous = learningDatabase
-    if selection.contains([.history, .pinnedCommands]) {
-      learningDatabase = AutocompleteLearningDatabase(capacity: previous.capacity)
-    } else {
-      if selection.contains(.history) { learningDatabase.clearHistory() }
-      if selection.contains(.pinnedCommands) { learningDatabase.clearPinnedCommands() }
+    var scopes: AutocompleteClearSelection = []
+    if selection.contains(.history) { scopes.formUnion([.history, .fullLines]) }
+    if selection.contains(.pinnedCommands) { scopes.insert(.learnedFolder) }
+    try clearData(selection: scopes)
+  }
+
+  @discardableResult
+  func clearData(selection: AutocompleteClearSelection) throws -> AutocompleteClearSelection {
+    defer {
+      // 部分失败时已完成的类别仍需立即反映到候选与规格中。
+      refreshLocalSpecs()
     }
     do {
-      try persistLearning()
+      let succeeded = try completionStore.clear(selection)
+      if succeeded.contains(.history) { seenTokens.removeAll() }
+      if succeeded.contains(.helpProbe) { helpProbeGeneration &+= 1 }
+      lastLearningError = nil
+      return succeeded
     } catch {
-      learningDatabase = previous
+      if let partial = error as? CompletionStore.ClearFailure {
+        if partial.succeeded.contains(.history) { seenTokens.removeAll() }
+        if partial.succeeded.contains(.helpProbe) { helpProbeGeneration &+= 1 }
+      }
+      lastLearningError = error
       throw error
     }
-    // 清空历史时一并清空由它派生的使用频次、命令转移与会话上下文。
-    cachedUsageModel = nil
-    if selection.contains(.history) {
-      let previousTransitions = transitions
-      transitions = AutocompleteTransitionTable()
-      lastCommandBySession = [:]
-      do {
-        try persistTransitions()
-      } catch {
-        transitions = previousTransitions
-        throw error
-      }
-      let previousHabits = pathHabits
-      pathHabits = AutocompletePathHabits()
-      do {
-        try persistPathHabits()
-      } catch {
-        pathHabits = previousHabits
-        throw error
-      }
+  }
+
+  private static func recordLine(
+    _ command: String, directory: String, at date: Date,
+    in lines: inout [CompletionLearningState.Line]
+  ) {
+    let date = CompletionLearningState.wholeSecond(date)
+    if let index = lines.firstIndex(where: { $0.command == command && $0.directory == directory }) {
+      lines[index].count = min(lines[index].count, Int.max - 1) + 1
+      lines[index].score = CompletionLearningState.frecency(
+        score: lines[index].score, lastUsed: lines[index].lastUsed, now: date) + 1
+      lines[index].lastUsed = date
+    } else {
+      lines.append(.init(command: command, directory: directory, lastUsed: date))
     }
+  }
+
+  private static func recordToken(
+    _ token: String, context: String, at date: Date,
+    state: inout CompletionLearningState, seen: inout Set<String>
+  ) {
+    let date = CompletionLearningState.wholeSecond(date)
+    if let index = state.history.firstIndex(where: { $0.command == context && $0.token == token }) {
+      state.history[index].count = min(state.history[index].count, Int.max - 1) + 1
+      state.history[index].score = CompletionLearningState.frecency(
+        score: state.history[index].score, lastUsed: state.history[index].lastUsed, now: date) + 1
+      state.history[index].lastUsed = date
+    } else {
+      state.history.append(.init(command: context, token: token, lastUsed: date))
+    }
+    seen.insert(CompletionHistoryContext.key(context: context, argument: token))
+  }
+
+  private static func removeToken(
+    _ token: String, context: String, state: inout CompletionLearningState, seen: inout Set<String>
+  ) {
+    state.history.removeAll { $0.command == context && $0.token == token }
+    seen.remove(CompletionHistoryContext.key(context: context, argument: token))
+  }
+
+  private static func learningLine(_ text: String) -> String? {
+    guard !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0.value != 9 })
+    else { return nil }
+    guard let last = text.unicodeScalars.lastIndex(where: { !CharacterSet.whitespacesAndNewlines.contains($0) })
+    else { return nil }
+    return String(text[..<text.unicodeScalars.index(after: last)])
+  }
+
+  private static func learningDirectory(_ text: String) -> String? {
+    guard text.utf8.count <= 4_096,
+      !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else { return nil }
+    if text.isEmpty { return "" }
+    guard text.hasPrefix("/") else { return nil }
+    return URL(fileURLWithPath: text).standardizedFileURL.path
+  }
+
+  private static func localDatabase(from state: CompletionLearningState) -> AutocompleteSpecDatabase {
+    var commands = state.helpProbe
+    for learned in state.learnedSpecs {
+      commands.removeAll { $0.name == learned.name }
+      commands.append(learned)
+    }
+    return AutocompleteSpecDatabase(sourceRevision: "local", commands: commands)
+  }
+
+  private func refreshLocalSpecs() {
+    localSpecDatabase = Self.localDatabase(from: completionStore.state)
+    let probed = Self.merged(
+      base: baseSpecDatabase,
+      local: AutocompleteSpecDatabase(sourceRevision: "local", commands: completionStore.state.helpProbe))
+    var commands = probed.commands
+    for learned in completionStore.state.learnedSpecs {
+      commands.removeAll { $0.name == learned.name }
+      commands.append(learned)
+    }
+    specDatabase = AutocompleteSpecDatabase(
+      sourceRevision: baseSpecDatabase.sourceRevision,
+      sourceDate: baseSpecDatabase.sourceDate,
+      commands: commands.sorted { $0.name < $1.name })
   }
 
   func knownOptions(for command: String) -> Set<String> {
-    Set(specDatabase.command(named: command)?.options.flatMap(\.names) ?? [])
+    guard let root = specDatabase.command(named: command) else { return [] }
+    func collect(_ specification: AutocompleteCommandSpec, into names: inout Set<String>) {
+      names.formUnion(specification.options.flatMap(\.names))
+      for child in specification.subcommands { collect(child, into: &names) }
+    }
+    var names: Set<String> = []
+    collect(root, into: &names)
+    return names
+  }
+
+  /// 原版 known_flags 递归根命令的整棵规格树，包括兄弟子命令的选项。
+  func knownOptions(forCommandLine line: String) -> Set<String> {
+    guard let root = ShellCommandTokenizer.tokenize(line).tokens.first else { return [] }
+    return knownOptions(for: root)
   }
 
   /// 名称清单只能完成可执行文件本身；至少存在一种子项才算详细规格，否则允许
@@ -1188,7 +1208,7 @@ final class AutocompleteService {
     return []
   }
 
-  /// 本地 help 规格独立保存并与内置规格按字段合并；手动更新远端清单时不会覆盖它。
+  /// 自动 help 规格补充内置字段；显式学习的规格覆盖同名命令。更新远端清单不覆盖两者。
   ///
   /// `subcommandPath` 非空时,探测结果是某个子命令的规格,要挂到本地规格树的对应位置
   /// 而不是当成一条顶层命令——否则 `docker compose --help` 会生成一个叫 `compose`
@@ -1197,15 +1217,17 @@ final class AutocompleteService {
   /// `command` 是根命令名,`subcommandPath` **不含**它——与
   /// `AutocompleteHelpProbe.probe(command:subcommandPath:)` 的参数语义严格一致。
   /// 两者用同一套约定,是因为它们总是成对调用,不一致会静默地把规格挂到错误的位置。
+  /// `learned` 表示用户显式请求学习，与自动探测分开清理。
   func installLocalSpec(
     _ spec: AutocompleteCommandSpec,
     command: String? = nil,
-    subcommandPath: [String] = []
+    subcommandPath: [String] = [],
+    learned: Bool = false
   ) throws {
-    guard let command, !subcommandPath.isEmpty else { return try installTopLevelSpec(spec) }
+    guard let command, !subcommandPath.isEmpty else { return try installTopLevelSpec(spec, learned: learned) }
     let existing = localSpecDatabase.command(named: command)
       ?? AutocompleteCommandSpec(name: command)
-    try installTopLevelSpec(Self.attaching(spec, at: subcommandPath, to: existing))
+    try installTopLevelSpec(Self.attaching(spec, at: subcommandPath, to: existing), learned: learned)
   }
 
   /// 沿子命令路径把探测结果挂进规格树,路径上缺失的层级按名字补出空壳。
@@ -1228,15 +1250,17 @@ final class AutocompleteService {
       arguments: parent.arguments)
   }
 
-  private func installTopLevelSpec(_ spec: AutocompleteCommandSpec) throws {
-    var commands = localSpecDatabase.commands.filter { $0.name != spec.name }
-    commands.append(spec)
-    commands.sort { $0.name < $1.name }
-    let updated = AutocompleteSpecDatabase(sourceRevision: "local", commands: commands)
-    let data = try AutocompleteSpecStore.encode(updated)
-    try Self.writeStateFile(data, to: localSpecURL, fileManager: fileManager)
-    localSpecDatabase = updated
-    specDatabase = Self.merged(base: baseSpecDatabase, local: localSpecDatabase)
+  private func installTopLevelSpec(_ spec: AutocompleteCommandSpec, learned: Bool) throws {
+    try completionStore.transaction { state in
+      if learned {
+        state.learnedSpecs.removeAll { $0.name == spec.name }
+        state.learnedSpecs.append(spec)
+      } else {
+        state.helpProbe.removeAll { $0.name == spec.name }
+        state.helpProbe.append(spec)
+      }
+    }
+    refreshLocalSpecs()
   }
 
   /// 应用用户显式触发的规格文件更新。该入口不接触本地规格和命令学习文件。
@@ -1246,15 +1270,46 @@ final class AutocompleteService {
       preserving: baseSpecDatabase,
       minimumCommandCount: minimumCommandCount
     )
+    // 线上规格可能落后于随应用发布的快照。检查成功但不降级，也不改动学习数据。
+    if let incoming = Self.isoSourceDate(updated.sourceDate),
+      let current = Self.isoSourceDate(baseSpecDatabase.sourceDate), incoming < current
+    { return }
     let encoded = try AutocompleteSpecStore.encode(updated)
     try Self.writeStateFile(encoded, to: updatedSpecURL, fileManager: fileManager)
     baseSpecDatabase = updated
-    specDatabase = Self.merged(base: baseSpecDatabase, local: localSpecDatabase)
+    refreshLocalSpecs()
+  }
+
+  private static func isoSourceDate(_ text: String?) -> Date? {
+    guard let text, text.utf8.count == 10 else { return nil }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withFullDate]
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    guard let date = formatter.date(from: text), formatter.string(from: date) == text else { return nil }
+    return date
   }
 
   /// 唯一联网入口，由设置页“立即更新”按钮调用。下载先落到 URLSession 临时文件，
   /// 检查 HTTP 状态和大小后才读入内存，避免 chunked 响应绕过 Content-Length。
   func updateNow(session: URLSession = .shared) async throws -> String {
+    try await updateNow(download: { try await self.downloadUpdate(session: session) })
+  }
+
+  /// 下载依赖可注入，重复调用共享进行中的任务；验证失败不会替换当前规格。
+  func updateNow(download: @escaping @MainActor () async throws -> Data) async throws -> String {
+    if let updateTask { return try await updateTask.value }
+    let task = Task { @MainActor in
+      let data = try await download()
+      try Task.checkCancellation()
+      try applyFigUpdatePayload(data)
+      return baseSpecDatabase.sourceRevision
+    }
+    updateTask = task
+    defer { updateTask = nil }
+    return try await task.value
+  }
+
+  private func downloadUpdate(session: URLSession) async throws -> Data {
     var request = URLRequest(url: Self.figSpecsURL)
     request.timeoutInterval = 60
     request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -1268,13 +1323,7 @@ final class AutocompleteService {
       maximumBytes: AutocompleteSpecStore.maximumEncodedBytes,
       fileManager: fileManager
     )
-    try applyFigUpdatePayload(data)
-    return baseSpecDatabase.sourceRevision
-  }
-
-  private func persistLearning() throws {
-    let data = try AutocompleteLearningStore.encode(learningDatabase)
-    try Self.writeStateFile(data, to: learningURL, fileManager: fileManager)
+    return data
   }
 
   /// 第二个及后续 token 才查询文件系统；首 token 始终由命令规格负责。目录枚举有
@@ -1285,31 +1334,15 @@ final class AutocompleteService {
       directory.hasPrefix("/")
     else { return [] }
 
-    var token = parsed.currentToken
-    var tokenStart = parsed.currentTokenStart
+    let token = parsed.currentToken
+    let tokenStart = parsed.currentTokenStart
     let root = parsed.tokens.first.flatMap { specDatabase.command(named: $0) }
     let completed = token.isEmpty ? Array(parsed.tokens.dropFirst()) : Array(parsed.tokens.dropFirst().dropLast())
-    let context = root.map { AutocompleteArgumentContext(root: $0, completed: completed) }
-    var mode = context?.filesystemMode ?? .filesAndFolders
-    if let context, !context.optionsTerminated, context.pendingArgument == nil,
-      let equal = token.firstIndex(of: "="),
-      let option = context.command.option(named: String(token[..<equal])), let argument = option.args.first
-    {
-      let offset = token.distance(from: token.startIndex, to: equal) + 1
-      token = String(token.dropFirst(offset))
-      tokenStart += offset
-      mode = AutocompleteArgumentContext.filesystemMode(for: argument)
-    } else if token.hasPrefix("-"), context?.optionsTerminated != true, context?.pendingArgument == nil {
-      return []
-    }
+    let context = root.map { FigCompletionContext(root: $0, completed: completed) }
+    let mode = context.map { FigCompletionRules.filesystemMode(of: $0.command, prefix: token) }
+      ?? .filesAndFolders
+    guard !token.hasPrefix("-") else { return [] }
     guard mode != .none else { return [] }
-    // 没有规格的命令按学到的习惯决定要不要列文件：`foo bar`、`foo baz` 之后 `foo <Tab>`
-    // 不再把整个目录倒出来；用户明确打 `./`、`/` 时照样列。
-    if root == nil, let executable = parsed.tokens.first,
-      !pathHabits.shouldEnumerate(command: executable, currentToken: token)
-    {
-      return []
-    }
     let rawToken = String(line.dropFirst(tokenStart))
     let tokenPath = token.replacingOccurrences(of: "\\ ", with: " ")
     let slash = tokenPath.lastIndex(of: "/")
@@ -1334,7 +1367,7 @@ final class AutocompleteService {
         value: value, typed: token, raw: rawToken, closeQuote: false)
       else { return nil }
       return AutocompleteCandidate(
-        insertText: insert, description: L("目录"), kind: .folder,
+        insertText: insert, displayText: value, description: L("目录"), kind: .folder,
         score: AutocompleteRelevance.score(kind: .folder, typed: token, candidate: insert),
         replacement: .currentToken(start: tokenStart))
     }
@@ -1375,6 +1408,7 @@ final class AutocompleteService {
         let kind: AutocompleteCandidateKind = isDirectory ? .folder : .file
         return AutocompleteCandidate(
           insertText: insert,
+          displayText: typedDirectory + name + suffix,
           description: isDirectory ? L("目录") : L("文件"),
           kind: kind,
           score: AutocompleteRelevance.score(kind: kind, typed: token, candidate: insert),

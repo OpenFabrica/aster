@@ -38,8 +38,8 @@
     replay: [["automatic", t("自动")], ["confirmOnce", t("确认一次")], ["manual", t("逐条")], ["skip", t("跳过")]],
     scrollLast: [["disabled", t("关闭")], ["lastContentAtTop", t("最后有内容行置顶")], ["lastLineInMiddle", t("内容行停在中间")], ["cursorLineAtTop", t("光标行置顶")]],
     scrollFirst: [["disabled", t("关闭")], ["sameAsLast", t("与末尾设置一致")], ["firstLineWithContent", t("历史首行置底")], ["firstLineInMiddle", t("首行停在中间")]],
-    autocompleteShortcut: [["tab", "Tab"], ["tab+right-arrow", t("Tab + 右方向键")], ["ctrl+space", "Control + Space"], ["disable", t("关闭")]],
-    candidatePanel: [["disable", t("关闭")], ["auto", t("自动")], ["escape", t("Esc 打开")], ["option-escape", t("Option + Esc 打开")]],
+    autocompleteShortcut: [["tab", "Tab"], ["tab+right-arrow", t("Tab / 右箭头键")], ["right-arrow", t("右箭头键")], ["ctrl+space", "Ctrl+Space"], ["disable", t("已禁用")]],
+    candidatePanel: [["disable", t("禁用")], ["auto", t("自动")], ["escape", t("Escape 键")], ["option-escape", "Option+Escape / F5"]],
     descriptionLanguage: [["system", t("跟随系统")], ["chinese", t("中文")], ["english", "English"]],
     cursorStyle: [["block", t("块状")], ["bar", t("竖线")], ["underline", t("下划线")], ["blockHollow", t("空心块状")]],
     cursorBlink: [["defaultOff", t("默认关闭")], ["defaultOn", t("默认开启")], ["alwaysOff", t("始终关闭")], ["alwaysOn", t("始终开启")]],
@@ -192,17 +192,15 @@
       ]
     },
     {
-      id: "controls", title: t("控制"), description: t("键盘、鼠标、链接、选择、剪贴板和滚动。"), special: "controls", groups: [
-        { title: t("自动补全"), rows: [
-          row("controls.autocompleteShortcut", t("接受候选"), t("接受 inline suggestion 的快捷键"), "select", { options: options.autocompleteShortcut }),
-          row("controls.autocompleteCandidatePanel", t("候选面板"), t("自动显示或使用快捷键打开"), "select", { options: options.candidatePanel }),
-          row("controls.autocompleteInlineSuggestion", "Inline suggestion", t("在终端光标后显示候选后缀")),
-          row("controls.clipboardSuggestion", t("剪贴板建议"), t("复制内容后，在空提示符上以灰字提示剪贴板内容，回车只粘贴不执行")),
-          row("controls.autocompleteOnDeviceLearning", t("本机学习"), t("只保存脱敏后的本机历史")),
-          row("controls.autocompleteSkipSecrets", t("跳过含凭据的命令"), t("命令里出现密码、令牌或密钥时整条不记录、不纠错")),
-          row("controls.autocompleteDatabaseStatus", t("补全数据库"), t("上游 Fig 规格版本与已安装的命令数量"), "readonly"),
-          action("updateAutocomplete", t("更新补全数据库"), t("从 Aster 仓库拉取最新的命令规格文件"), t("立即更新")),
-          action("clearAutocomplete", t("清除补全数据"), t("选择清除历史、固定命令或目录频率数据"), t("清除…"), { danger: true }),
+      id: "controls", title: t("控制"), description: "", special: "controls", groups: [
+        { title: t("自动补全"), autocomplete: true, rows: [
+          row("controls.autocompleteShortcut", t("接受建议"), t("单一候选或已选中候选时，用此键接受补全"), "select", { options: options.autocompleteShortcut }),
+          row("controls.autocompleteCandidatePanel", t("候选面板"), t("何时显示候选面板"), "select", { options: options.candidatePanel }),
+          row("controls.autocompleteInlineSuggestion", t("内联建议"), t("当某个候选明显领先时，以淡色内联预览")),
+          row("controls.autocompleteOnDeviceLearning", t("本地学习"), t("基于你运行过的命令改进补全，数据只留在本机。")),
+          row("controls.autocompleteSkipSecrets", t("不记录敏感命令"), t("看起来带密码、令牌或 API key 的命令不写入补全历史")),
+          action("updateAutocomplete", t("补全数据库"), "", t("立即更新")),
+          action("clearAutocomplete", t("清除我的数据"), t("清除自动补全为你学到的数据。内置 CLI 补全将保留。"), t("清除…")),
         ]},
         { title: t("选择"), rows: [
           row("controls.shiftArrowSelection", t("Shift + 方向键选择"), t("选择文本而不是发送转义序列")),
@@ -602,7 +600,12 @@
   }
 
   function commitValue(item, value) {
+    const needsIntegration = ["controls.autocompleteInlineSuggestion", "controls.autocompleteOnDeviceLearning", "controls.autocompleteSkipSecrets"].includes(item.key);
+    const integrationDisabled = settingValue("shell.shellIntegration") === false;
     send("set", { changes: [{ key: item.key, value }] });
+    if (needsIntegration && value === true && integrationDisabled) {
+      showToast(t("此功能需要 Shell 集成。请在 Shell 设置中启用。"));
+    }
   }
 
   function controlOptions(item) {
@@ -806,6 +809,10 @@
             });
             return;
           }
+          if (item.action === "clearAutocomplete") {
+            window.AsterAutocompleteSettings.openClear({ t, send });
+            return;
+          }
           if (item.action === "configureOpenWithApps") {
             openApplicationsDialog();
             return;
@@ -918,6 +925,13 @@
     card.className = "card";
     card.append(...group.rows.filter(isVisible).map(makeRow));
     host.appendChild(card);
+    if (group.autocomplete) {
+      window.AsterAutocompleteSettings.decorateGroup(host, {
+        t, send,
+        status: settingValue("controls.autocompleteCompletionStatus") ?? { state: "idle" },
+        dataSync: snapshot?.capabilities?.dataSync === true,
+      });
+    }
     return host;
   }
 
@@ -3088,6 +3102,12 @@
         document.documentElement.classList.toggle("strong-text", snapshot?.values?.["appearance.interfaceStrongTextActive"] === true);
         app.setAttribute("aria-busy", "false");
         render();
+      } else if (message.type === "autocompleteStatus") {
+        if (snapshot?.values) snapshot.values["controls.autocompleteCompletionStatus"] = message.status;
+        const host = content.querySelector('[data-setting-key="updateAutocomplete"]');
+        if (host) window.AsterAutocompleteSettings.updateStatus(host, message.status, t, send);
+      } else if (message.type === "openAutocompleteClear") {
+        window.AsterAutocompleteSettings.openClear({ t, send });
       } else if (message.type === "mutationResult") {
         const reply = mutationReplies.get(message.requestID);
         mutationReplies.delete(message.requestID);

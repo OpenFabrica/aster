@@ -1191,7 +1191,7 @@ final class AsterTerminalView: LocalProcessTerminalView {
   override func mouseMoved(with event: NSEvent) {
     // SwiftTerm 的 mouseMoved 路径不读取 allowMouseReporting。模式锁定时直接忽略 hover
     // 报告，避免 Read-only、Vi 或 Hint 在用户移动指针时向 TUI 写入 CSI 序列。
-    guard paneModeState.inputDecision == .forwardToProcess else {
+    guard paneModeState.inputDecision == .forwardToProcess, allowMouseReporting else {
       NSCursor.iBeam.set()
       return
     }
@@ -2268,6 +2268,15 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     let executable = ShellCommandTokenizer.tokenize(submittedCommand).tokens.first ?? ""
     return executable.isEmpty ? nil : (executable as NSString).lastPathComponent
   }
+  /// About-pane summary from known command state; never sends input or reads screen content.
+  var paneCommandSummary: String {
+    if hasForegroundCommand, let submittedCommand, !submittedCommand.isEmpty { return submittedCommand }
+    if let provider = activeAgentProvider { return provider.commandName }
+    let shell = preferences?.compatibilityString(forKey: "general.shell",
+      default: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh") ?? "/bin/zsh"
+    return URL(fileURLWithPath: shell).lastPathComponent + " (idle)"
+  }
+
   /// Hook 状态一旦到达即成为当前 Agent 命令的权威来源；否则保留前台进程与输出
   /// 探针回退，未安装集成的 Agent 仍能显示基本 processing 状态。
   private var agentLifecycleIsAuthoritative = false
@@ -2321,6 +2330,59 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 设置关闭或 Pane 失焦时立即释放；PTY 模式由输出、输入前检查与低频兜底轮询采样。
   private var automaticSecureInputEnabled = true
   private weak var preferences: AppPreferences?
+  /// 宿主按终端会话归属绑定运行期覆盖；默认每个 Session 使用无覆盖的新状态。
+  var privilegesState = PanePrivilegesState() {
+    didSet {
+      guard privilegesState !== oldValue else { return }
+      bindPrivilegesState()
+    }
+  }
+  private var privilegesCancellable: AnyCancellable?
+  /// 错误退出与 Bell 共用可注入的声音边界，测试无需触发系统声音。
+  var playTerminalSound: () -> Void = { NSSound.beep() }
+
+  var resolvedPrivileges: PanePrivileges.Values {
+    privilegesState.privileges.resolved(in: preferences?.configuration ?? AsterConfiguration())
+  }
+
+  /// 普通手动请求立即持有 assertion；Agent 自动请求只在 processing 期间生效。
+  var shouldPreventSleep: Bool {
+    privilegesState.caffeinates(sessionID: id)
+      || (activeAgentProvider != nil && agentTaskState == .processing
+        && resolvedPrivileges.caffeinateAgentProcessing)
+  }
+
+  private func bindPrivilegesState() {
+    privilegesCancellable = privilegesState.didChange.sink { [weak self] in
+      self?.refreshPrivileges()
+    }
+    refreshPrivileges()
+  }
+
+  private func refreshPrivileges() {
+    objectWillChange.send()
+    let values = resolvedPrivileges
+    terminalView?.terminalBellEnabled = values.terminalBell
+    terminalView?.allowMouseReporting = values.allowMouseCapture
+    if let ghosttyView {
+      ghosttyView.allowMouseCapture = values.allowMouseCapture
+      if let preferences {
+        ghosttyView.updateConfiguration(GhosttyConfiguration.make(preferences: preferences))
+      }
+    }
+  }
+
+  private var privilegedShellConfiguration: ShellConfiguration? {
+    guard var shell = preferences?.configuration.shell else { return nil }
+    let values = resolvedPrivileges
+    shell.soundOnErrorExit = values.soundOnErrorExit
+    shell.terminalBell = values.terminalBell
+    shell.notifyOnFinish = values.notifyOnFinish
+    shell.notifyOnError = values.notifyOnError
+    shell.notifyOnWatchFinish = values.notifyOnWatchFinish
+    shell.notificationShellControlled = values.notificationShellControlled
+    return shell
+  }
   private var submittedCommand: String?
   /// 程序通过 OSC 88 声明的重启命令;Shell 退出时清空。
   private var resumeProtocolCommand: String?
@@ -2387,7 +2449,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 首次 surface 创建后的前台进程组即登录 Shell；后续不同值表示前台命令。
   private var ghosttyShellProcessIdentifier: Int32?
   private var targetOpenCoordinator: TerminalTargetOpenCoordinator?
-  private var autocompleteController: TerminalAutocompleteController?
+  private var autocompleteController: TerminalAutocompleteController? {
+    willSet {
+      if autocompleteController !== newValue { autocompleteController?.invalidate() }
+    }
+  }
   /// Session Recording 的注入点。nil 或记录层故障都不影响终端本职；
   /// Session 只转发已有状态，绝不为记录层做额外解析。
   weak var eventRecorder: (any TerminalEventRecording)?
@@ -2598,16 +2664,17 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 标签层消费的 Agent 专属徽章。若用户关闭某类徽章，返回 nil 让聚合器忽略
   /// Agent 的长寿命前台进程，而不是回退成普通 shell spinner。
   var agentActivityBadge: TerminalBadgeState? {
-    guard activeAgentProvider != nil, let agents = preferences?.configuration.agents else {
+    guard activeAgentProvider != nil else {
       return nil
     }
+    let values = resolvedPrivileges
     switch agentTaskState {
     case .processing:
-      return agents.badgeProcessing ? .running(percent: nil) : TerminalBadgeState.none
+      return values.badgeAgentProcessing ? .running(percent: nil) : TerminalBadgeState.none
     case .awaitingInput:
-      return agents.badgeAwaitingInput ? .awaitingInput : TerminalBadgeState.none
+      return values.badgeAgentAwaitingInput ? .awaitingInput : TerminalBadgeState.none
     case .idle:
-      return agents.badgeTaskComplete && agentTaskCompletionUnread
+      return values.badgeAgentTaskComplete && agentTaskCompletionUnread
         ? .finished : TerminalBadgeState.none
     }
   }
@@ -2633,6 +2700,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     self.sshEndpointResolver = sshEndpointResolver
     super.init()
     Self.liveSessions.add(self)
+    bindPrivilegesState()
   }
 
   /// makeTerminalView 的调用计数；随诊断上报,用于区分缓存命中与全新 PTY 创建路径。
@@ -2758,24 +2826,6 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
         }
       )
       autocomplete.attach(to: view)
-      autocomplete.projectCommandProvider = { [weak self] directory in
-        self?.projectCommandSuggestionProvider?(directory)
-      }
-      autocomplete.clipboardSuggestionProvider = { [weak view] in
-        // 剪贴板是全局的，建议却只该出现在用户此刻正在打字的那个 Pane：否则分屏时
-        // 每个 Pane 都画同一条灰字，后台标签页里也会悄悄留着一条，用户无从判断回车
-        // 会落在哪儿。
-        guard let view, view.window?.isKeyWindow == true,
-          view.window?.firstResponder === view
-        else { return nil }
-        // 安全输入生效（密码提示符、系统级保护）时一律不提示：这类场景下把剪贴板
-        // 内容画到终端画布上，正好违背用户开启安全输入的意图。
-        guard !SecureInputCoordinator.shared.isSystemProtectionActive else { return nil }
-        return ClipboardSuggestionMonitor.shared.pendingText()
-      }
-      autocomplete.onClipboardSuggestionConsumed = {
-        ClipboardSuggestionMonitor.shared.consume()
-      }
       autocomplete.onCommandSubmitted = { [weak self] command in
         self?.recordSubmittedCommand(command)
       }
@@ -2800,7 +2850,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
       }
     }
     view.autoresizingMask = [.width, .height]
-    view.allowMouseReporting = preferences.allowMouseReporting
+    view.allowMouseReporting = resolvedPrivileges.allowMouseCapture
     view.optionAsMetaKey = preferences.optionAsMeta
     view.linkHighlightMode = .hoverWithModifier
     apply(preferences: preferences, to: view)
@@ -2928,6 +2978,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     self.preferences = preferences
     if let ghosttyView {
       applyLinkDetectionSettings(preferences, to: ghosttyView)
+      ghosttyView.allowMouseCapture = resolvedPrivileges.allowMouseCapture
       ghosttyView.updateConfiguration(GhosttyConfiguration.make(preferences: preferences))
       return ghosttyView
     }
@@ -3103,8 +3154,9 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
         active: self.automaticSecureInputEnabled && requested && focused
       )
     }
-    view.onBell = { [weak preferences] in
-      if preferences?.configuration.shell.terminalBell == true { NSSound.beep() }
+    view.allowMouseCapture = resolvedPrivileges.allowMouseCapture
+    view.onBell = { [weak self] in
+      if self?.resolvedPrivileges.terminalBell == true { self?.playTerminalSound() }
     }
     view.onNotification = { [weak self] title, body in
       self?.post(
@@ -3178,24 +3230,6 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
         }
       )
       autocomplete.attach(to: view)
-      autocomplete.projectCommandProvider = { [weak self] directory in
-        self?.projectCommandSuggestionProvider?(directory)
-      }
-      autocomplete.clipboardSuggestionProvider = { [weak view] in
-        // 剪贴板是全局的，建议却只该出现在用户此刻正在打字的那个 Pane：否则分屏时
-        // 每个 Pane 都画同一条灰字，后台标签页里也会悄悄留着一条，用户无从判断回车
-        // 会落在哪儿。
-        guard let view, view.window?.isKeyWindow == true,
-          view.window?.firstResponder === view
-        else { return nil }
-        // 安全输入生效（密码提示符、系统级保护）时一律不提示：这类场景下把剪贴板
-        // 内容画到终端画布上，正好违背用户开启安全输入的意图。
-        guard !SecureInputCoordinator.shared.isSystemProtectionActive else { return nil }
-        return ClipboardSuggestionMonitor.shared.pendingText()
-      }
-      autocomplete.onClipboardSuggestionConsumed = {
-        ClipboardSuggestionMonitor.shared.consume()
-      }
       autocomplete.onCommandSubmitted = { [weak self] command in
         self?.recordSubmittedCommand(command)
       }
@@ -3320,7 +3354,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
         at: TerminalGridPoint(column: Int(point.column), row: token)
       )
       // 命令开始执行时网格上就是最终的命令行（含 ↑ 历史、shell 建议、Tab 补全的结果），
-      // 把它交给补全控制器做「下一步」推断；读不到时控制器回退到键盘重建。
+      // 把它交给补全控制器学习；读不到时控制器回退到键盘重建。
       if event == .commandStart, let running = ghosttyShellCommandTimeline.runningCommand,
         let inputAnchor = ghosttyBufferAnchors[running.inputStart.row],
         let outputAnchor = ghosttyBufferAnchors[running.outputStart.row],
@@ -3525,6 +3559,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   }
 
   private func applyProcessExit(code: Int32?) {
+    privilegesState.taskFinished(sessionID: id)
     eventRecorder?.sessionEnded(id: id, exitCode: code)
     let termination = TerminalProcessTermination(rawWaitStatus: code.map { $0 << 8 })
     lifecycleState = .ended(termination)
@@ -3754,6 +3789,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
       ghosttyView.pasteProtectionEnabled = controls.pasteProtection
       ghosttyView.pasteBracketedSafe = controls.resolvedPasteBracketedSafe
       applyLinkDetectionSettings(preferences, to: ghosttyView)
+      ghosttyView.allowMouseCapture = resolvedPrivileges.allowMouseCapture
       ghosttyView.updateConfiguration(GhosttyConfiguration.make(preferences: preferences))
       automaticSecureInputEnabled = controls.secureInputAutomatically
     }
@@ -4559,6 +4595,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 停止当前 Shell。关闭 Pane 时先给予 750ms 正常退出窗口；应用即将终止时必须
   /// 立即结束进程组，因为主事件循环不会继续存活到延迟升级任务执行。
   func stop(immediately: Bool = false) {
+    privilegesState.taskFinished(sessionID: id)
     clearSSHRemoteEndpoint()
     // 受管终端先按语义处理服务端资源：分离保留进程与布局，结束才终止远端进程。
     // 分离路径不写 Agent 结束和 `session ended`，否则会把一个仍在运行的任务
@@ -4913,7 +4950,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     case .right: [61]
     }
     view.vtKeypadApplicationModeAllowed = controls.resolvedVTKeypadAppAllowed
-    view.allowMouseReporting = preferences.allowMouseReporting
+    view.allowMouseReporting = resolvedPrivileges.allowMouseCapture
     view.mouseReportingBypassModifiers = switch controls.resolvedBypassMouseReporting {
     case .none: []
     case .shift: [.shift]
@@ -4944,7 +4981,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     view.applyScrollConfiguration(preferences.configuration.controls)
     view.pasteProtectionEnabled = preferences.configuration.controls.pasteProtection
     view.pasteBracketedSafe = preferences.configuration.controls.resolvedPasteBracketedSafe
-    view.terminalBellEnabled = preferences.configuration.shell.terminalBell
+    view.terminalBellEnabled = resolvedPrivileges.terminalBell
+    view.terminalBellHandler = { [weak self] in self?.playTerminalSound() }
     view.titleShellControlled = preferences.configuration.shell.resolvedTitleShellControlled
     view.getTerminal().allowTitleReport = preferences.configuration.shell.resolvedTitleReport
     let scrollback = Int(min(max(
@@ -5236,6 +5274,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
       else { return }
       progressState = .indeterminate
     case .commandFinished(let exitStatus):
+      privilegesState.taskFinished(sessionID: id)
       // 必须在本分支尾部把 submittedCommand 置 nil 之前上报。
       eventRecorder?.commandFinished(
         id: id, command: submittedCommand, exitStatus: exitStatus)
@@ -5317,8 +5356,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   }
 
   private func notifyForCompletion(exitCode: Int, watched: Bool) {
-    guard let shell = preferences?.configuration.shell else { return }
-    if exitCode != 0, shell.resolvedSoundOnErrorExit { NSSound.beep() }
+    guard let shell = privilegedShellConfiguration else { return }
+    if exitCode != 0, shell.resolvedSoundOnErrorExit { playTerminalSound() }
     let enabled = watched
       ? shell.resolvedNotifyOnWatchFinish
       : (exitCode == 0 ? shell.notifyOnFinish : shell.notifyOnError)
@@ -5338,7 +5377,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     _ notification: TerminalNotification,
     category: TerminalNotificationCategory
   ) {
-    guard let shell = preferences?.configuration.shell else { return }
+    guard let shell = privilegedShellConfiguration,
+      category != .application || shell.resolvedNotificationShellControlled else { return }
     let focused = if let ghosttyView {
       ghosttyView.window?.isKeyWindow == true
         && ghosttyView.window?.firstResponder === ghosttyView

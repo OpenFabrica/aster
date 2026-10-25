@@ -4,9 +4,9 @@ import Testing
 
 @testable import Aster
 
-@Test("Autocomplete 服务持久化脱敏学习并可清空")
+@Test("未启用敏感命令过滤时保留完整学习命令，并可清空")
 @MainActor
-func autocompleteServicePersistsSecretSafeLearning() throws {
+func autocompleteServicePersistsWholeCommandLearning() throws {
   let directory = try makeAutocompleteTemporaryDirectory()
   defer { try? FileManager.default.removeItem(at: directory) }
   let service = try AutocompleteService(
@@ -35,8 +35,7 @@ func autocompleteServicePersistsSecretSafeLearning() throws {
     controls: ControlConfiguration()
   )
 
-  #expect(result.candidates.contains { $0.insertText == "curl https://example.test" })
-  #expect(!result.candidates.contains { $0.insertText.contains("private-value") })
+  #expect(result.candidates.contains { $0.insertText == "curl --token private-value https://example.test" })
   try reloaded.clearLearning()
   #expect(
     reloaded.suggestions(
@@ -405,37 +404,32 @@ func autocompleteServiceIgnoreKeepsBundledStructureForProbedCommand() throws {
   #expect(service.specDatabase.command(named: "docker")?.subcommands.count == bundledSubcommands)
 }
 
-@Test("补全 git 分支时从磁盘读取引用，绝不运行 git")
+@Test("Git 原生动态查询异步返回，再与当前输入的静态候选合并")
 @MainActor
-func autocompleteServiceCompletesGitBranchesWithoutRunningGit() throws {
+func autocompleteServiceMergesNativeDynamicBranches() async throws {
   let state = try makeAutocompleteTemporaryDirectory()
   let project = try makeAutocompleteTemporaryDirectory()
   defer {
     try? FileManager.default.removeItem(at: state)
     try? FileManager.default.removeItem(at: project)
   }
-  // 只在磁盘上摆出真实的 .git 布局；测试进程里没有任何 git 可执行文件参与。
-  let git = project.appendingPathComponent(".git")
-  try FileManager.default.createDirectory(
-    at: git.appendingPathComponent("refs/heads"), withIntermediateDirectories: true)
-  try "ref: refs/heads/main\n".write(
-    to: git.appendingPathComponent("HEAD"), atomically: true, encoding: .utf8)
-  for branch in ["main", "master-fix"] {
-    try "".write(
-      to: git.appendingPathComponent("refs/heads/\(branch)"), atomically: true, encoding: .utf8)
-  }
-
   let service = try AutocompleteService(
-    baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL)
+    baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL,
+    nativeDynamicQuery: { line, directory, _, specifications in
+      #expect(line == "git checkout ma")
+      #expect(directory == project.path)
+      #expect(specifications.command(named: "git") != nil)
+      return ["master-fix", "main"].map { .init(name: $0, description: "branch", kind: .argument) }
+    })
+  let items = await service.dynamicCandidates(line: "git checkout ma", directory: project.path)
   let result = service.suggestions(
     line: "git checkout ma",
     directory: project.path,
     sessionIdentifier: "session",
-    controls: ControlConfiguration()
+    controls: ControlConfiguration(), dynamic: items
   )
-  let dynamic = result.candidates.filter { $0.kind == .dynamicArgument }
-  #expect(dynamic.map(\.insertText).contains("master-fix"))
-  #expect(dynamic.map(\.insertText).contains("main"))
+  #expect(result.candidates.map(\.insertText) == ["master-fix", "main"])
+  #expect(result.candidates.allSatisfy { $0.kind == .argument && $0.description == "branch" })
 }
 
 @Test("动态候选按见证文件缓存，文件不变时不重复读盘")
@@ -539,27 +533,42 @@ func autocompleteContextFiltersFilesystemByArgument() throws {
   #expect(query("cat 'notes").candidates.contains { $0.appendableSuffix(from: "cat 'notes") == ".md'" })
 }
 
-@Test("历史参数按当前参数槽位学习，插入选项后仍推荐常用值")
+@Test("已知规格不注入历史裸参数，目录整行只在完整前缀匹配时出现")
 @MainActor
-func autocompleteContextReusesLearnedArguments() throws {
+func autocompleteContextDoesNotInjectHistoryArgumentsIntoKnownSpecs() throws {
   let state = try makeAutocompleteTemporaryDirectory()
   defer { try? FileManager.default.removeItem(at: state) }
   let service = try AutocompleteService(baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL)
   for _ in 0..<4 {
-    _ = service.record(command: "git checkout feature-smart", directory: "/project", exitStatus: 0,
-      ignorePatterns: [], knownOptions: [], sessionIdentifier: "test")
+    #expect(service.record(command: "git checkout feature-smart", directory: "/project", exitStatus: 0,
+      ignorePatterns: [], knownOptions: [], sessionIdentifier: "test"))
   }
-  let result = service.suggestions(line: "git checkout --force fe", directory: "/project", sessionIdentifier: "test", controls: .init())
-  #expect(result.candidates.first?.appendableSuffix(from: "git checkout --force fe") == "ature-smart")
+  for directory in ["/project", "/other"] {
+    let result = service.suggestions(line: "git checkout --force fe", directory: directory,
+      sessionIdentifier: "test", controls: .init())
+    #expect(!result.candidates.contains { $0.displayText == "feature-smart" })
+    #expect(!result.candidates.contains { $0.insertText == "git checkout feature-smart" })
+  }
+  let local = service.suggestions(line: "git checkout fe", directory: "/project",
+    sessionIdentifier: "test", controls: .init())
+  #expect(local.candidates.contains {
+    $0.kind == .learnedCommand && $0.insertText == "git checkout feature-smart"
+  })
+  #expect(!local.candidates.contains { $0.insertText == "feature-smart" })
+  let other = service.suggestions(line: "git checkout fe", directory: "/other",
+    sessionIdentifier: "test", controls: .init())
+  #expect(!other.candidates.contains {
+    $0.insertText == "feature-smart" || $0.insertText == "git checkout feature-smart"
+  })
   var disabled = ControlConfiguration()
   disabled.autocompleteOnDeviceLearning = false
-  #expect(!service.suggestions(line: "git checkout --force fe", directory: "/project", sessionIdentifier: "test", controls: disabled).candidates.contains { $0.insertText == "feature-smart" })
-  #expect(!service.suggestions(line: "git checkout --force fe", directory: "/other", sessionIdentifier: "test", controls: .init()).candidates.contains { $0.insertText == "feature-smart" })
+  #expect(!service.suggestions(line: "git checkout fe", directory: "/project",
+    sessionIdentifier: "test", controls: disabled).candidates.contains { $0.kind == .learnedCommand })
 }
 
-@Test("无规格命令连续只传单词后不再列文件，打 ./ 或传过路径时恢复")
+@Test("无规格命令不按参数使用习惯抑制文件补全")
 @MainActor
-func autocompleteServiceLearnsPathHabitsForUnknownCommands() throws {
+func autocompleteServiceKeepsFilesForUnknownCommands() throws {
   let state = try makeAutocompleteTemporaryDirectory()
   defer { try? FileManager.default.removeItem(at: state) }
   let project = state.appendingPathComponent("project")
@@ -581,22 +590,22 @@ func autocompleteServiceLearnsPathHabitsForUnknownCommands() throws {
   #expect(files("zzunknowncmd ").contains("README.md"))
   run("zzunknowncmd alpha")
   run("zzunknowncmd beta")
-  #expect(files("zzunknowncmd ").isEmpty)
+  #expect(files("zzunknowncmd ").contains("notes.txt"))
   #expect(files("zzunknowncmd ./").contains("./README.md"))
-  // 习惯落盘，重新加载仍生效。
+  // 重载学习数据也不改变文件枚举规则。
   let reloaded = try AutocompleteService(baseDirectory: state, bundledSpecURL: repositoryAutocompleteSpecURL)
   #expect(
     reloaded.suggestions(
       line: "zzunknowncmd ", directory: project.path, sessionIdentifier: "s", controls: ControlConfiguration()
-    ).candidates.filter { $0.kind == .file }.isEmpty)
-  // 传过真实路径后恢复列文件（README.md 本身会与学到的历史参数归并，看另一个文件）。
+    ).candidates.contains { $0.kind == .file && $0.insertText == "README.md" })
+  // 同一整行和文件候选会去重；记录一个文件不会抑制其它文件。
   run("zzunknowncmd README.md")
   #expect(files("zzunknowncmd ").contains("notes.txt"))
-  // 清空历史一并清空路径习惯。
+  // 连续词参数仍保留文件候选；清理历史后重新出现被整行去重的文件。
   run("zzunknowncmd alpha")
   run("zzunknowncmd beta")
-  #expect(files("zzunknowncmd ").isEmpty)
-  try service.clearLearning(.history)
+  #expect(files("zzunknowncmd ").contains("notes.txt"))
+  try service.clearData(selection: [.history, .fullLines])
   #expect(files("zzunknowncmd ").contains("README.md"))
 }
 
@@ -621,7 +630,7 @@ func autocompleteServiceIndexesReportedSearchPath() async throws {
   let result = service.suggestions(line: "zzqu", directory: "/project", sessionIdentifier: "s", controls: ControlConfiguration())
   let candidate = try #require(result.candidates.first { $0.insertText == "zzquux" })
   #expect(candidate.kind == .command)
-  #expect(candidate.description == L("PATH 中的程序"))
+  #expect(candidate.appendableSuffix(from: "zzqu") == "ux")
   // 有规格的命令（git）不重复出现为 PATH 候选。
   let git = service.suggestions(line: "gi", directory: "/project", sessionIdentifier: "s", controls: ControlConfiguration())
   #expect(git.candidates.filter { $0.insertText == "git" }.count <= 1)
