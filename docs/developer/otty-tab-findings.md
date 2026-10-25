@@ -1,5 +1,7 @@
 # Otty 1.6.2 原生 Tab / 接受候选规则
 
+> 归档说明：Hopper 原库、关键反编译输出、SHA-256 清单和重开步骤已整理到 [Otty 1.6.2 分析存档](otty-analysis/1.6.2-0fa10277/README.md)。本文中的 `.build/rea/`、任务 worktree 路径与 PID 为历史记录；续查时使用存档中的同名文件，不能当成当前运行状态。
+
 本页记录已保存 REA Evidence 和当前 arm64 Mach-O 的有界 LLVM 反汇编规则。实现与真实窗口验证在恢复报告中单独记录。REA keyDown Evidence：`ev_ab3ac8ae06372e00bb1a44e1006a790df14038e6f458b5613eae4d13694c0022`，文件 `remaining-keybody.json` / `tab-keybody.txt`；新增本地反汇编不冒充 REA Evidence，其 SHA-256 和来源见 `fig-rules-tab-provenance.json`。
 
 ## 调用与状态

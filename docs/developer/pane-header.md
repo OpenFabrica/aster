@@ -56,4 +56,4 @@ UI 编排在 `WorkspaceTitlePopover`、`PaneHeaderActions`；`WorkspaceTitlePane
 
 ## 验证
 
-使用 `./scripts/test.sh --filter 'paneHeader|paneTitleEditor|paneDirectoryApplications|panePrivileges|paneGit|workspaceTitlePopoverExposesWorkingActions'`。测试覆盖恢复规则、hover 无点击、键盘滚动、失效目标、分屏共享、真实 Ghostty 字节和临时本地 Git 仓库；不访问真实 Git remote。真实窗口及当前构建证据保存在 `.design-loop/pane-header/ui/`，完成记录见该目录的 `final.md`。未运行全量套件。
+使用 `./scripts/test.sh --filter 'paneHeader|paneTitleEditor|paneDirectoryApplications|panePrivileges|paneGit|workspaceTitlePopoverExposesWorkingActions'`。测试覆盖恢复规则、hover 无点击、键盘滚动、失效目标、分屏共享、真实 Ghostty 字节和临时本地 Git 仓库；不访问真实 Git remote。真实窗口证据已从任务 `.design-loop/pane-header/ui/` 迁移至主工作区文档的 `otty-analysis/1.6.2-0fa10277/local/pane-header-ui/`，完成记录见归档中的 `final.md`；重开与校验入口见 [分析存档](otty-analysis/1.6.2-0fa10277/README.md)。未运行全量套件。

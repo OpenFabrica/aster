@@ -1,5 +1,7 @@
 # Otty 1.6.2 Pane 顶部菜单行为证据
 
+> 归档说明：Hopper 原库、关键反编译输出、SHA-256 清单和重开步骤已整理到 [Otty 1.6.2 分析存档](otty-analysis/1.6.2-0fa10277/README.md)。本文中的 `.build/rea/`、任务 worktree 路径与 PID 为历史记录；续查时使用存档中的同名文件，不能当成当前运行状态。
+
 本文记录标题胶囊弹层 `WorkspaceCommandPanel` 的原生行为，用于 Aster 对照实现。范围仅包含此弹层及其直接动作；不把 Otty 内部类型名直接等同于 Aster 类型，也不把未跟完的调用链当作已实现规则。
 
 ## 证据与限制

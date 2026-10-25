@@ -1,5 +1,7 @@
 # Otty 1.6.2 的 Fig 数据消费规则
 
+> 归档说明：Hopper 原库、关键反编译输出、SHA-256 清单和重开步骤已整理到 [Otty 1.6.2 分析存档](otty-analysis/1.6.2-0fa10277/README.md)。本文中的 `.build/rea/`、任务 worktree 路径与 PID 为历史记录；续查时使用存档中的同名文件，不能当成当前运行状态。
+
 本文记录已发布 Otty 的 Rust 补全路径实际消费的 Fig 数据，供 Aster 实现和回归测试使用。它不是 Fig 规范摘要，也不把 Swift 模型中存在的字段视为 Rust 引擎已支持的功能。伪代码是 REA/Hopper 产物，不是原始源码；本次结论来自静态调用、字段分类器和 arm64 指令，尚未逐条在 Otty UI 中运行自定义规格验证。
 
 ## 目标与证据
@@ -13,7 +15,7 @@
 | F | `ev_8ce5139646efbd204c0bad3cd84deb009db4b00c92ac0a2ce6408d9e72c848d8` | `.build/rea/remaining-fig-fields.json`：CompletionSpec/SpecArg 字段分类器、SpecArg 与 SpecOption decoder |
 | N | `ev_96a649374255ac759491fbc8ff9ee762258981712dbd2a0f6ba0a7d996c3444f` | `.build/rea/next.json`：`0x101434764` 候选引擎 |
 
-同一二进制的有界 LLVM 反汇编用于核对 Hopper 丢失的字符串立即数、比较方向及循环边界；这些文件不是额外的 REA Evidence。文件哈希、工具版本和范围在 `.build/rea/fig-rules-provenance.json`。相关调查产物保留于任务工作区，不随源码发布。
+同一二进制的有界 LLVM 反汇编用于核对 Hopper 丢失的字符串立即数、比较方向及循环边界；这些文件不是额外的 REA Evidence。文件哈希、工具版本和范围在 `.build/rea/fig-rules-provenance.json`。关键输出已作为压缩证据包随 Git 保存，原始 Hopper 数据库和完整输出保留在主工作区文档的 `local/` 归档中。
 
 ## 实际模型与忽略字段
 

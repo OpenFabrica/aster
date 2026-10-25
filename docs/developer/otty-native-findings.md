@@ -1,5 +1,7 @@
 # Otty 1.6.2 原生补全证据
 
+> 归档说明：Hopper 原库、关键反编译输出、SHA-256 清单和重开步骤已整理到 [Otty 1.6.2 分析存档](otty-analysis/1.6.2-0fa10277/README.md)。本文中的 `.build/rea/`、任务 worktree 路径与 PID 为历史记录；续查时使用存档中的同名文件，不能当成当前运行状态。
+
 本文是 REA 调查的原生规则记录，供独立实现和回归测试使用。伪代码不是原始源码；静态分支成立不代表宿主 UI 已运行时验收。早期推断以本文最终规则为准。
 
 ## 目标与证据
@@ -15,7 +17,7 @@ Hopper 数据库 `.build/rea/otty-1.6.2-0fa10277.hop`，SHA-256：`155cb11ed6e0d
 | C | `ev_b33ee9dfd268988e487d4a3db37474e9f34ba78f5dda4cf22eab97c691042266` | `config.json`：C ABI 清理、配置更新、补全 |
 | N | `ev_96a649374255ac759491fbc8ff9ee762258981712dbd2a0f6ba0a7d996c3444f` | `next.json`：候选引擎、枚举解析器、boost、历史查询、数据库清理 |
 
-以上文件均在任务工作区 `.build/rea/`，是未随源码发布的调查产物。下文伪代码行号为对应 item 的 `pseudocode` 的 1-based 行号；G 使用 `raw_result`。大函数伪代码存在重复块和浮点恢复错误，数值结论以指令佐证为准。
+以上同名文件已保留在版本化证据包和主工作区的本机原始归档中；具体位置见上方存档入口。下文伪代码行号为对应 item 的 `pseudocode` 的 1-based 行号；G 使用 `raw_result`。大函数伪代码存在重复块和浮点恢复错误，数值结论以指令佐证为准。
 
 从同一二进制提取 arm64 slice（文件偏移 16384、长度 41329552），未修改指令。使用 `xcrun llvm-objdump --disassemble --arch-name=aarch64 --start-address=… --stop-address=…` 有界反汇编。`.s` 的地址范围、SHA-256、工具版本、重现命令在 `.build/rea/native-findings-provenance.json`；它们是独立指令佐证，不冒充 REA Evidence。
 

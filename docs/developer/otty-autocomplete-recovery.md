@@ -1,5 +1,7 @@
 # 控制 → 自动补全：Otty 1.6.2 恢复与重建
 
+> 归档说明：Hopper 原库、关键反编译输出、SHA-256 清单和重开步骤已整理到 [Otty 1.6.2 分析存档](otty-analysis/1.6.2-0fa10277/README.md)。本文中的 `.build/rea/`、任务 worktree 路径与 PID 为历史记录；续查时使用存档中的同名文件，不能当成当前运行状态。
+
 ## 范围与结论
 
 目标是 `/Applications/Otty.app` 的 1.6.2 版本中“控制 → 自动补全”，包括设置、输入触发、候选计算、学习、更新和清除。
@@ -20,7 +22,7 @@ Aster 的新运行期不再调用旧 `AutocompleteEngine` 或旧排序表；保�
 | 配置 | `ev_b33ee9dfd268988e487d4a3db37474e9f34ba78f5dda4cf22eab97c691042266` | 枚举别名及 fallback |
 | 后续定点恢复 | `ev_96a649374255ac759491fbc8ff9ee762258981712dbd2a0f6ba0a7d996c3444f` | boost、失败清理、上下文；汇编用于核对数值和布局 |
 
-原生完整输出保存在本工作区 `.build/rea/`；地址、推导和限制见 [原生证据笔记](otty-native-findings.md)。
+原生完整输出已迁移至主工作区文档的 `local/rea/` 归档；地址、推导和限制见 [原生证据笔记](otty-native-findings.md)。
 初次从原始二进制启动的 REA 桥接超过等待时限，取消后 Hopper Python 在 `server.accept()` 中报告
 `SystemError` / `KeyboardInterrupt`。这不表示已经完成的二进制分析被破坏。
 后续复用了已保存的 `.build/rea/otty-1.6.2-0fa10277.hop`，完成多轮定点反编译。最后一轮 close_binary 未收到清理确认，返回 cleanup_incomplete；随后现场确认 Hopper 已退出，并结束该轮遗留的独立 driver 子进程。已导出证据保留，不能将这个返回称为正常关闭确认。
@@ -115,4 +117,4 @@ SSH/which、超时、取消、动态迟到、Unicode 和引号等分支完成定
 
 交付应用为 `/Users/mike/.codex/worktrees/otty-autocomplete-rebuild/aster/dist/Aster.app`，版本 `0.6.26-dev-6c7b4fa+`，bundle ID `io.local.aster-terminal.dev`。当前验收进程 PID 22687，路径与该产物一致。主可执行文件修改时间 `2026-10-25T19:00:51.916638+08:00`，SHA-256 `0265d7ed60061b7740f5cef8142a77c18ca7b7fdf7def20bba629e5f02325a4f`。完整交付信息在 `.build/rea/artifact-manifest.json`。
 
-没有运行全仓测试，没有提交、合并或发布。主工作区保持干净，其已有 ahead 2 状态未改变。
+以上为初轮交付的历史验证：当时未运行全仓测试，尚未提交、合并或发布，主工作区保持干净且已有 ahead 2。后续定向回归、提交整合及归档入口见本页顶部的续查手册。
