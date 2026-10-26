@@ -11,7 +11,7 @@ func fileRenderPipelineSupportsOperatorToken() async throws {
   let artifact = await FileRenderPipeline().renderSource(
     "let selected = preferred ?? fallback",
     language: "swift",
-    dark: false
+    theme: TerminalThemeCatalog.resolve(named: "Ayu Light", customThemes: [], mode: .light)
   )
   guard case .highlightedRTF(let data)? = artifact else {
     Issue.record("源码渲染没有返回 RTF")
@@ -25,7 +25,9 @@ func fileRenderPipelineUsesLightTextInDarkAppearance() async throws {
   let text = "plain words"
   // 对比浅色与深色两次渲染的正文亮度：深色外观下正文必须明显更亮。
   func brightness(dark: Bool) async throws -> CGFloat {
-    let artifact = await FileRenderPipeline().renderSource(text, language: "plaintext", dark: dark)
+    let theme = TerminalThemeCatalog.resolve(
+      named: dark ? "Ayu Dark" : "Ayu Light", customThemes: [], mode: dark ? .dark : .light)
+    let artifact = await FileRenderPipeline().renderSource(text, language: "plaintext", theme: theme)
     guard case .highlightedRTF(let data)? = artifact else {
       Issue.record("源码渲染没有返回 RTF")
       return -1
@@ -129,9 +131,9 @@ func previewFilePaneStartsReadOnlyWithUnifiedToolbar() throws {
       .first { $0.identifier?.rawValue == "file-pane-status" })
   #expect(runtime.isReadOnly)
   #expect(mode.selectedSegment == 1)
-  #expect(status.stringValue == "✓ Saved")
+  #expect(status.isHidden)
   let buttonTitles = controller.view.descendants.compactMap { ($0 as? NSButton)?.title }
-  #expect(buttonTitles.contains("Close"))
+  #expect(buttonTitles.contains(L("关闭文件")))
 }
 
 @Test("Markdown Preview File Pane 渲染标题和正文")

@@ -141,6 +141,9 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   private var fileNodes: [WorkspaceFileNode]?
   private var filesDirectory: String?
   private var requestedFilesDirectory: String?
+  private var filesNeedsRefresh = true
+  private var filesWatchers: [FileSystemDirectoryWatcher] = []
+  private var filesWatchRefreshTask: Task<Void, Never>?
   private weak var filesSearchField: NSSearchField?
   private weak var filesSortButton: NSButton?
   private weak var filesShowHiddenButton: NSButton?
@@ -271,6 +274,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     informationRefreshTask?.cancel()
     gitTask?.cancel()
     filesTask?.cancel()
+    filesWatchRefreshTask?.cancel()
     outlineTask?.cancel()
     gitDiffTask?.cancel()
     historyTask?.cancel()
@@ -627,6 +631,9 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       dismissGitDiffPreview()
     case .files:
       filesTask?.cancel()
+      filesNeedsRefresh = true
+      filesWatchRefreshTask?.cancel()
+      filesWatchers.removeAll()
       remoteFilesController?.suspend()
     case .outline:
       if outlineTask != nil { outlineNeedsRefresh = true }
@@ -844,10 +851,18 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     let paneID = tab.activePaneID
     let directory = requestedDirectory ?? tab.workingDirectory
     let includeHidden = filesShowHidden
+    let expansion = expandedPaths
+    if requestedFilesDirectory != directory, fileNodes != nil {
+      sectionsAwaitingPaneRefresh.insert(.files)
+      updatePaneRefreshOverlay()
+    }
     requestedFilesDirectory = directory
+    filesNeedsRefresh = false
     filesTask = Task { @MainActor [weak self] in
       guard let self else { return }
-      let value = await self.inspectionClient.files(directory, includeHidden)
+      let value = await DetailsFileTreeSnapshot.load(
+        directory: directory, expandedPaths: expansion, includeHidden: includeHidden,
+        read: self.inspectionClient.files)
       guard !Task.isCancelled, self.model.selectedTab?.id == tabID,
         self.model.selectedTab?.activePaneID == paneID,
         self.requestedFilesDirectory == directory,
@@ -856,7 +871,37 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       self.fileNodes = value
       self.filesDirectory = directory
       self.rebuildFileTreeProjection()
+      self.watchFilesDirectories(directory: directory)
       self.completePaneRefresh(for: .files)
+    }
+  }
+
+  /// 仅监听当前可见树中的目录。vnode 事件合并后重取快照，收起面板或离开 Files 即释放。
+  private func watchFilesDirectories(directory: String) {
+    filesWatchers.removeAll()
+    guard isPresentationActive, selection == .files, !remoteOverrides(.files) else { return }
+    let paths = [directory] + visibleFileRows.map(\.item.node).filter {
+      $0.isDirectory && !$0.isSymbolicLink && expandedPaths.contains($0.path)
+    }.map(\.path)
+    for path in paths {
+      let watcher = FileSystemDirectoryWatcher(directory: URL(fileURLWithPath: path))
+      do {
+        try watcher.start { [weak self] in
+          guard let self else { return }
+          self.filesWatchRefreshTask?.cancel()
+          self.filesWatchRefreshTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            guard let self, self.isPresentationActive, self.selection == .files,
+              self.requestedFilesDirectory == directory, !self.remoteOverrides(.files)
+            else { return }
+            self.refreshFiles(directory: directory)
+          }
+        }
+        filesWatchers.append(watcher)
+      } catch {
+        // 不可监听的目录仍允许读取；下次进入 Files 必须重新枚举。
+        filesNeedsRefresh = true
+      }
     }
   }
 
@@ -893,7 +938,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       // 目录没变也可能过期：分支切换、外部 commit 都不会通知面板，重开时必须按时间重取。
       if gitDirectory != directory || isGitSnapshotExpired { refreshGit() }
     case .files:
-      if filesDirectory != directory { refreshFiles() }
+      if filesDirectory != directory || filesNeedsRefresh { refreshFiles() }
     case .outline:
       if outlineNeedsRefresh { refreshOutline(debounced: false) }
       // 会话区目录没变也可能过期：期间可能有新 session 结束并落库。
@@ -1702,7 +1747,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       guard let self else { return }
       self.filesShowHidden.toggle()
       self.updateFilesShowHiddenButton()
-      self.refreshFiles(directory: self.filesDirectory ?? self.requestedFilesDirectory)
+      self.refreshFiles(directory: self.requestedFilesDirectory)
     }
     showHidden.isBordered = false
     showHidden.identifier = NSUserInterfaceItemIdentifier("details-files-show-hidden")
@@ -1769,7 +1814,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     return root
   }
 
-  /// 扁平（depth 序列）→ 树。`WorkspaceFileTree.enumerate` 按遍历顺序输出，子节点
+  /// 扁平（depth 序列）→ 树。目录快照按遍历顺序输出，子节点
   /// 紧跟父节点且 depth 每次最多 +1，递归归入上一层末尾节点即可。
   private struct FileTreeItem {
     let node: WorkspaceFileNode
@@ -1792,7 +1837,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       }
     }
     var roots: [FileTreeItem] = []
-    for node in nodes.prefix(2_000) {
+    for node in nodes {
       insert(node, into: &roots, depth: 0)
     }
     return roots
@@ -1965,6 +2010,8 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       expandedPaths.insert(path)
     }
     rebuildVisibleFileRows()
+    // 折叠期间不监听后代；再次展开必须重读，即使旧快照里还缓存着它的子节点。
+    refreshFiles(directory: requestedFilesDirectory)
   }
 
   private func openFileNode(_ node: WorkspaceFileNode) {
@@ -2192,7 +2239,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   private func refreshFilesAfterMutation(expanding url: URL, selecting selection: URL? = nil) {
     expandedPaths.insert(url.standardizedFileURL.path)
     pendingFileSelectionPath = selection?.standardizedFileURL.path
-    refreshFiles(directory: filesDirectory ?? requestedFilesDirectory)
+    refreshFiles(directory: requestedFilesDirectory)
   }
 
   // MARK: - History
@@ -3895,7 +3942,7 @@ private final class DetailsFileRowView: HoverHighlightRowView {
     let symbolName = node.isSymbolicLink
       ? "arrow.up.forward.square" : (node.isDirectory ? "folder" : "doc")
     iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-    iconView.contentTintColor = Self.filesIconTint
+    iconView.contentTintColor = AsterTheme.accent
     fileButton.image = nil
     fileButton.contentTintColor = nil
     fileButton.attributedTitle = NSAttributedString(
@@ -3908,10 +3955,6 @@ private final class DetailsFileRowView: HoverHighlightRowView {
     self.onToggle = onToggle
     self.onOpen = onOpen
   }
-
-  /// 文件夹与文件图标统一 `#5FABF3`；文件名保持默认前景。
-  private static let filesIconTint = NSColor(
-    srgbRed: 0x5F / 255, green: 0xAB / 255, blue: 0xF3 / 255, alpha: 1)
 
   @objc private func openItem() { onOpen?() }
 }

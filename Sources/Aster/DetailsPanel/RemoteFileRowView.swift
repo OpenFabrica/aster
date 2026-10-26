@@ -71,10 +71,6 @@ final class RemoteFileRowView: HoverHighlightRowView {
   private var regularMetadata = ""
   private var appliedMode: RemoteInspectorLayout.Mode?
 
-  /// 图标色与本地 Files 页保持一致，避免两种模式看起来像两个功能。
-  private static let iconTint = NSColor(
-    srgbRed: 0x5F / 255, green: 0xAB / 255, blue: 0xF3 / 255, alpha: 1)
-
   /// 创建一行：图标、可双击进入的名称、右对齐的元数据。字号与图标随界面字号档位缩放。
   init(identifier: NSUserInterfaceItemIdentifier) {
     super.init(frame: .zero)
@@ -132,7 +128,7 @@ final class RemoteFileRowView: HoverHighlightRowView {
     case .file, .other: symbol = "doc"
     }
     iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-    iconView.contentTintColor = Self.iconTint
+    iconView.contentTintColor = AsterTheme.accent
 
     let nameColor = entry.nameDecodedLossy ? AsterTheme.tertiaryInk : AsterTheme.ink
     nameButton.attributedTitle = NSAttributedString(

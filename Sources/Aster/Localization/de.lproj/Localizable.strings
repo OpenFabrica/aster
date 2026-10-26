@@ -2329,3 +2329,55 @@
 "错误退出时通知" = "Bei Fehlerbeendigung benachrichtigen";
 "防止休眠" = "WACH HALTEN";
 "静音" = "Stummschalten";
+
+"无法读取预览选区，请重试。" = "Die Vorschauauswahl konnte nicht gelesen werden. Bitte erneut versuchen.";
+"发送文件到 Chat" = "Datei an Chat senden";
+"文件选区" = "Dateiauswahl";
+"没有运行中的目标终端，可先复制消息。" = "Kein Zielterminal läuft. Sie können die Nachricht zunächst kopieren.";
+
+"语法" = "Syntax";
+
+"显示为" = "Anzeigen als";
+
+"自动检测" = "Automatisch erkennen";
+
+"从磁盘重新加载" = "Von Festplatte neu laden";
+
+"复制文件路径" = "Dateipfad kopieren";
+
+"关闭文件" = "Schließen";
+
+"已保存" = "Gespeichert";
+
+"放弃更改" = "Verwerfen";
+
+"磁盘文件已修改" = "Auf Festplatte geändert";
+
+"运行脚本" = "Skript ausführen";
+
+"实际大小" = "Originalgröße";
+
+"缩放以适应" = "An Fenster anpassen";
+
+"打开可执行文件？" = "Ausführbare Datei öffnen?";
+
+"放大" = "Vergrößern";
+"缩小" = "Verkleinern";
+
+"当前项目的 Agents" = "AGENTS IN DIESEM PROJEKT";
+
+"当前项目的终端" = "TERMINALS IN DIESEM PROJEKT";
+
+"其他 Agents" = "ANDERE AGENTS";
+
+"其他终端" = "ANDERE TERMINALS";
+
+"创建新会话" = "NEU ERSTELLEN";
+
+"新建 %@" = "Neu: %@";
+
+"正在启动 %@…" = "%@ wird gestartet…";
+
+"%@ 未就绪，请先在新终端中完成启动，再选择该终端重试。" = "%@ ist noch nicht bereit. Schließe den Start im neuen Terminal ab, wähle es aus und versuche es erneut.";
+
+"请在本地工作区创建聊天目标。" = "Erstelle Chatziele in einem lokalen Arbeitsbereich.";

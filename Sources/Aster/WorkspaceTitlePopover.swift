@@ -17,14 +17,16 @@ final class WorkspaceTitleBarBackgroundView: NSView {
   }
 }
 
-/// 工作区标题按钮。Otty 在左侧标签布局中常驻显示当前目录胶囊；程序标题仍保存在
-/// `programTitle` 中供窗口标题和辅助语义使用，但不会替换用户定位工作区所需的路径。
+/// 工作区标题按钮：终端显示当前目录，文件 Pane 显示资源标题。
 @MainActor
 final class WorkspaceTitleButton: NSButton {
   var programTitle: String {
     didSet { updatePresentation() }
   }
   var workingDirectory: String {
+    didSet { updatePresentation() }
+  }
+  var resourceTitle: String? {
     didSet { updatePresentation() }
   }
   /// 活动 Pane 的 Agent 会话标题。有值时胶囊显示它（工作目录退到 toolTip），
@@ -113,7 +115,12 @@ final class WorkspaceTitleButton: NSButton {
   }
 
   private func updatePresentation() {
-    if let agentSessionTitle {
+    if let resourceTitle {
+      title = "\(resourceTitle) ⋯"
+      toolTip = workingDirectory
+      image = nil
+      imagePosition = .noImage
+    } else if let agentSessionTitle {
       title = "\(agentSessionTitle) ⋯"
       // 会话标题占据胶囊时，目录定位信息仍要可达：toolTip 保留完整路径。
       toolTip = workingDirectory
@@ -228,8 +235,9 @@ final class WorkspaceTitlePopoverViewController: NSViewController, NSTextFieldDe
   /// 1.5 倍约 420×738，常见屏幕放得下，所以不设上限，否则底部的行会被裁掉。
   static let preferredSize = NSSize(
     width: InterfaceScale.length(280), height: InterfaceScale.length(492))
-  /// 内容列宽：弹层宽度减去左右各 14pt 内边距（内边距不缩放）。
+  /// 命名、目录和分隔线保留 14pt 外边距；动作行扩展到距弹层边框 7pt。
   private static let rowWidth = preferredSize.width - 28
+  private static let actionRowWidth = preferredSize.width - 14
 
   /// 绑定当前标签；弹层尺寸由 `preferredSize` 决定。
   init(model: AppModel, preferences: AppPreferences, tab: TerminalTabItem) {
@@ -270,13 +278,13 @@ final class WorkspaceTitlePopoverViewController: NSViewController, NSTextFieldDe
 
     let content = NSStackView()
     content.orientation = .vertical
-    content.alignment = .leading
+    content.alignment = .centerX
     content.spacing = 1
     root.addSubview(content)
     content.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
-      content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+      content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 7),
+      content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -7),
       content.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
       content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -12),
     ])
@@ -460,7 +468,7 @@ final class WorkspaceTitlePopoverViewController: NSViewController, NSTextFieldDe
     }
     button.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      button.widthAnchor.constraint(equalToConstant: Self.rowWidth),
+      button.widthAnchor.constraint(equalToConstant: Self.actionRowWidth),
       button.heightAnchor.constraint(equalToConstant: InterfaceScale.length(28)),
     ])
     return button

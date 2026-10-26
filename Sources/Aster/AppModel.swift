@@ -25,18 +25,24 @@ struct AgentChatDestination: Identifiable, Equatable {
   var id: UUID { paneID }
   let tabID: UUID
   let paneID: UUID
-  let provider: AgentProvider
+  let provider: AgentProvider?
   let title: String
+  var workingDirectory: String? = nil
+  var agentName: String? = nil
+
+  var providerName: String? { agentName ?? provider?.displayName }
 }
 
 /// 打开“发送到聊天”面板时冻结的来源快照。终端输出只存在内存中，绝不写入工作区
 /// 快照或日志；发送前仍由 `AgentChatContextBuilder` 进行清理和脱敏。
 struct AgentChatPresentation: Equatable {
   let originPaneID: UUID
-  let destinations: [AgentChatDestination]
+  var destinations: [AgentChatDestination]
   let selection: String?
   let transcript: String
   let transcriptHasError: Bool
+  var fileContext: FileChatContext? = nil
+  var workingDirectory: String? = nil
 }
 
 /// Shell 菜单在打开瞬间读取的聚焦 Pane Agent 上下文。它只包含继续会话所需的稳定
@@ -547,7 +553,12 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     self.updatedAt = updatedAt ?? createdAt
     self.titleColor = titleColor
     self.autoTitleColorIndex = autoTitleColorIndex
-    let initialTitleState = (titleState ?? TerminalTitleState(fallback: title)).normalized()
+    var initialTitleState = (titleState ?? TerminalTitleState(fallback: title)).normalized()
+    if let resource = layout?.allPanes.first, [.editor, .preview].contains(resource.kind) {
+      // 恢复旧文件 Pane 时清掉它继承的 Shell OSC 标题，保留用户的名称/前缀覆盖。
+      initialTitleState = TerminalTitleState(tabOverride: initialTitleState.tabOverride,
+        windowOverride: initialTitleState.windowOverride, fallback: Self.displayName(for: resource))
+    }
     self.titleState = initialTitleState
     self.titleEditorState = TabTitleEditorState(override: initialTitleState.tabOverride)
     self.title = initialTitleState.tabTitle
@@ -633,6 +644,13 @@ final class TerminalTabItem: ObservableObject, Identifiable {
   var activeAgentSessionTitle: String? {
     if case .name = titleState.tabOverride { return nil }
     return paneAgentSessionTitles[activePaneID]
+  }
+
+  /// 文件 Pane 的标题栏使用资源标题；终端继续显示当前工作目录。
+  var activeFileTitle: String? {
+    guard let kind = runtimes[activePaneID]?.descriptor.kind,
+      kind == .editor || kind == .preview else { return nil }
+    return displayTitle
   }
 
   /// 标签展示名：用户固定名 > 活动 Pane 的 Agent 会话标题 > OSC/目录自动标题。
@@ -944,6 +962,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     )
     runtimes.removeValue(forKey: activePaneID)?.stop()
     paneAgentSessionTitles.removeValue(forKey: activePaneID)
+    paneTitleStates.removeValue(forKey: activePaneID)
     layout = layout.updatingPane(paneID: activePaneID) { _ in replacement }
     addRuntime(for: replacement)
     updateTitleFallback(resourceURL.lastPathComponent, paneID: activePaneID)
@@ -1689,6 +1708,8 @@ final class AppModel: ObservableObject {
   var openQuicklyInitialFilter = OpenQuicklyFilter.all
   var enabledAgentProviders: [AgentProvider] = []
   var agentLaunchCommands: [String: [String]] = [:]
+  /// 应用注入其它窗口的模型；目标身份在实际预填时跨窗口重新解析。
+  var chatDestinationModelsProvider: (() -> [AppModel])?
   var workflowRecipeReplaySettings: WorkflowRecipeReplaySettings {
     WorkflowRecipeReplaySettings(savedRecipes: savedRecipeReplayMode, recipeFiles: recipeReplayMode)
   }
@@ -2125,6 +2146,25 @@ final class AppModel: ObservableObject {
       workingDirectory: directory
     )
     insertTab(tab, position: position, hasContent: hasContent)
+  }
+
+  /// 文件工具栏 Run：只运行本地 .sh，复用新终端就绪后的命令队列，避免向旧 Pane 写入。
+  @discardableResult
+  func runShellFile(_ url: URL) -> Bool {
+    guard isLocalMachineActive, remoteStructureHandler == nil,
+      url.isFileURL, url.pathExtension.lowercased() == "sh"
+    else { return false }
+    do {
+      guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { return false }
+      let tab = TerminalTabItem(title: url.lastPathComponent,
+        workingDirectory: url.deletingLastPathComponent().path)
+      pendingRecipeCommands[tab.activePaneID] = ["bash " + ShellQuoting.singleQuoted(url.path)]
+      insertTab(tab, hasContent: true)
+      return true
+    } catch {
+      notice = error.localizedDescription
+      return false
+    }
   }
 
   /// 跨窗口拖动标签时转移现有 TerminalTabItem，而不是从 snapshot 重建。PTY、编辑
@@ -2835,7 +2875,7 @@ final class AppModel: ObservableObject {
   }
 
   /// 捕获当前 Pane 的选区与最近滚动缓冲区，随后由面板让用户决定是否各自附加。目标
-  /// 覆盖当前工作区的全部标签，但只接受仍运行中的 Claude Code/Codex 会话。
+  /// 覆盖已打开窗口的全部运行中终端，菜单区分 Agent、普通终端和新建目标。
   func presentAgentChat() {
     guard let tab = selectedTab,
       let runtime = tab.activeRuntime,
@@ -2845,10 +2885,6 @@ final class AppModel: ObservableObject {
       return
     }
     let destinations = agentChatDestinations()
-    guard !destinations.isEmpty else {
-      notice = L("当前工作区没有可接收聊天内容的 Claude Code 或 Codex。")
-      return
-    }
     let transcript = session.textSnapshot().lines.suffix(2_000).joined(separator: "\n")
     agentChatPresentationRequested.send(
       AgentChatPresentation(
@@ -2856,7 +2892,8 @@ final class AppModel: ObservableObject {
         destinations: destinations,
         selection: session.selectedTextForAgentContext,
         transcript: transcript,
-        transcriptHasError: session.lastCommandExitStatus.map { $0 != 0 } ?? false
+        transcriptHasError: session.lastCommandExitStatus.map { $0 != 0 } ?? false,
+        workingDirectory: tab.workingDirectory
       )
     )
   }
@@ -2869,24 +2906,82 @@ final class AppModel: ObservableObject {
     destination: AgentChatDestination,
     comment: String,
     selection: String?,
-    transcript: String?
+    transcript: String?,
+    fileContext: String? = nil
   ) -> Bool {
-    let trimmedComment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmedComment.utf8.count <= AgentChatContextBudget().reservedPromptBytes else {
-      notice = L("Comment 超过 8 KiB 上限。")
-      return false
-    }
-    guard let target = tabs.first(where: { $0.id == destination.tabID })?.runtime(for: destination.paneID),
+    guard let text = agentChatMessage(comment: comment, selection: selection,
+      transcript: transcript, fileContext: fileContext) else { return false }
+    guard let target = chatDestinationModels.lazy.flatMap(\.tabs)
+      .first(where: { $0.id == destination.tabID })?.runtime(for: destination.paneID),
       let session = target.terminalSession,
-      session.activeAgentProvider == destination.provider,
-      destination.provider == .claudeCode || destination.provider == .codex
+      session.activeAgentProvider == destination.provider
     else {
       notice = L("目标 Agent 已退出或 Pane 已关闭。")
       return false
     }
+    guard session.typePromptText(text) else {
+      notice = L("目标 Agent 当前无法接收聊天内容。")
+      return false
+    }
+    notice = L("已预填到 \(destination.title) 的输入框，等待你确认发送。")
+    return true
+  }
 
+  /// 新建目标仅在 Send 时启动；等待选中的 CLI 就绪后预填，不追加提交回车。
+  /// 启动失败时保留对话框，不能把消息当作 Shell 命令写入空闲提示符。
+  func prefillNewAgentChat(_ target: AgentChatNewTarget, workingDirectory: String?,
+    comment: String, selection: String?, transcript: String?, fileContext: String?) async -> Bool {
+    guard isLocalMachineActive, remoteStructureHandler == nil else {
+      notice = L("请在本地工作区创建聊天目标。")
+      return false
+    }
+    guard let text = agentChatMessage(comment: comment, selection: selection,
+      transcript: transcript, fileContext: fileContext) else { return false }
+    let directory = workingDirectory ?? selectedTab?.workingDirectory
+      ?? FileManager.default.homeDirectoryForCurrentUser.path
+    let components = target.launchComponents(overrides: agentLaunchCommands)
+    let tab = TerminalTabItem(title: target.name, workingDirectory: directory)
+    guard let session = tab.activeSession else { return false }
+    pendingRecipeCommands[tab.activePaneID] = [WorkflowShellCommandEncoder.encode(components)]
+    insertTab(tab, hasContent: true)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(8))
+    do {
+      while ContinuousClock.now < deadline {
+        try Task.checkCancellation()
+        let matched: Bool
+        if let provider = target.provider {
+          matched = session.activeAgentProvider == provider
+        } else {
+          matched = session.foregroundCommandName == (components[0] as NSString).lastPathComponent
+        }
+        if matched, session.hasForegroundCommand {
+          // 与参考保持短暂 TUI 布局时间；随后再次检查进程，避免退出后写回 Shell。
+          try await Task.sleep(for: .milliseconds(600))
+          guard session.hasForegroundCommand, session.typePromptText(text) else { break }
+          return true
+        }
+        try await Task.sleep(for: .milliseconds(200))
+      }
+    } catch is CancellationError {
+      return false
+    } catch {
+      notice = error.localizedDescription
+      return false
+    }
+    notice = L("\(target.name) 未就绪，请先在新终端中完成启动，再选择该终端重试。")
+    return false
+  }
+
+  private func agentChatMessage(comment: String, selection: String?, transcript: String?,
+    fileContext: String?) -> String? {
+    let trimmedComment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmedComment.utf8.count <= AgentChatContextBudget().reservedPromptBytes else {
+      notice = L("Comment 超过 8 KiB 上限。")
+      return nil
+    }
     do {
       var builder = AgentChatContextBuilder()
+      if let fileContext { try builder.add(source: .fileSelection, content: fileContext) }
       if let selection, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         try builder.add(source: .terminalSelection, content: selection)
       }
@@ -2896,18 +2991,12 @@ final class AppModel: ObservableObject {
       let context = builder.renderedForPrompt
       guard !trimmedComment.isEmpty || !context.isEmpty else {
         notice = L("请填写 Comment 或至少选择一项上下文。")
-        return false
+        return nil
       }
-      let text = [trimmedComment, context].filter { !$0.isEmpty }.joined(separator: "\n\n")
-      guard session.typePromptText(text) else {
-        notice = L("目标 Agent 当前无法接收聊天内容。")
-        return false
-      }
-      notice = L("已预填到 \(destination.title) 的输入框，等待你确认发送。")
-      return true
+      return [trimmedComment, context].filter { !$0.isEmpty }.joined(separator: "\n\n")
     } catch {
       notice = L("无法构造聊天上下文：\(error.localizedDescription)")
-      return false
+      return nil
     }
   }
 
@@ -2950,6 +3039,14 @@ final class AppModel: ObservableObject {
   /// transcript、目标 Agent 与 Comment，最终只预填输入框而不会自动回车。
   func sendTerminalSelectionToChat() {
     presentAgentChat()
+  }
+
+  /// 文件动作先展示来源快照与目标选择；没有运行中的目标时仍能复制消息。
+  func presentFileChat(_ context: FileChatContext, originPaneID: UUID) {
+    agentChatPresentationRequested.send(AgentChatPresentation(
+      originPaneID: originPaneID, destinations: agentChatDestinations(),
+      selection: context.selection, transcript: "", transcriptHasError: false, fileContext: context,
+      workingDirectory: URL(fileURLWithPath: context.path).deletingLastPathComponent().path))
   }
 
   /// 文件浏览器的 Send to Chat 只读取普通、非符号链接、UTF-8 小文件，并复用
@@ -3328,22 +3425,38 @@ final class AppModel: ObservableObject {
     return result
   }
 
-  private func agentChatDestinations() -> [AgentChatDestination] {
-    tabs.flatMap { tab in
+  func agentChatDestinations() -> [AgentChatDestination] {
+    chatDestinationModels.flatMap(\.tabs).flatMap { tab in
       tab.layout.allPanes.compactMap { descriptor in
         guard let session = tab.runtime(for: descriptor.id)?.terminalSession,
-          session.statusIsRunning,
-          let provider = session.activeAgentProvider,
-          provider == .claudeCode || provider == .codex
+          session.statusIsRunning
         else { return nil }
+        let provider = session.activeAgentProvider
+        let directory = session.resolvedCurrentWorkingDirectory()
+        let title: String
+        if case .name(let name) = tab.tabTitleOverride,
+          !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+          let name = URL(fileURLWithPath: directory).lastPathComponent
+          title = name.isEmpty ? (provider?.displayName ?? L("终端")) : name
+        }
         return AgentChatDestination(
           tabID: tab.id,
           paneID: descriptor.id,
           provider: provider,
-          title: "\(tab.windowTitle) · \(provider.commandName)"
+          title: title,
+          workingDirectory: directory,
+          agentName: session.hasForegroundCommand ? AgentChatNewTarget.allCases.first {
+            $0.command == session.foregroundCommandName
+          }?.name : nil
         )
       }
     }
+  }
+
+  private var chatDestinationModels: [AppModel] {
+    [self] + (chatDestinationModelsProvider?() ?? []).filter { $0 !== self }
   }
 
   /// 全局跳转必须同时恢复标签与 Pane 焦点；终端行号仅在目标仍位于 scrollback 时

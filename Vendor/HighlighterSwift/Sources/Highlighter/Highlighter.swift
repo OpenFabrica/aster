@@ -274,6 +274,12 @@ open class Highlighter {
         return true
     }
 
+    /// 使用调用方提供的 CSS 与字体，不访问磁盘或更改内置主题资源。
+    public func setTheme(css: String, usingFont: HRFont? = nil) {
+        self.theme = Theme(withTheme: css, usingFont: usingFont)
+        self.theme.name = "aster-current-theme"
+    }
+
 
     /**
      Get a list of available Highlight.js themes.

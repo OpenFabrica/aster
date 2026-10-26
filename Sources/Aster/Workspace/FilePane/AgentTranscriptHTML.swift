@@ -102,8 +102,8 @@ enum AgentTranscriptHTML {
   }
 
   /// 完整 HTML 文档：与 Markdown 预览同一条 CSP（无脚本、无网络、内联样式）。
-  /// 颜色跟随系统明暗，与既有 web 预览一样属于主题令牌规则的显式例外。
-  static func document(body: String) -> String {
+  /// File Pane 传入当前主题；不在窗口内的历史导出保留默认配色。
+  static func document(body: String, style: FilePaneStyle? = nil) -> String {
     """
     <!doctype html><html><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'">
@@ -126,6 +126,8 @@ enum AgentTranscriptHTML {
     .chip{display:inline-block;background:rgba(127,127,127,.13);border-radius:6px;padding:2px 9px;font-size:11px;color:#5a6066;margin:2px 0}
     .notice{font-size:11.5px;color:#8a9096;text-align:center}
     @media(prefers-color-scheme:dark){body{color:#ddd} .claude .md blockquote{color:#aaa} details.tools pre{color:#a8adb3} .chip{color:#a8adb3}}
+    \(style?.previewCSS ?? "")
+    \(style.map { "section header,details.tools,details.tools pre,.chip,.notice,.claude .md blockquote{color:\($0.theme.palette.secondaryForeground.displayString)}" } ?? "")
     </style></head><body>\(body)</body></html>
     """
   }

@@ -7,6 +7,8 @@ License. It embeds Highlight.js, which is distributed under the BSD 3-Clause Lic
 
 Source: https://github.com/smittytone/HighlighterSwift
 
+Aster patches resource lookup and adds caller-provided CSS theme support; see `Vendor/HighlighterSwift/UPSTREAM.md`.
+
 ## Swift Markdown and cmark-gfm
 
 Swift Markdown is copyright Apple Inc. and the Swift project authors and is distributed under

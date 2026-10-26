@@ -13,24 +13,33 @@ enum FileRenderArtifact: Sendable {
 /// File Pane 只依赖这一条窄渲染边界。生产实现由 actor 串行执行，测试可注入轻量
 /// renderer 验证过期结果丢弃等时序，而不需要启动真实 JavaScript 高亮器。
 protocol FileRendering: Sendable {
-  /// `dark` 选择与当前外观匹配的高亮主题；高亮结果是固定颜色，外观变化后需重新渲染。
-  func renderSource(_ text: String, language: String?, dark: Bool) async -> FileRenderArtifact?
+  /// 高亮颜色来自当前主题快照；主题变化后需重新渲染。
+  func renderSource(_ text: String, language: String?, theme: TerminalTheme) async -> FileRenderArtifact?
   func renderPreview(_ text: String, kind: FilePresentationKind) async -> FileRenderArtifact?
+  func sourceLanguages() async -> [String]
+}
+
+extension FileRendering {
+  func sourceLanguages() async -> [String] { [] }
 }
 
 /// 一个工作区窗口持有一个实例。actor 的串行隔离既把 CPU 密集的 Markdown 和语法
 /// 高亮移出主线程，也避免 Highlighter 内部 JavaScriptContext 被并发访问。
 actor FileRenderPipeline: FileRendering {
+  func sourceLanguages() -> [String] {
+    Highlighter()?.supportedLanguages().sorted { $0.localizedStandardCompare($1) == .orderedAscending } ?? []
+  }
   /// 按外观选主题做语法高亮，返回 RTF 数据；高亮失败或任务取消时返回 nil。
-  func renderSource(_ text: String, language: String?, dark: Bool) -> FileRenderArtifact? {
+  func renderSource(_ text: String, language: String?, theme: TerminalTheme) -> FileRenderArtifact? {
     guard !Task.isCancelled, let highlighter = Highlighter() else { return nil }
-    // HighlighterSwift 3.1 内置的旧 `xcode` CSS 缺少新版 highlight.js 会输出的
-    // `hljs-operator`，Debug 构建会为每个运算符打印警告。Panda 主题同时显式定义
-    // params/operator 等新 token；浅色与深色两套分别保证各自底色上的对比度。
-    // 主题里的普通文字色会写进每个字符，所以深色外观必须换深色主题，否则正文
-    // 会以浅色主题的深灰落在深色底上，几乎看不见。
-    _ = highlighter.setTheme(dark ? "panda-syntax-dark" : "panda-syntax-light")
-    guard let highlighted = highlighter.highlight(text, as: language), !Task.isCancelled,
+    highlighter.setTheme(
+      css: FilePaneStyle(theme: theme).sourceCSS,
+      usingFont: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular))
+    // 未知扩展名或语法失败时也提交当前主题的纯文本，不能残留上一次手选语法的属性。
+    let highlighted = highlighter.highlight(text, as: language) ?? NSAttributedString(string: text,
+      attributes: [.foregroundColor: NSColor(theme.palette.foreground),
+        .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)])
+    guard !Task.isCancelled,
       let data = try? highlighted.data(
         from: NSRange(location: 0, length: highlighted.length),
         documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]

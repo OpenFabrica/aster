@@ -54,18 +54,23 @@ func filePaneSourceHasVisibleGlyphsInViewport(kind: PaneKind, softWrap: Bool) as
   let scroll = try #require(text.enclosingScrollView)
   let container = try #require(text.textContainer)
   let layout = try #require(text.layoutManager)
+  func viewportWidth() -> CGFloat {
+    // 原生 ruler 占据负 x 的 inset；正文只需覆盖从 x=0 开始的实际可见区域。
+    let visible = scroll.contentView.bounds
+    return max(0, visible.maxX - max(0, visible.minX))
+  }
   #expect(text.string == document)
   #expect(scroll.contentSize.width > 100)
   #expect(scroll.contentSize.height > 100)
-  #expect(text.frame.width >= scroll.contentSize.width)
+  #expect(text.frame.width >= viewportWidth())
   #expect(layout.glyphRange(forBoundingRect: text.visibleRect, in: container).length > 0)
-  if !softWrap { #expect(text.frame.width > scroll.contentSize.width) }
+  if !softWrap { #expect(text.frame.width > viewportWidth()) }
   #expect(text.frame.height > scroll.contentSize.height)
   text.scrollRangeToVisible(NSRange(location: (document as NSString).length - 1, length: 1))
   #expect(text.visibleRect.origin.y > 0)
   window.setContentSize(NSSize(width: 900, height: 620))
   window.contentView?.layoutSubtreeIfNeeded()
-  #expect(text.frame.width >= scroll.contentSize.width)
+  #expect(text.frame.width >= viewportWidth())
   #expect(text.frame.height >= scroll.contentSize.height)
   #expect(layout.glyphRange(forBoundingRect: text.visibleRect, in: container).length > 0)
 }

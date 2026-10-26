@@ -2329,3 +2329,55 @@
 "错误退出时通知" = "Notifier en cas d’erreur";
 "防止休眠" = "MAINTIEN EN ÉVEIL";
 "静音" = "Couper le son";
+
+"无法读取预览选区，请重试。" = "Impossible de lire la sélection de l’aperçu. Réessayez.";
+"发送文件到 Chat" = "Envoyer le fichier au chat";
+"文件选区" = "Sélection du fichier";
+"没有运行中的目标终端，可先复制消息。" = "Aucun terminal cible actif. Vous pouvez d’abord copier le message.";
+
+"语法" = "Syntaxe";
+
+"显示为" = "Afficher comme";
+
+"自动检测" = "Détection automatique";
+
+"从磁盘重新加载" = "Recharger depuis le disque";
+
+"复制文件路径" = "Copier le chemin du fichier";
+
+"关闭文件" = "Fermer";
+
+"已保存" = "Enregistré";
+
+"放弃更改" = "Abandonner";
+
+"磁盘文件已修改" = "Modifié sur le disque";
+
+"运行脚本" = "Exécuter le script";
+
+"实际大小" = "Taille réelle";
+
+"缩放以适应" = "Ajuster à la fenêtre";
+
+"打开可执行文件？" = "Ouvrir le fichier exécutable ?";
+
+"放大" = "Agrandir";
+"缩小" = "Réduire";
+
+"当前项目的 Agents" = "AGENTS DANS CE PROJET";
+
+"当前项目的终端" = "TERMINAUX DANS CE PROJET";
+
+"其他 Agents" = "AUTRES AGENTS";
+
+"其他终端" = "AUTRES TERMINAUX";
+
+"创建新会话" = "CRÉER";
+
+"新建 %@" = "Nouveau %@";
+
+"正在启动 %@…" = "Démarrage de %@…";
+
+"%@ 未就绪，请先在新终端中完成启动，再选择该终端重试。" = "%@ n’est pas prêt. Terminez le démarrage dans le nouveau terminal, puis sélectionnez ce terminal et réessayez.";
+
+"请在本地工作区创建聊天目标。" = "Créez les cibles de discussion dans un espace de travail local.";

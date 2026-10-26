@@ -6,7 +6,7 @@ import AsterCore
 @MainActor
 final class AgentChatSendSheetController: NSObject {
   private weak var model: AppModel?
-  private let presentation: AgentChatPresentation
+  private var presentation: AgentChatPresentation
   private let panel: NSPanel
   private let targetPopup = NSPopUpButton()
   private let selectionCheck = NSButton(checkboxWithTitle: L("终端选区"), target: nil, action: nil)
@@ -14,11 +14,18 @@ final class AgentChatSendSheetController: NSObject {
   private let preview = NSTextView()
   private let comment = NSTextView()
   private let errorLabel = NSTextField(labelWithString: "")
+  private let pasteboard: NSPasteboard
+  private var sendTask: Task<Void, Never>?
+  private var projectsTask: Task<Void, Never>?
+  private weak var sendButton: NSButton?
+  private var didChooseDestination = false
+  private var projectPaths: [String: String] = [:]
 
   /// 创建确认面板并搭好界面；面板以 sheet 方式挂到父窗口。
-  init(model: AppModel, presentation: AgentChatPresentation) {
+  init(model: AppModel, presentation: AgentChatPresentation, pasteboard: NSPasteboard = .general) {
     self.model = model
     self.presentation = presentation
+    self.pasteboard = pasteboard
     // 面板内容以文字为主，随界面字号放大；设上限让 1.5 倍时仍放得进 13 寸屏（约 1440×900）。
     panel = NSPanel(
       contentRect: NSRect(
@@ -29,15 +36,24 @@ final class AgentChatSendSheetController: NSObject {
       defer: false
     )
     super.init()
-    panel.title = "Agent transcript"
+    panel.title = presentation.fileContext == nil ? "Agent transcript" : L("发送文件到 Chat")
     panel.isReleasedWhenClosed = false
     panel.standardWindowButton(.zoomButton)?.isHidden = true
     panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
     buildInterface()
+    projectsTask = Task { [weak self, presentation] in
+      let paths = await AgentChatTargetsMenu.resolveProjects(for: presentation)
+      guard let self, !Task.isCancelled else { return }
+      self.projectPaths = paths
+      AgentChatTargetsMenu.populate(self.targetPopup, presentation: self.presentation, projectPaths: paths,
+        preservingSelection: self.didChooseDestination)
+    }
   }
 
   func present(on parent: NSWindow, completion: @escaping () -> Void) {
     parent.beginSheet(panel) { [weak self] _ in
+      self?.sendTask?.cancel()
+      self?.projectsTask?.cancel()
       self?.panel.orderOut(nil)
       completion()
     }
@@ -48,7 +64,7 @@ final class AgentChatSendSheetController: NSObject {
     let root = NSView()
     panel.contentView = root
 
-    let title = NSTextField(labelWithString: "Agent transcript")
+    let title = NSTextField(labelWithString: panel.title)
     title.font = NSFont.interface(ofSize: 22, weight: .bold)
     let status = NSTextField(labelWithString: statusText)
     status.font = NSFont.interface(ofSize: 13, weight: .medium)
@@ -65,6 +81,10 @@ final class AgentChatSendSheetController: NSObject {
       true
 
     selectionCheck.target = self
+    if presentation.fileContext != nil {
+      selectionCheck.title = L("文件选区")
+      transcriptCheck.isHidden = true
+    }
     selectionCheck.action = #selector(sourceChanged(_:))
     selectionCheck.state = presentation.selection?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
       ? .on : .off
@@ -80,10 +100,17 @@ final class AgentChatSendSheetController: NSObject {
 
     let sendLabel = NSTextField(labelWithString: "Send to:")
     sendLabel.font = NSFont.interface(ofSize: 15, weight: .medium)
-    targetPopup.addItems(withTitles: presentation.destinations.map(\.title))
+    targetPopup.identifier = NSUserInterfaceItemIdentifier("chat-send-target")
+    targetPopup.target = self
+    targetPopup.action = #selector(destinationChanged(_:))
+    NotificationCenter.default.addObserver(self, selector: #selector(refreshDestinations(_:)),
+      name: NSPopUpButton.willPopUpNotification, object: targetPopup)
+    AgentChatTargetsMenu.populate(targetPopup, presentation: presentation)
     targetPopup.controlSize = .large
     // 带外框的 popup 高度由 controlSize 固定，字号放大会被裁切，因此保持原字号。
     targetPopup.font = NSFont.systemFont(ofSize: 15, weight: .medium)
+    targetPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    sendLabel.setContentHuggingPriority(.required, for: .horizontal)
     let destination = NSStackView(views: [sendLabel, targetPopup])
     destination.orientation = .horizontal
     destination.alignment = .centerY
@@ -106,6 +133,7 @@ final class AgentChatSendSheetController: NSObject {
     }
     let cancel = ActionButton(title: "Cancel", bezelStyle: .rounded) { [weak self] in self?.dismiss() }
     let send = ActionButton(title: "Send", bezelStyle: .rounded) { [weak self] in self?.send() }
+    sendButton = send
     send.keyEquivalent = "\r"
     let actions = NSStackView(views: [copy, NSView(), cancel, send])
     actions.orientation = .horizontal
@@ -113,8 +141,11 @@ final class AgentChatSendSheetController: NSObject {
 
     let content = NSStackView(views: [title, status, previewScroll, sources, destination, commentLabel, commentScroll, errorLabel, actions])
     content.orientation = .vertical
-    content.alignment = .width
+    content.alignment = .leading
     content.spacing = 10
+    for block in [previewScroll, sources, destination, commentScroll, actions] as [NSView] {
+      block.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+    }
     root.addSubview(content)
     content.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
@@ -128,6 +159,7 @@ final class AgentChatSendSheetController: NSObject {
   }
 
   private var statusText: String {
+    if let context = presentation.fileContext { return context.path }
     if presentation.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return "● Empty"
     }
@@ -135,8 +167,20 @@ final class AgentChatSendSheetController: NSObject {
   }
 
   @objc private func sourceChanged(_ sender: Any?) { updatePreview() }
+  @objc private func destinationChanged(_ sender: Any?) { didChooseDestination = true }
+
+  /// 刷新接收者而保留来源快照；CLI 晚于启动等待期就绪后可以在同一个面板重试。
+  @objc private func refreshDestinations(_ sender: Any?) {
+    guard let model else { return }
+    presentation.destinations = model.agentChatDestinations()
+    AgentChatTargetsMenu.populate(targetPopup, presentation: presentation, projectPaths: projectPaths)
+  }
 
   private func updatePreview() {
+    if let context = presentation.fileContext {
+      preview.string = context.rendered(includeSelection: selectionCheck.state == .on)
+      return
+    }
     var chunks: [String] = []
     if selectionCheck.state == .on, let selection = presentation.selection { chunks.append(selection) }
     if transcriptCheck.state == .on { chunks.append(presentation.transcript) }
@@ -144,21 +188,45 @@ final class AgentChatSendSheetController: NSObject {
   }
 
   private func send() {
-    guard presentation.destinations.indices.contains(targetPopup.indexOfSelectedItem) else { return }
-    let destination = presentation.destinations[targetPopup.indexOfSelectedItem]
-    let selection = selectionCheck.state == .on ? presentation.selection : nil
+    guard sendTask == nil,
+      let choice = targetPopup.selectedItem?.representedObject as? AgentChatTargetChoice else { return }
+    let selection = presentation.fileContext == nil && selectionCheck.state == .on ? presentation.selection : nil
     let transcript = transcriptCheck.state == .on ? presentation.transcript : nil
     guard let model else { return }
-    guard model.prefillAgentChat(
-      destination: destination,
-      comment: comment.string,
-      selection: selection,
-      transcript: transcript
-    ) else {
-      errorLabel.stringValue = model.notice ?? L("无法预填聊天内容。")
-      return
+    let fileContext = presentation.fileContext?.rendered(includeSelection: selectionCheck.state == .on)
+    switch choice {
+    case .existing(let destination):
+      guard model.prefillAgentChat(
+        destination: destination,
+        comment: comment.string,
+        selection: selection,
+        transcript: transcript,
+        fileContext: fileContext
+      ) else {
+        errorLabel.stringValue = model.notice ?? L("无法预填聊天内容。")
+        return
+      }
+      dismiss()
+    case .create(let target):
+      errorLabel.stringValue = L("正在启动 \(target.name)…")
+      targetPopup.isEnabled = false
+      sendButton?.isEnabled = false
+      sendTask = Task { [weak self] in
+        guard let self else { return }
+        let sent = await model.prefillNewAgentChat(target, workingDirectory: presentation.workingDirectory,
+          comment: comment.string, selection: selection, transcript: transcript, fileContext: fileContext)
+        self.sendTask = nil
+        guard !Task.isCancelled else { return }
+        targetPopup.isEnabled = true
+        sendButton?.isEnabled = true
+        if sent {
+          dismiss()
+        } else {
+          refreshDestinations(nil)
+          errorLabel.stringValue = model.notice ?? L("无法预填聊天内容。")
+        }
+      }
     }
-    dismiss()
   }
 
   /// Copy 是用户显式的本地剪贴板操作，不会改变目标 Agent 输入框。复制内容与当前
@@ -171,12 +239,14 @@ final class AgentChatSendSheetController: NSObject {
       errorLabel.stringValue = L("没有可复制的内容。")
       return
     }
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
+    pasteboard.clearContents()
+    pasteboard.setString(text, forType: .string)
     errorLabel.stringValue = L("已复制当前消息。")
   }
 
   private func dismiss() {
+    sendTask?.cancel()
+    projectsTask?.cancel()
     guard let parent = panel.sheetParent else {
       panel.orderOut(nil)
       return
@@ -185,10 +255,6 @@ final class AgentChatSendSheetController: NSObject {
   }
 
   private func scrollView(for textView: NSTextView) -> NSScrollView {
-    let scroll = NSScrollView()
-    scroll.hasVerticalScroller = true
-    scroll.borderType = .bezelBorder
-    scroll.documentView = textView
-    return scroll
+    AgentChatTextScrollView(textView: textView)
   }
 }

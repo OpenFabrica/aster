@@ -912,6 +912,10 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
       }
       workspaceModel.agentLaunchCommands =
         preferences.configuration.agents.customLaunchCommands ?? [:]
+      workspaceModel.chatDestinationModelsProvider = { [weak self] in
+        guard let self else { return [] }
+        return [self.model] + self.additionalWorkspaceWindows.values.map(\.model)
+      }
     }
   }
 

@@ -1,6 +1,13 @@
 import AppKit
 import AsterCore
 
+/// 只缩进原生按钮内容，保留整行背景、鼠标命中与 tracking 范围。
+private final class PaneMenuRowCell: NSButtonCell {
+  override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+    super.drawInterior(withFrame: cellFrame.insetBy(dx: 10, dy: 0), in: controlView)
+  }
+}
+
 /// Nonmodal menu rows keep the parent panel tracking pointer movement while a submenu is open.
 @MainActor
 final class WorkspaceTitleRowButton: NSButton {
@@ -29,6 +36,7 @@ final class WorkspaceTitleRowButton: NSButton {
     self.handler = handler
     self.hasSubmenu = showsSubmenu
     super.init(frame: .zero)
+    cell = PaneMenuRowCell(textCell: title)
     self.title = title
     isBordered = false
     alignment = .left
@@ -52,7 +60,7 @@ final class WorkspaceTitleRowButton: NSButton {
       label.translatesAutoresizingMaskIntoConstraints = false
       NSLayoutConstraint.activate([
         label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+        label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
       ])
     }
     for (index, symbol) in trailingSymbols.reversed().enumerated() {
@@ -65,7 +73,7 @@ final class WorkspaceTitleRowButton: NSButton {
       NSLayoutConstraint.activate([
         icon.centerYAnchor.constraint(equalTo: centerYAnchor),
         icon.trailingAnchor.constraint(equalTo: trailingAnchor,
-          constant: -CGFloat(24 + index * 21)),
+          constant: -CGFloat(26 + index * 21)),
         icon.widthAnchor.constraint(equalToConstant: InterfaceScale.length(13)),
         icon.heightAnchor.constraint(equalToConstant: InterfaceScale.length(13)),
       ])

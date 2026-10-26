@@ -655,7 +655,12 @@ func filesInitiallyCollapsesDirectories() async throws {
   let client = WorkspaceInspectionClient(
     information: { _ in WorkspaceInformationSnapshot(processes: [], listeningPorts: []) },
     git: { _ in GitStatusSummary() },
-    files: { _, _ in nodes }
+    files: { directory, _ in
+      if directory == "/tmp/Sources" {
+        return [WorkspaceFileNode(path: "/tmp/Sources/main.swift", name: "main.swift", depth: 0, isDirectory: false)]
+      }
+      return nodes.filter { $0.depth == 0 }
+    }
   )
   let controller = DetailsPanelViewController(
     model: model, preferences: preferences, inspectionClient: client)
@@ -672,6 +677,8 @@ func filesInitiallyCollapsesDirectories() async throws {
   let disclosure = try #require(
     directoryCell.allDescendants.compactMap { $0 as? NSButton }.first)
   disclosure.performClick(nil)
+  await Task.yield()
+  await Task.yield()
   #expect(table.numberOfRows == 3)
 }
 
@@ -693,7 +700,12 @@ func filesContextMenuItemsAndDirectoryExpandStayInTree() async throws {
   let client = WorkspaceInspectionClient(
     information: { _ in WorkspaceInformationSnapshot(processes: [], listeningPorts: []) },
     git: { _ in GitStatusSummary() },
-    files: { _, _ in nodes }
+    files: { directory, _ in
+      if directory == "/tmp/Sources" {
+        return [WorkspaceFileNode(path: "/tmp/Sources/main.swift", name: "main.swift", depth: 0, isDirectory: false)]
+      }
+      return nodes.filter { $0.depth == 0 }
+    }
   )
   let controller = DetailsPanelViewController(
     model: model, preferences: preferences, inspectionClient: client)
@@ -736,6 +748,8 @@ func filesContextMenuItemsAndDirectoryExpandStayInTree() async throws {
   let disclosure = try #require(
     directoryCell.allDescendants.compactMap { $0 as? NSButton }.first)
   disclosure.performClick(nil)
+  await Task.yield()
+  await Task.yield()
   #expect(table.numberOfRows == 3)
 }
 

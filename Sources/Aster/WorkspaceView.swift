@@ -1125,6 +1125,7 @@ final class WorkspaceViewController: NSViewController {
           // 不产生 OSC 7，若不在这里同步，胶囊会一直停在最后一个上报目录的 Pane（通常
           // 是最近创建、启动时上报了一次目录的那个）。
           self.workspaceTitleButton?.workingDirectory = tab.workingDirectory
+          self.workspaceTitleButton?.resourceTitle = tab.activeFileTitle
           // 分组头也按活动 Pane 目录解析，但只有全量刷新才重建：分屏里两个 Pane 属于不同
           // 项目时，切焦点会让组头停在上一个 Pane 的项目。分组没变仍走局部更新，不打断终端。
           if self.sidebarProjectGroupIsStale(for: tab) { self.scheduleRefreshAfterMouseRelease() }
@@ -1146,6 +1147,7 @@ final class WorkspaceViewController: NSViewController {
           }
           // Agent 会话标题变化也走本通道；标题栏胶囊只跟随当前选中标签的活动 Pane。
           if tab.id == self.model.selectedTabID {
+            self.workspaceTitleButton?.resourceTitle = tab.activeFileTitle
             self.workspaceTitleButton?.agentSessionTitle = tab.activeAgentSessionTitle
             self.workspaceTitleButton?.agentProvider = tab.activeSession?.activeAgentProvider
           }
@@ -1200,6 +1202,7 @@ final class WorkspaceViewController: NSViewController {
   private func updateWindowTitle(_ title: String) {
     view.window?.title = title
     workspaceTitleButton?.programTitle = title
+    workspaceTitleButton?.resourceTitle = model.selectedTab?.activeFileTitle
   }
 
   /// 一次 Pane 拖放的落点：`direction` 为 nil 表示落在面板中心（交换两个面板）。
@@ -2305,8 +2308,7 @@ final class WorkspaceViewController: NSViewController {
     inspectorTitleBarHoverRegion = background
     background.addTrackingArea(makeHoverTrackingArea())
 
-    // Otty 常驻显示缩写后的工作目录胶囊。点击入口承载命名、目录、Git、分屏与查找
-    // 等动作；程序的 OSC 2/0 标题继续同步到原生窗口标题，不占用这条定位入口。
+    // 终端显示缩写目录，文件 Pane 显示资源标题；点击仍打开相同的工作区动作入口。
     let title = WorkspaceTitleButton(
       programTitle: tab.windowTitle,
       workingDirectory: tab.workingDirectory,
@@ -2323,6 +2325,7 @@ final class WorkspaceViewController: NSViewController {
     }
     title.identifier = NSUserInterfaceItemIdentifier("workspace-title-button")
     title.agentSessionTitle = tab.activeAgentSessionTitle
+    title.resourceTitle = tab.activeFileTitle
     title.agentProvider = tab.activeSession?.activeAgentProvider
     workspaceTitleButton = title
     background.addSubview(title)

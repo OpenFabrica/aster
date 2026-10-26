@@ -21,9 +21,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   /// 工具条与内容区所在的纵向容器；查找栏按需插在两者之间。
   private weak var column: NSStackView?
   private var findBar: FilePaneFindBar?
-  private let titleLabel = NSTextField(labelWithString: "")
-  private let statusLabel = NSTextField(labelWithString: "")
-  private let modeControl = NSSegmentedControl(
+  private let modeControl = FilePresentationControl(
     labels: ["", ""], trackingMode: .selectOne, target: nil, action: nil)
   private var presentationKind: FilePresentationKind = .sourceText
   private var showingPreview = false
@@ -32,10 +30,17 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   private var observedDocumentError: String?
   private var softWrap: Bool
   private var selectedLanguage: String?
+  private var syntaxLanguages: [String] = []
   private var cancellables: Set<AnyCancellable> = []
   private var documentDelegate: DocumentTextDelegate?
   private var sourceScrollView: NSScrollView?
+  private var renderedTheme: TerminalTheme?
+  private var renderedFont: NSFont?
   private var cachedPreviewView: NSView?
+  private weak var transcriptWebView: WKWebView?
+  private var transcriptBody: String?
+  private weak var toolbarView: FilePaneToolbar?
+  private var contentZoom: Double = 1
   private(set) weak var previewWebView: WKWebView?
   private var sourceRenderRevision = 0
   private var previewRenderRevision = 0
@@ -49,10 +54,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   private nonisolated(unsafe) var modificationFallbackTimer: Timer?
   private var lastModificationDate: Date?
   private var reportedExternalConflict = false
-  private weak var overflowButton: NSButton?
-  private weak var shareButton: NSButton?
   private weak var statusSpinner: NSProgressIndicator?
-  private var sharingPicker: NSSharingServicePicker?
   private(set) weak var sourceTextView: NSTextView?
   /// Workspace 控制器用它维护行跳转目标；锁定或切换 Source/Preview 会替换 NSTextView，
   /// 因此不能只在首次建 Pane 时登记一次。
@@ -84,7 +86,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   override func loadView() {
     let root = AppearanceObservingView()
     // 源码高亮颜色是渲染时按外观固定下来的，外观切换后要按新主题重新着色。
-    root.onEffectiveAppearanceChange = { [weak self] in self?.scheduleSourceRendering() }
+    root.onEffectiveAppearanceChange = { [weak self] in self?.synchronizeEditorPresentation() }
     let column = NSStackView(views: [makeToolbar(), contentHost])
     column.orientation = .vertical
     // 纵向 NSStackView 默认 centerX 对齐：内容视图一旦有固有宽度（如 transcript
@@ -99,6 +101,10 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     renderContent()
     observeRuntime()
     startModificationMonitoring()
+    Task { [weak self, renderer] in
+      let languages = await renderer.sourceLanguages()
+      self?.syntaxLanguages = languages
+    }
   }
 
   override func viewDidLayout() {
@@ -129,93 +135,42 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     )
   }
 
-  /// 搭建文件 Pane 顶部工具条：呈现模式、文件名、状态与保存/关闭操作。
+  /// 文件名由外层 Pane 标题展示；工具条只承载当前文件的呈现和动作。
   private func makeToolbar() -> NSView {
-    let theme = preferences.activeTheme
-    let bar = NSView()
-    bar.identifier = NSUserInterfaceItemIdentifier("file-pane-toolbar")
-    bar.wantsLayer = true
-    // 动态 NSColor 直接取 cgColor 会在视图接入暗色窗口之前按 Aqua 解析并永久冻结成
-    // 白色。File Pane 随工作区主题重建，因此这里直接消费当前主题的 Container token；
-    // Tokyo Night / Glass Dark 等暗色主题的工具栏与 Pane 表面会保持同一色域。
-    bar.layer?.backgroundColor = NSColor(
-      theme.resolvedColor(forSlot: "container.background")
-        ?? theme.style.container.background ?? theme.palette.containerBackground
-    ).cgColor
-    bar.addBottomBorder(color: NSColor(
-      theme.resolvedColor(forSlot: "container.border")
-        ?? theme.style.container.borderColor ?? theme.palette.interfaceBorder
-          ?? theme.palette.panelBackground
-    ))
-    bar.translatesAutoresizingMaskIntoConstraints = false
-    bar.heightAnchor.constraint(equalToConstant: InterfaceScale.length(42)).isActive = true
-
-    modeControl.segmentStyle = .texturedRounded
-    modeControl.identifier = NSUserInterfaceItemIdentifier("file-pane-presentation")
+    modeControl.identifier = .init("file-pane-presentation")
     modeControl.target = self
     modeControl.action = #selector(changePresentationMode)
-    modeControl.setWidth(32, forSegment: 0)
-    modeControl.setWidth(32, forSegment: 1)
     modeControl.setAccessibilityLabel("File presentation")
     configureModeControl()
-    let chat = IconHoverButton(symbol: "text.bubble", accessibilityDescription: "Send to Chat") {
-      [weak self] in
-      guard let self, let fileURL else { return }
-      model.sendFileToChat(fileURL)
-    }
-    let share = IconHoverButton(symbol: "square.and.arrow.up", accessibilityDescription: "Share") {
-      [weak self] in self?.showSharingPicker()
-    }
-    share.identifier = NSUserInterfaceItemIdentifier("file-pane-share")
-    shareButton = share
-    let left = NSStackView(views: [modeControl, chat, share])
-    left.orientation = .horizontal
-    left.alignment = .centerY
-    left.spacing = 7
-
-    titleLabel.font = NSFont.interface(ofSize: 11.5, weight: .medium)
-    titleLabel.textColor = AsterTheme.ink
-    titleLabel.lineBreakMode = .byTruncatingMiddle
-    let overflow = IconHoverButton(symbol: "ellipsis", accessibilityDescription: "File options") {
-      [weak self] in self?.showOverflowMenu()
-    }
-    overflowButton = overflow
-    let center = NSStackView(views: [titleLabel, overflow])
-    center.orientation = .horizontal
-    center.alignment = .centerY
-    center.spacing = 5
-
-    statusLabel.font = NSFont.interface(ofSize: 10.5)
-    statusLabel.identifier = NSUserInterfaceItemIdentifier("file-pane-status")
-    statusLabel.textColor = AsterTheme.secondaryInk
-    let spinner = NSProgressIndicator()
-    spinner.style = .spinning
-    spinner.controlSize = .small
-    spinner.isDisplayedWhenStopped = false
-    statusSpinner = spinner
-    let save = IconHoverButton(symbol: "square.and.arrow.down", accessibilityDescription: "Save") {
-      [weak self] in self?.save()
-    }
-    let close = ActionButton(title: "Close", bezelStyle: .inline) { [weak self] in
-      self?.model.closeSelectedPaneOrTab()
-    }
-    let right = NSStackView(views: [spinner, statusLabel, save, close])
-    right.orientation = .horizontal
-    right.alignment = .centerY
-    right.spacing = 7
-
-    let row = NSStackView(views: [left, NSView(), center, NSView(), right])
-    row.orientation = .horizontal
-    row.alignment = .centerY
-    row.spacing = 8
-    row.edgeInsets = NSEdgeInsets(top: 5, left: 10, bottom: 5, right: 10)
-    bar.addSubview(row)
-    row.pinEdges(to: bar)
+    let bar = FilePaneToolbar(mode: modeControl,
+      send: { [weak self] in self?.sendCurrentContentToChat() },
+      open: { [weak self] in self?.showFileActions() },
+      save: { [weak self] in self?.save() },
+      discard: { [weak self] in self?.reloadFromDisk() },
+      run: { [weak self] in self?.runShellFile() },
+      resume: { [weak self] in self?.resumeHistory() },
+      close: { [weak self] in
+        guard let self, let tab, tab.runtime(for: runtime.id) === runtime else { return }
+        model.select(tab)
+        tab.setActivePane(runtime.id)
+        model.closeSelectedPaneOrTab()
+      })
+    toolbarView = bar
+    statusSpinner = bar.spinner
+    bar.onZoom = { [weak self] zoom in self?.setContentZoom(zoom) }
+    bar.onZoomToFit = { [weak self] in self?.zoomToFit() }
+    let theme = preferences.activeTheme
+    bar.layer?.backgroundColor = NSColor(theme.resolvedColor(forSlot: "container.background")
+      ?? theme.style.container.background ?? theme.palette.containerBackground).cgColor
     updateToolbar()
     return bar
   }
 
   private func observeRuntime() {
+    preferences.objectWillChange.sink { [weak self] _ in
+      // @Published 的 willSet 通知还不能回读新配置；下一轮统一同步主题与编辑器设置。
+      DispatchQueue.main.async { [weak self] in self?.synchronizeEditorPresentation() }
+    }.store(in: &cancellables)
     runtime.$documentText.dropFirst().sink { [weak self] text in
       guard let self else { return }
       // 使用 @Published 发出的新值；在 willSet 通知期间回读 runtime 属性可能仍是旧文本，
@@ -266,20 +221,15 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   }
 
   private func updateToolbar() {
-    titleLabel.stringValue = fileURL?.lastPathComponent ?? "Untitled"
-    if observedDocumentError != nil {
-      statusLabel.stringValue = "Error"
-      statusLabel.textColor = AsterTheme.warning
-    } else if reportedExternalConflict {
-      statusLabel.stringValue = "Modified on Disk"
-      statusLabel.textColor = AsterTheme.warning
-    } else if observedDirty {
-      statusLabel.stringValue = "Edited"
-      statusLabel.textColor = AsterTheme.secondaryInk
-    } else {
-      statusLabel.stringValue = "✓ Saved"
-      statusLabel.textColor = AsterTheme.secondaryInk
-    }
+    let status: String?
+    if let error = observedDocumentError { status = error }
+    else if reportedExternalConflict { status = L("磁盘文件已修改") }
+    else { status = nil }
+    toolbarView?.update(editable: presentationKind.supportsEditing && !observedReadOnly && !showingPreview,
+      dirty: observedDirty, statusText: status)
+    toolbarView?.showZoom(showingPreview && [.svg, .image].contains(presentationKind))
+    toolbarView?.runButton.isHidden = fileURL?.pathExtension.lowercased() != "sh" || !model.isLocalMachineActive
+    toolbarView?.resumeButton.isHidden = presentationKind != .agentTranscript || !showingPreview
     configureModeControl()
   }
 
@@ -290,6 +240,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       runtime.setReadOnly(modeControl.selectedSegment == 1)
     }
     if !showingPreview { statusSpinner?.stopAnimation(nil) }
+    updateToolbar()
     renderContent()
   }
 
@@ -300,7 +251,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     modeControl.isHidden = !canPreview && !presentationKind.supportsEditing
     modeControl.setImage(
       NSImage(
-        systemSymbolName: "chevron.left.forwardslash.chevron.right",
+        systemSymbolName: canPreview ? "chevron.left.forwardslash.chevron.right" : "square.and.pencil",
         accessibilityDescription: "Source"
       ),
       forSegment: 0
@@ -347,14 +298,6 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     findBar?.removeFromSuperview()
     findBar = nil
     if !showingPreview, let sourceTextView { view.window?.makeFirstResponder(sourceTextView) }
-  }
-
-  private func toggleReadOnly() {
-    guard presentationKind.supportsEditing else {
-      model.notice = "This file type is preview-only."
-      return
-    }
-    runtime.toggleReadOnly()
   }
 
   private func save() {
@@ -413,16 +356,25 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       updateSourceLayout()
       return sourceScrollView
     }
-    let textView = NSTextView()
+    let textView = FileSourceTextView()
+    textView.contextMenuProvider = { [weak self, weak textView] in
+      guard let self, let textView else { return NSMenu() }
+      return FilePaneMenus.source(textView: textView, syntax: makeSyntaxMenu(), viewAs: makeViewAsMenu(),
+      reload: runtime.isReadOnly || fileURL.map({ !FileManager.default.fileExists(atPath: $0.path) }) != false
+        ? nil : { [weak self] in self?.reloadFromDisk() },
+        sendToChat: { [weak self] in self?.sendCurrentContentToChat() })
+    }
     sourceTextView = textView
     textView.isVerticallyResizable = true
     textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
     textView.isEditable = presentationKind.supportsEditing && !runtime.isReadOnly
     textView.isSelectable = true
-    textView.backgroundColor = AsterTheme.paper
-    textView.textColor = AsterTheme.ink
-    textView.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+    textView.isRichText = false
+    textView.allowsUndo = true
+    textView.backgroundColor = NSColor(preferences.activeTheme.palette.renderedTerminalBackground)
+    textView.textColor = NSColor(preferences.activeTheme.palette.foreground)
+    textView.font = preferences.terminalFontVariants.normal
     textView.textContainerInset = NSSize(width: 16, height: 14)
     textView.isAutomaticQuoteSubstitutionEnabled = false
     textView.isAutomaticDashSubstitutionEnabled = false
@@ -435,9 +387,15 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     documentDelegate = delegate
     textView.delegate = delegate
     let scroll = NSScrollView()
+    scroll.wantsLayer = true
+    scroll.layer?.masksToBounds = true
     scroll.hasVerticalScroller = true
     scroll.autohidesScrollers = true
     scroll.documentView = textView
+    scroll.verticalRulerView = FileLineNumberRuler(scrollView: scroll, textView: textView)
+    scroll.hasVerticalRuler = true
+    scroll.hasHorizontalRuler = false
+    scroll.rulersVisible = preferences.configuration.editor.showLineNumbers
     sourceScrollView = scroll
     updateSourceLayout()
     return scroll
@@ -448,11 +406,15 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     textView.isEditable = presentationKind.supportsEditing && !runtime.isReadOnly
     scroll.hasHorizontalScroller = !softWrap
     textView.isHorizontallyResizable = !softWrap
-    textView.autoresizingMask = softWrap ? [.width] : []
+    // 宽度由这里按最终 viewport 统一设置；再开启 .width 会在 ruler tile 时重复扣减标尺宽度。
+    textView.autoresizingMask = []
     textView.textContainer?.widthTracksTextView = softWrap
     // Pane 初次挂载和 Source/Preview 切换时滚动区可能尚未完成布局。显式跟随
     // viewport 建立文本视图尺寸，避免零宽 documentView 只加载文本而不绘制字形。
-    let viewport = scroll.contentSize
+    // ruler 在 clip view 内占据负 x 区间，正文从 x=0 开始；去掉该区间才是可用宽度。
+    scroll.tile()
+    let clipBounds = scroll.contentView.bounds
+    let viewport = NSSize(width: max(0, clipBounds.maxX - max(0, clipBounds.minX)), height: clipBounds.height)
     guard viewport.width > 0, viewport.height > 0 else { return }
     textView.minSize = viewport
     let size = NSSize(
@@ -464,6 +426,35 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       width: softWrap ? max(0, viewport.width - textView.textContainerInset.width * 2) : CGFloat.greatestFiniteMagnitude,
       height: CGFloat.greatestFiniteMagnitude
     )
+  }
+
+  /// 同一 Pane 内就地更新主题和行号，保留文档、选区、撤销栈与预览实例。
+  private func synchronizeEditorPresentation() {
+    guard isViewLoaded else { return }
+    softWrap = preferences.configuration.editor.lineWrap
+    sourceScrollView?.rulersVisible = preferences.configuration.editor.showLineNumbers
+    updateSourceLayout()
+    let theme = preferences.activeTheme
+    let font = preferences.terminalFontVariants.normal
+    guard renderedTheme != theme || renderedFont != font else { return }
+    renderedTheme = theme
+    renderedFont = font
+    toolbarView?.layer?.backgroundColor = NSColor(
+      theme.resolvedColor(forSlot: "container.background") ?? theme.palette.containerBackground).cgColor
+    sourceTextView?.backgroundColor = NSColor(theme.palette.renderedTerminalBackground)
+    sourceTextView?.textColor = NSColor(theme.palette.foreground)
+    sourceTextView?.font = font
+    sourceScrollView?.verticalRulerView?.needsDisplay = true
+    scheduleSourceRendering()
+    if let web = previewWebView, let body = pendingPreviewBody { loadWebPreview(body, into: web) }
+    if let web = transcriptWebView, let body = transcriptBody {
+      web.loadHTMLString(AgentTranscriptHTML.document(body: body, style: FilePaneStyle(theme: theme)), baseURL: nil)
+    }
+    if let preview = cachedPreviewView as? QLPreviewView { applyPreviewTheme(preview) }
+    if let pdf = cachedPreviewView as? PDFView { pdf.backgroundColor = NSColor(theme.palette.renderedTerminalBackground) }
+    if presentationKind == .image, let scroll = cachedPreviewView as? NSScrollView {
+      scroll.backgroundColor = NSColor(theme.palette.renderedTerminalBackground)
+    }
   }
 
   private func sourceText() -> String {
@@ -483,13 +474,13 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
 
   private func scheduleSourceRendering(debounced: Bool = false) {
     guard let textView = sourceTextView,
-      [.sourceText, .diff, .markdown, .restructuredText, .html, .svg].contains(presentationKind)
+      [.sourceText, .diff, .markdown, .restructuredText, .html, .svg, .agentTranscript].contains(presentationKind)
     else { return }
     sourceRenderRevision += 1
     let revision = sourceRenderRevision
     let text = textView.string
-    let language = selectedLanguage ?? languageName(for: fileURL?.pathExtension.lowercased() ?? "")
-    let dark = textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let language = selectedLanguage ?? (presentationKind == .agentTranscript ? "json" : languageName(for: fileURL?.pathExtension.lowercased() ?? ""))
+    let theme = preferences.activeTheme
     sourceRenderTask?.cancel()
     sourceRenderTask = Task { [weak self] in
       if debounced {
@@ -497,11 +488,11 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
         guard !Task.isCancelled else { return }
       }
       guard let self,
-        case .highlightedRTF(let data)? = await renderer.renderSource(text, language: language, dark: dark),
+        case .highlightedRTF(let data)? = await renderer.renderSource(text, language: language, theme: theme),
         !Task.isCancelled,
         revision == sourceRenderRevision,
         let textView = sourceTextView,
-        textView.string == text,
+        textView.string == text, preferences.activeTheme == theme,
         let highlighted = try? NSAttributedString(
           data: data,
           options: [.documentType: NSAttributedString.DocumentType.rtf],
@@ -513,12 +504,20 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       // 只替换属性，不替换字符；这样不会制造一轮伪编辑，也不会清空 undo 栈。
       storage.beginEditing()
       storage.setAttributes([:], range: NSRange(location: 0, length: storage.length))
+      let fonts = preferences.terminalFontVariants
       highlighted.enumerateAttributes(
         in: NSRange(location: 0, length: highlighted.length)
       ) { attributes, range, _ in
-        storage.addAttributes(attributes, range: range)
+        var adjusted = attributes
+        let traits = (attributes[.font] as? NSFont).map { NSFontManager.shared.traits(of: $0) } ?? []
+        adjusted[.font] = traits.contains(.boldFontMask)
+          ? (traits.contains(.italicFontMask) ? fonts.boldItalic : fonts.bold)
+          : (traits.contains(.italicFontMask) ? fonts.italic : fonts.normal)
+        storage.addAttributes(adjusted, range: range)
       }
       storage.endEditing()
+      textView.typingAttributes = [.foregroundColor: NSColor(theme.palette.foreground),
+        .font: fonts.normal]
       textView.selectedRanges = selections
     }
   }
@@ -571,31 +570,52 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       guard let image = NSImage(contentsOf: fileURL) else {
         return messageView("Unable to decode this image.", symbol: "photo")
       }
-      let imageView = NSImageView(image: image)
+      let imageView = FilePreviewImageView(image: image)
+      imageView.contextMenuProvider = { [weak self, weak imageView] in
+        guard let self else { return NSMenu() }
+        return FileNativePreviewMenus.make(copy: {
+          guard let image = imageView?.image else { return }
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.writeObjects([image])
+        }, selectAll: nil, send: { [weak self] in self?.sendCurrentContentToChat() }, fileActions: fileActionsMenu())
+      }
       imageView.imageScaling = .scaleProportionallyUpOrDown
       imageView.animates = true
       let scroll = NSScrollView()
+      scroll.backgroundColor = NSColor(preferences.activeTheme.palette.renderedTerminalBackground)
       scroll.hasVerticalScroller = true
       scroll.hasHorizontalScroller = true
       scroll.allowsMagnification = true
       scroll.minMagnification = 0.1
-      scroll.maxMagnification = 8
+      scroll.maxMagnification = 16
       scroll.documentView = imageView
       imageView.frame = NSRect(origin: .zero, size: image.size)
       return scroll
     case .pdf:
-      let pdf = PDFView()
+      let pdf = FilePreviewPDFView()
+      pdf.contextMenuProvider = { [weak self, weak pdf] in
+        guard let self else { return NSMenu() }
+        return FileNativePreviewMenus.make(copy: pdf?.currentSelection?.string?.isEmpty == false ? { [weak pdf] in pdf?.copy(nil) } : nil,
+          selectAll: { [weak pdf] in pdf?.selectAll(nil) }, send: { [weak self] in self?.sendCurrentContentToChat() }, fileActions: fileActionsMenu())
+      }
+      pdf.backgroundColor = NSColor(preferences.activeTheme.palette.renderedTerminalBackground)
       pdf.document = PDFDocument(url: fileURL)
       pdf.autoScales = true
       pdf.displayMode = .singlePageContinuous
       return pdf
     case .richDocument:
       guard preferences.configuration.editor.previewRichDocuments,
-        let preview = QLPreviewView(frame: .zero, style: .normal)
+        let preview = FileQuickLookPreviewView(frame: .zero, style: .normal)
       else {
         return messageView("Rich document preview is disabled in Settings.", symbol: "doc.richtext")
       }
       preview.previewItem = fileURL as QLPreviewItem
+      preview.contextMenuProvider = { [weak self, weak preview] in
+        guard let self, preview != nil else { return NSMenu() }
+        return FileNativePreviewMenus.quickLook(send: { [weak self] in self?.sendCurrentContentToChat() },
+          fileActions: fileActionsMenu())
+      }
+      applyPreviewTheme(preview)
       return preview
     case .diff:
       return ensureSourceContent()
@@ -606,15 +626,37 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     case .binary:
       let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
       let data = readPrefix(of: fileURL, maximumBytes: Self.boundedPreviewBytes)
-      return HexPreviewView(data: data, isTruncated: size > data.count)
+      let hex = HexPreviewView(data: data, isTruncated: size > data.count)
+      hex.contextMenuProvider = { [weak self, weak hex] in
+        guard let self, let hex else { return NSMenu() }
+        return FileNativePreviewMenus.make(copy: hex.selectedText().isEmpty ? nil : { [weak hex] in
+          guard let text = hex?.selectedText(), !text.isEmpty else { return }
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(text, forType: .string)
+        }, selectAll: { [weak hex] in hex?.selectAllRows() }, send: { [weak self, weak hex] in
+          guard let self else { return }
+          let selection = hex?.selectedText()
+          model.presentFileChat(FileChatContext(path: fileURL.path,
+            selection: selection?.isEmpty == false ? selection : nil, lines: nil), originPaneID: runtime.id)
+        }, fileActions: fileActionsMenu())
+      }
+      return hex
     }
+  }
+
+  private func applyPreviewTheme(_ preview: QLPreviewView) {
+    let theme = preferences.activeTheme
+    preview.wantsLayer = true
+    preview.layer?.backgroundColor = NSColor(theme.palette.renderedTerminalBackground).cgColor
+    preview.appearance = NSAppearance(named: theme.mode == .dark ? .darkAqua : .aqua)
   }
 
   private func makeWebPreview(baseURL: URL) -> NSView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-    let webView = WKWebView(frame: .zero, configuration: configuration)
+    let webView = FilePreviewWebView(frame: .zero, configuration: configuration)
+    configurePreviewMenu(webView)
     webView.navigationDelegate = self
     previewWebView = webView
     loadWebPreview(pendingPreviewBody ?? "<p>Rendering preview…</p>", into: webView, baseURL: baseURL)
@@ -626,10 +668,10 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       <!doctype html><html><head><meta charset="utf-8">
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'">
       <style>
-      :root{color-scheme:light dark} body{font:15px -apple-system;margin:48px auto;max-width:920px;padding:0 32px;line-height:1.58;color:#2d3033;background:transparent}
-      h1,h2,h3{line-height:1.25;margin-top:1.5em} pre,code{font:13px ui-monospace,monospace} pre{padding:14px;overflow:auto;background:rgba(127,127,127,.11);border-radius:7px}
-      blockquote{border-left:3px solid #999;padding-left:14px;color:#666} table{border-collapse:collapse} th,td{border:1px solid #aaa;padding:6px 9px} img,svg{max-width:100%;height:auto}
-      @media(prefers-color-scheme:dark){body{color:#ddd} blockquote{color:#aaa}}
+      body{font-family:-apple-system,system-ui,sans-serif;font-size:\(preferences.terminalFontVariants.normal.pointSize)px;margin:0 auto;max-width:760px;padding:24px;line-height:1.55}
+      h1,h2,h3,h4,h5,h6{margin-top:1.5em} code{font-family:ui-monospace,monospace;font-size:.92em;padding:2px 4px;border-radius:3px;background:rgba(127,127,127,.11)} pre{padding:12px;overflow-x:auto;background:rgba(127,127,127,.11);border-radius:6px} pre code{background:transparent;padding:0}
+      blockquote{border-left:3px solid #999;padding-left:12px;margin:1em 0} table{border-collapse:collapse} th,td{border:1px solid #aaa;padding:4px 8px} img,svg{max-width:100%;height:auto}
+      \(FilePaneStyle(theme: preferences.activeTheme).previewCSS)
       </style></head><body>\(body)</body></html>
       """
     webView.loadHTMLString(document, baseURL: baseURL ?? fileURL?.deletingLastPathComponent())
@@ -724,9 +766,6 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     metaLine.lineBreakMode = .byTruncatingMiddle
     stack.addArrangedSubview(metaLine)
     let actions = NSStackView(views: [
-      ActionButton(title: "Resume", bezelStyle: .rounded) { [weak self] in
-        self?.model.continueAgentSession(history.metadata, kind: .resume)
-      },
       ActionButton(title: "Fork", bezelStyle: .rounded) { [weak self] in
         self?.model.continueAgentSession(history.metadata, kind: .fork)
       },
@@ -741,15 +780,21 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-    let webView = WKWebView(frame: .zero, configuration: configuration)
+    let webView = FilePreviewWebView(frame: .zero, configuration: configuration)
+    configurePreviewMenu(webView)
     webView.navigationDelegate = self
+    transcriptWebView = webView
     webView.loadHTMLString(
-      AgentTranscriptHTML.document(body: "<p class=\"notice\">" + L("正在渲染会话…") + "</p>"), baseURL: nil)
+      AgentTranscriptHTML.document(body: "<p class=\"notice\">" + L("正在渲染会话…") + "</p>",
+        style: FilePaneStyle(theme: preferences.activeTheme)), baseURL: nil)
     let entries = history.transcript.entries
     Task.detached(priority: .userInitiated) {
-      let document = AgentTranscriptHTML.document(body: AgentTranscriptHTML.body(entries: entries))
-      await MainActor.run { [weak webView] in
-        _ = webView?.loadHTMLString(document, baseURL: nil)
+      let body = AgentTranscriptHTML.body(entries: entries)
+      await MainActor.run { [weak self, weak webView] in
+        guard let self, let webView, self.transcriptWebView === webView else { return }
+        self.transcriptBody = body
+        webView.loadHTMLString(AgentTranscriptHTML.document(body: body,
+          style: FilePaneStyle(theme: self.preferences.activeTheme)), baseURL: nil)
       }
     }
     let body: NSView = webView
@@ -772,65 +817,95 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   }
 
 
-  private func showSharingPicker() {
-    guard let fileURL, let button = shareButton else { return }
-    let picker = NSSharingServicePicker(items: [fileURL])
-    sharingPicker = picker
-    picker.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+  private func fileActionsMenu() -> NSMenu {
+    guard let fileURL else { return NSMenu() }
+    return FilePaneFileActions.menu(url: fileURL) { [weak self] message in self?.model.notice = message }
   }
 
-  private func showOverflowMenu() {
-    guard let button = overflowButton else { return }
-    let menu = NSMenu(title: "File options")
-    if presentationKind.supportsEditing {
-      let readOnly = ActionMenuItem(
-        title: runtime.isReadOnly ? "Unlock Editing" : "Make Read-only"
-      ) { [weak self] in self?.toggleReadOnly() }
-      readOnly.state = runtime.isReadOnly ? .on : .off
-      menu.addItem(readOnly)
+  private func showFileActions() {
+    guard let button = toolbarView?.openButton else { return }
+    fileActionsMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 3), in: button)
+  }
+
+  private func makeSyntaxMenu() -> NSMenu {
+    FilePaneMenus.syntax(languages: syntaxLanguages, selected: selectedLanguage) { [weak self] language in
+      self?.selectedLanguage = language
+      self?.scheduleSourceRendering()
     }
-    menu.addItem(
-      ActionMenuItem(title: "Reload from Disk") { [weak self] in self?.reloadFromDisk() })
-    if presentationKind.supportsSourcePreviewToggle {
-      menu.addItem(.separator())
-      let source = ActionMenuItem(title: "View as Source") { [weak self] in
-        self?.modeControl.selectedSegment = 0
+  }
+
+  private func makeViewAsMenu() -> NSMenu? {
+    guard presentationKind == .agentTranscript else { return nil }
+    let menu = NSMenu()
+    for (index, title) in ["JSON/JSONL Syntax Highlight", "Agent History"].enumerated() {
+      let item = ActionMenuItem(title: title) { [weak self] in
+        self?.modeControl.selectedSegment = index
         self?.changePresentationMode()
       }
-      source.state = showingPreview ? .off : .on
-      menu.addItem(source)
-      let preview = ActionMenuItem(title: "View as Preview") { [weak self] in
-        self?.modeControl.selectedSegment = 1
-        self?.changePresentationMode()
+      item.state = showingPreview == (index == 1) ? .on : .off
+      menu.addItem(item)
+    }
+    return menu
+  }
+
+  private func configurePreviewMenu(_ web: FilePreviewWebView) {
+    web.onSendToChat = { [weak self] in self?.sendCurrentContentToChat() }
+    web.onReloadFromDisk = { [weak self] in self?.reloadFromDisk() }
+    web.allowsMagnification = true
+    web.magnification = contentZoom
+  }
+
+  private func setContentZoom(_ zoom: Double) {
+    contentZoom = zoom
+    previewWebView?.magnification = zoom
+    if let image = cachedPreviewView as? NSScrollView, presentationKind == .image { image.magnification = zoom }
+  }
+
+  private func zoomToFit() {
+    if presentationKind == .image, let scroll = cachedPreviewView as? NSScrollView, let image = scroll.documentView,
+      image.bounds.width > 0, image.bounds.height > 0 {
+      toolbarView?.selectZoom(max(0.1, min(16, min(scroll.contentSize.width / image.bounds.width,
+        scroll.contentSize.height / image.bounds.height))))
+    } else { toolbarView?.selectZoom(1) }
+  }
+
+  private func runShellFile() {
+    guard let fileURL else { return }
+    // 与 Otty 一致，Run 执行磁盘上的脚本；当前编辑稿仍留在原 Pane，需显式保存。
+    _ = model.runShellFile(fileURL)
+  }
+
+  private func resumeHistory() {
+    guard let fileURL, let history = model.agentHistories.first(where: {
+      $0.metadata.transcriptFileURL.standardizedFileURL == fileURL.standardizedFileURL
+    }) else { return }
+    model.continueAgentSession(history.metadata, kind: .resume)
+  }
+
+  /// 选区从当前视图捕获（包含未保存编辑）；预览的 DOM 查询也绑定发起时的文件 Pane。
+  private func sendCurrentContentToChat() {
+    guard let fileURL else { return }
+    let paneID = runtime.id
+    if !showingPreview, let source = sourceTextView {
+      model.presentFileChat(.capture(path: fileURL.path, text: source.string, range: source.selectedRange()), originPaneID: paneID)
+    } else if let web = previewWebView ?? transcriptWebView {
+      Task { @MainActor [weak self, weak web] in
+        guard let self, let web else { return }
+        do {
+          let selection = try await web.evaluateJavaScript("window.getSelection()?.toString() ?? ''") as? String
+          guard self.tab?.runtime(for: paneID) === self.runtime else { return }
+          self.model.presentFileChat(FileChatContext(path: fileURL.path,
+            selection: selection?.isEmpty == false ? selection : nil, lines: nil), originPaneID: paneID)
+        } catch {
+          self.model.notice = L("无法读取预览选区，请重试。")
+        }
       }
-      preview.state = showingPreview ? .on : .off
-      menu.addItem(preview)
+    } else if let pdf = cachedPreviewView as? PDFView {
+      model.presentFileChat(FileChatContext(path: fileURL.path, selection: pdf.currentSelection?.string,
+        lines: nil), originPaneID: paneID)
+    } else {
+      model.presentFileChat(FileChatContext(path: fileURL.path, selection: nil, lines: nil), originPaneID: paneID)
     }
-    menu.addItem(.separator())
-    let wrap = ActionMenuItem(title: "Soft Wrap") { [weak self] in
-      guard let self else { return }
-      softWrap.toggle()
-      renderContent()
-    }
-    wrap.state = softWrap ? .on : .off
-    menu.addItem(wrap)
-    let language = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
-    let languageMenu = NSMenu(title: "Language")
-    for value in [
-      "Automatic", "swift", "javascript", "typescript", "python", "json", "bash", "diff", "html",
-      "css",
-    ] {
-      let item = ActionMenuItem(title: value) { [weak self] in
-        self?.selectedLanguage = value == "Automatic" ? nil : value
-        self?.renderContent()
-      }
-      item.state =
-        (value == "Automatic" && selectedLanguage == nil) || value == selectedLanguage ? .on : .off
-      languageMenu.addItem(item)
-    }
-    language.submenu = languageMenu
-    menu.addItem(language)
-    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 3), in: button)
   }
 
   private func reloadFromDisk() {
@@ -849,6 +924,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
 
   private func performReloadFromDisk() {
     runtime.reloadDocument()
+    if runtime.documentError == nil { sourceTextView?.undoManager?.removeAllActions() }
     classifyDocument()
     renderedPreviewText = nil
     pendingPreviewBody = nil
@@ -959,15 +1035,21 @@ private final class AppearanceObservingView: NSView {
   }
 }
 
-private final class HexPreviewView: NSView, NSTableViewDataSource, NSTableViewDelegate {
+private final class HexPreviewView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
   private let data: Data
   private let isTruncated: Bool
+  private weak var table: NSTableView?
+  var contextMenuProvider: (() -> NSMenu)?
 
   init(data: Data, isTruncated: Bool) {
     self.data = data
     self.isTruncated = isTruncated
     super.init(frame: .zero)
     let table = NSTableView()
+    self.table = table
+    table.allowsMultipleSelection = true
+    table.menu = NSMenu()
+    table.menu?.delegate = self
     table.headerView = nil
     table.style = .plain
     table.backgroundColor = .clear
@@ -986,6 +1068,25 @@ private final class HexPreviewView: NSView, NSTableViewDataSource, NSTableViewDe
   }
 
   required init?(coder: NSCoder) { nil }
+
+  func menuWillOpen(_ menu: NSMenu) {
+    menu.removeAllItems()
+    guard let actions = contextMenuProvider?() else { return }
+    menu.autoenablesItems = false
+    for item in actions.items { actions.removeItem(item); menu.addItem(item) }
+  }
+
+  func selectAllRows() { table?.selectAll(nil) }
+
+  func selectedText() -> String {
+    guard let table else { return "" }
+    return table.selectedRowIndexes.compactMap { row -> String? in
+      let start = row * HexLineFormatter.bytesPerLine
+      guard start < data.count else { return nil }
+      let bytes = Array(data[start..<min(start + HexLineFormatter.bytesPerLine, data.count)])
+      return HexLineFormatter.line(offset: start, bytes: bytes[...])
+    }.joined(separator: "\n")
+  }
 
   func numberOfRows(in tableView: NSTableView) -> Int {
     let dataRows = (data.count + HexLineFormatter.bytesPerLine - 1) / HexLineFormatter.bytesPerLine

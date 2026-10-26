@@ -2329,3 +2329,55 @@
 "错误退出时通知" = "エラー終了時に通知";
 "防止休眠" = "スリープ防止";
 "静音" = "ミュート";
+
+"无法读取预览选区，请重试。" = "Unable to read the preview selection. Try again.";
+"发送文件到 Chat" = "Send File to Chat";
+"文件选区" = "File Selection";
+"没有运行中的目标终端，可先复制消息。" = "No target terminal is running. You can copy the message first.";
+
+"语法" = "Syntax";
+
+"显示为" = "View as";
+
+"自动检测" = "Auto-detect";
+
+"从磁盘重新加载" = "Reload from Disk";
+
+"复制文件路径" = "Copy File Path";
+
+"关闭文件" = "Close";
+
+"已保存" = "Saved";
+
+"放弃更改" = "Discard";
+
+"磁盘文件已修改" = "Modified on Disk";
+
+"运行脚本" = "Run Script";
+
+"实际大小" = "Actual Size";
+
+"缩放以适应" = "Zoom to Fit";
+
+"打开可执行文件？" = "Open executable file?";
+
+"放大" = "Zoom In";
+"缩小" = "Zoom Out";
+
+"当前项目的 Agents" = "AGENTS IN THIS PROJECT";
+
+"当前项目的终端" = "TERMINALS IN THIS PROJECT";
+
+"其他 Agents" = "OTHER AGENTS";
+
+"其他终端" = "OTHER TERMINALS";
+
+"创建新会话" = "CREATE NEW";
+
+"新建 %@" = "New %@";
+
+"正在启动 %@…" = "Starting %@…";
+
+"%@ 未就绪，请先在新终端中完成启动，再选择该终端重试。" = "%@ is not ready. Complete startup in the new terminal, then select that terminal and try again.";
+
+"请在本地工作区创建聊天目标。" = "Create chat targets in a local workspace.";

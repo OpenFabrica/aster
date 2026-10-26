@@ -447,7 +447,7 @@ func appModelOpensComposerForTheActivePane() async throws {
   #expect(input.placeholder == "Type here...")
 }
 
-@Test("发送到聊天只发现运行中的 Claude 或 Codex，并且仅预填不回车")
+@Test("发送到聊天发现运行中的目标，并且仅预填不回车")
 @MainActor
 func appModelPrefillsSelectedAgentChatWithoutSubmitting() async throws {
   let model = AppModel(defaults: behaviorTestDefaults())
@@ -480,16 +480,22 @@ func appModelPrefillsSelectedAgentChatWithoutSubmitting() async throws {
 
   var encoded: [UInt8] = []
   observeTestPTYWrites(terminal) { encoded.append(contentsOf: $0) }
+  let sendingModel = AppModel(defaults: behaviorTestDefaults())
+  sendingModel.chatDestinationModelsProvider = { [model] }
   #expect(
-    model.prefillAgentChat(
+    sendingModel.prefillAgentChat(
       destination: presentation.destinations[0],
       comment: "__CHAT_PREFILL_DELIVERED__",
       selection: nil,
-      transcript: nil
+      transcript: nil,
+      fileContext: "Path: /tmp/current.swift\nLines: 1-1\n\nTOKEN=chat-test-secret\nselected content"
     )
   )
   try await Task.sleep(for: .milliseconds(50))
   #expect(encoded.contains(13) == false)
+  #expect(String(decoding: encoded, as: UTF8.self).contains("file-selection"))
+  #expect(String(decoding: encoded, as: UTF8.self).contains("TOKEN=[REDACTED]"))
+  #expect(!String(decoding: encoded, as: UTF8.self).contains("chat-test-secret"))
   // 实际 zsh 输入区已协商 bracketed paste；预填遵循目标模式，不追加提交回车。
   #expect(String(decoding: encoded, as: UTF8.self).contains("\u{001B}[200~"))
   #expect(String(decoding: encoded, as: UTF8.self).contains("\u{001B}[201~"))

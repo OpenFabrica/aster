@@ -930,6 +930,38 @@ public struct WorkspaceFileNode: Identifiable, Equatable, Sendable {
 /// 生成详情面板使用的有界目录树。符号链接作为叶节点显示但绝不递归，既保留用户
 /// 可见信息，也阻止工作目录内链接把扫描带到仓库外或形成循环。
 public enum WorkspaceFileTree {
+  /// 完整列出一层目录，不递归、不施加全树条目预算。Files 在展开目录时再读取下一层，
+  /// 避免折叠目录的后代挤掉当前目录中的文件。根路径允许是 Shell 的逻辑符号链接目录。
+  public static func children(
+    root: URL, includeHidden: Bool = false, fileManager: FileManager = .default
+  ) throws -> [WorkspaceFileNode] {
+    guard root.isFileURL else { return [] }
+    let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey]
+    // Foundation 不接受符号链接作为枚举根，并会把 /var 等逻辑路径改成 /private/var。
+    // I/O 使用物理目录，返回路径仍保留 Shell CWD，避免展开集合与相对路径基准失配。
+    let entries = try fileManager.contentsOfDirectory(
+      at: root.resolvingSymlinksInPath(), includingPropertiesForKeys: Array(keys), options: [])
+    var nodes: [WorkspaceFileNode] = []
+    for entry in entries {
+      if withUnsafeCurrentTask(body: { $0?.isCancelled == true }) { return [] }
+      let values: URLResourceValues
+      do {
+        values = try entry.resourceValues(forKeys: keys)
+      } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        // 枚举后被并发删除的单个条目不能让整个目录退化为空列表。
+        continue
+      }
+      if !includeHidden, values.isHidden == true { continue }
+      nodes.append(.init(
+        path: root.appendingPathComponent(entry.lastPathComponent).path,
+        name: entry.lastPathComponent, depth: 0,
+        isDirectory: values.isDirectory == true, isSymbolicLink: values.isSymbolicLink == true))
+    }
+    return nodes.sorted {
+      $0.name.localizedStandardCompare($1.name) == .orderedAscending
+    }
+  }
+
   public static func enumerate(
     root: URL,
     maximumDepth: Int = 3,
