@@ -3,6 +3,40 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.26</title>
+            <pubDate>Mon, 26 Oct 2026 09:22:53 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>45</sparkle:version>
+            <sparkle:shortVersionString>0.6.26</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 新功能
+
+- **自动补全换成新引擎**：补全规则重新整理，来源包括内置 CLI 规格（711 条）、Shell 别名与 PATH、文件和目录、当前目录的历史命令和 README。Git 分支、npm/pnpm/yarn/bun 脚本、Make、Cargo、SSH 主机等候选在后台只读获取，不执行任何项目脚本。
+  - 接受键可选 `Tab`、`Tab + 右方向键`、单独右方向键、`Control + Space` 或关闭，默认 `Tab`。
+  - 候选面板可选关闭、自动、Esc 或 Option + Esc，默认 Esc。Tab 不再自动选中首项，先用上下键选，再按 Tab 或 Return。
+  - 设置里可以查看补全数据库并立即更新，也可以按类别「清除我的数据」。
+  - **注意**：学习数据从空库重新开始，旧数据已备份但不导入。剪贴板建议、失败后的纠错建议、Agent 恢复命令置顶这几项暂时没有接入新引擎。
+- **Pane 菜单重做**：点击顶部目录胶囊打开新的圆角菜单，鼠标移上去就展开子菜单，不用再点。
+  - Git 菜单直接执行操作：Push/Pull 先确认，Fetch 显示进度并可取消，创建分支、Merge/Rebase 先让你选分支。
+  - 「通知与权限」在同一标签的分屏间共享，可分别开关声音、通知、徽标、防休眠和鼠标捕获。
+  - 「关于此 Pane」显示 Pane ID、命令、打开时间和设备。
+- **文件 Pane 更紧凑好用**：
+  - 工具栏变紧凑，窄分屏只显示图标；新增「打开方式」，可在访达中显示、复制路径或用别的应用打开。
+  - 源码右键菜单提供剪切、复制、粘贴、撤销、语法选择和「发送到 Chat」。
+  - 「发送到 Chat」携带选区和行范围，包含未保存的编辑；可以预填到已有 Agent 或终端，也可以新建 Agent 会话，始终由你确认发送。
+  - 本地 `.sh` 文件显示运行按钮，在新终端里执行磁盘上的版本。
+  - 自动换行和行号移到「设置 → 编辑器」。源码字体跟随终端字体，图片和文字预览可缩放。
+
+## 修复
+
+- **Codex 的主机终端也能停靠到 Pane**：Codex 调用远程主机时，终端原来总是浮窗，也停靠不回去。现在 Aster 按 Codex 的会话 ID 找到调用它的 Pane。需要先在设置里装好 Codex 的 Agent 集成。
+- **没有调用方 Pane 时不再显示无效按钮**：agent 主机终端是独立窗口且找不到调用它的 Pane 时，标题栏不再露出点了没反应的「停靠到 Pane」按钮。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.26/Aster-0.6.26.dmg" length="43443496" type="application/octet-stream" sparkle:edSignature="r2LCKdv+FSVJ70A6XEdVolNry2x0e+y3kb41K3MXwx22Ce+0VHvR0LSTgJTW+iY9PBgd5n4jpMMYS0AiYr5CCQ=="/>
+        </item>
+        <item>
             <title>0.6.25</title>
             <pubDate>Fri, 23 Oct 2026 21:06:27 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -81,25 +115,6 @@
 - **打开链接后不再残留下划线和网址提示**：按住 Command 点链接打开后，终端里的链接下划线、手形光标和左下角的网址提示有时会一直留着，还会随着输出不停刷新。现在切到别的窗口或弹出确认框时会自动清掉。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.22/Aster-0.6.22.dmg" length="42400646" type="application/octet-stream" sparkle:edSignature="sPlxH8J4tctwI2VCaiZFArWu0bOcyKEjKeb+8lKmiq2LT8eft6yPxR/pcKuzRQkDrvGDoEaaL02CQ9MC4yR1AQ=="/>
-        </item>
-        <item>
-            <title>0.6.21</title>
-            <pubDate>Sat, 17 Oct 2026 09:32:11 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>40</sparkle:version>
-            <sparkle:shortVersionString>0.6.21</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 修复
-
-- **受管终端里 Claude Code 输入框不再闪烁**：开了「本机后台保活」的 Pane 里，Claude Code 反复查询终端背景色，每次都让整屏重画，输入框不停闪烁。现在这些查询由后台服务直接回答，不再触发重画。
-- **受管终端里 Claude Code 跟随浅色主题**：后台服务以前不回答背景色查询，Claude Code 拿不到颜色，总是按深色主题显示。现在后台服务按 Aster 当前的终端主题回答，切换主题后也会跟着变。远程机器上的受管终端暂时仍按深色显示。
-- **更新后自动换掉旧的后台服务**：本机后台服务会活过 Aster 更新，以前更新后仍在运行旧版本，新的修复不生效。现在 Aster 打开时会检查：没有终端在运行就自动换成新版本；有终端在运行，会弹窗说明重启会结束几个终端，由你选「现在重启」或「以后再说」。
-
-  从 0.6.20 及更早版本更新时，后台服务一定是旧版本。如果有受管终端在运行，第一次打开会看到这个提示。选「现在重启」后，在各个 Pane 上点「重新启动 Shell」即可。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.21/Aster-0.6.21.dmg" length="42264521" type="application/octet-stream" sparkle:edSignature="rP/5DQ1ufnJzk+gO/+a3hkvzK2gEBug7xei23ezV6cr0KY7zcTmjcNvK0FDpfI/YrJXcmUF7E0ZuvHhHj3XyDA=="/>
         </item>
     </channel>
 </rss>
