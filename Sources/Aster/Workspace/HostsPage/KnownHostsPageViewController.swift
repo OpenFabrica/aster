@@ -16,6 +16,9 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
   private(set) var sections: [KnownHostsPageSection] = []
   /// 最近一次渲染的记录行，供测试与截图读取。
   private(set) var rowViews: [KnownHostsEntryRowView] = []
+  /// 搜索结果中的页码（从 0 开始）；刷新与删除后会收敛到有效页。
+  private(set) var pageIndex = 0
+  private(set) var pageCount = 1
 
   private let searchBar = HostsPageFilledView(fillColor: HostsPagePalette.control, cornerRadius: 9)
   private let scrollView = NSScrollView()
@@ -24,6 +27,11 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
   private let errorLabel = makeLabel("", size: 12, color: AsterTheme.ink)
   private let statusLabel = makeLabel("", size: 12.5, color: AsterTheme.secondaryInk)
   private let spinner = NSProgressIndicator()
+  private let paginationBar = NSView()
+  private let pageLabel = makeLabel("", size: 12.5, color: AsterTheme.secondaryInk)
+  private var previousButton: HostsPagePillButton!
+  private var nextButton: HostsPagePillButton!
+  private var paginationHeight: NSLayoutConstraint!
 
   /// 生产用 `SSHKnownHostsService.live()`；测试注入假的服务与提示出口。
   init(service: SSHKnownHostsService = .live(), notify: ((String, Bool) -> Void)? = nil) {
@@ -73,6 +81,7 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
     hint.identifier = NSUserInterfaceItemIdentifier("known-hosts-hint")
     configureErrorBanner()
     configureScrollView()
+    configurePagination()
     // 顶部用栈排列：错误横幅隐藏时栈会把它摘掉，不留空白。
     let header = NSStackView(views: [bar, hint, errorBanner])
     header.orientation = .vertical
@@ -83,7 +92,7 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
       view.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
     }
     hint.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -4).isActive = true
-    for subview in [header, scrollView] as [NSView] {
+    for subview in [header, scrollView, paginationBar] as [NSView] {
       subview.translatesAutoresizingMaskIntoConstraints = false
       root.addSubview(subview)
     }
@@ -96,7 +105,10 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
       scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
       scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: paginationBar.topAnchor),
+      paginationBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+      paginationBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+      paginationBar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
     ])
   }
 
@@ -204,7 +216,9 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
 
   /// 输入即过滤。
   func controlTextDidChange(_ obj: Notification) {
+    pageIndex = 0
     render()
+    scrollToTop()
   }
 
   /// Esc 清空搜索词。
@@ -213,7 +227,9 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
       return false
     }
     searchField.stringValue = ""
+    pageIndex = 0
     render()
+    scrollToTop()
     return true
   }
 
@@ -236,12 +252,22 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
     }
 
     if let listing = service.listing {
-      sections = KnownHostsPageContent.sections(
-        listing: listing, query: searchField.stringValue,
+      let page = KnownHostsPageContent.page(
+        listing: listing, query: searchField.stringValue, index: pageIndex,
         names: service.names(for:), isRemovable: service.isRemovable)
+      pageIndex = page.index
+      pageCount = page.count
+      sections = page.sections
+      pageLabel.stringValue = L("第 \(String(pageIndex + 1))/\(String(pageCount)) 页 · 共 \(String(page.total)) 条记录")
     } else {
       sections = []
+      pageIndex = 0
+      pageCount = 1
     }
+    paginationBar.isHidden = pageCount <= 1
+    paginationHeight.constant = pageCount > 1 ? InterfaceScale.length(50) : 0
+    previousButton.isEnabled = pageIndex > 0
+    nextButton.isEnabled = pageIndex + 1 < pageCount
     var views: [NSView] = []
     if let status = statusText(loading: loading) {
       views.append(makeStatusRow(status, showsSpinner: loading && service.listing == nil))
@@ -252,6 +278,50 @@ final class KnownHostsPageViewController: NSViewController, HostsHubPage, NSText
     for view in views {
       view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
     }
+  }
+
+  // MARK: - 分页
+
+  /// 分页条固定在列表下方，长列表无需滚到底部才能翻页；单页时不占高度。
+  private func configurePagination() {
+    paginationBar.identifier = NSUserInterfaceItemIdentifier("known-hosts-pagination")
+    previousButton = HostsPagePillButton(title: L("上一页"), symbol: "chevron.left") { [weak self] in
+      self?.changePage(by: -1)
+    }
+    nextButton = HostsPagePillButton(title: L("下一页"), symbol: "chevron.right") { [weak self] in
+      self?.changePage(by: 1)
+    }
+    previousButton.identifier = NSUserInterfaceItemIdentifier("known-hosts-previous-page")
+    nextButton.identifier = NSUserInterfaceItemIdentifier("known-hosts-next-page")
+    pageLabel.identifier = NSUserInterfaceItemIdentifier("known-hosts-page-number")
+    let row = NSStackView(views: [previousButton!, pageLabel, nextButton!])
+    row.orientation = .horizontal
+    row.spacing = 12
+    row.translatesAutoresizingMaskIntoConstraints = false
+    paginationBar.addSubview(row)
+    paginationHeight = paginationBar.heightAnchor.constraint(equalToConstant: 0)
+    NSLayoutConstraint.activate([
+      paginationHeight,
+      row.centerXAnchor.constraint(equalTo: paginationBar.centerXAnchor),
+      row.centerYAnchor.constraint(equalTo: paginationBar.centerYAnchor),
+      row.leadingAnchor.constraint(greaterThanOrEqualTo: paginationBar.leadingAnchor, constant: 24),
+      row.trailingAnchor.constraint(lessThanOrEqualTo: paginationBar.trailingAnchor, constant: -24),
+    ])
+  }
+
+  /// 翻页只重建当前页；搜索条件与文件原行号不变。
+  private func changePage(by delta: Int) {
+    let next = min(max(pageIndex + delta, 0), pageCount - 1)
+    guard next != pageIndex else { return }
+    pageIndex = next
+    render()
+    scrollToTop()
+  }
+
+  private func scrollToTop() {
+    view.layoutSubtreeIfNeeded()
+    scrollView.contentView.scroll(to: .zero)
+    scrollView.reflectScrolledClipView(scrollView.contentView)
   }
 
   /// 列表上方的状态文字：首次读取中、没有可列出的文件；有列表时不显示。

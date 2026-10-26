@@ -1,4 +1,4 @@
-// 主机页右侧编辑面板的开合与宿主回调。面板盖在卡片网格右侧，网格保持可见可点；
+// 主机页右侧编辑面板的开合与宿主回调。面板与左侧主内容并排，共享同一条布局边界；
 // 切换到另一台主机前，有未保存的修改先确认是否放弃。
 import AppKit
 import AsterCore
@@ -84,6 +84,7 @@ extension HostsPageViewController: HostEditorPanelHost {
       panelView.topAnchor.constraint(equalTo: view.topAnchor),
       panelView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       panelView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor),
+      panelView.leadingAnchor.constraint(equalTo: browserContentView.trailingAnchor),
       preferredWidth, trailing,
     ])
     editorPanel = panel

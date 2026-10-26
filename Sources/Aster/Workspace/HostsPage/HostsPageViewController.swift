@@ -30,6 +30,8 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
   var editorPanel: HostEditorPanelController?
   /// 面板右边缘约束，开合动画改它的常量。
   var editorTrailingConstraint: NSLayoutConstraint?
+  /// 搜索、工具栏与卡片的共同容器；右侧编辑面板打开时整体让出宽度。
+  let browserContentView = NSView()
 
   private(set) var query = HostBrowserQuery()
   private(set) var layoutMode: LayoutMode = .grid
@@ -129,6 +131,25 @@ final class HostsPageViewController: NSViewController, NSTextFieldDelegate {
 
   /// 搭建固定的页面骨架；卡片内容由 `reload()` 填充。标题带由外壳 `HostsHubViewController` 提供。
   private func buildLayout(in root: NSView) {
+    browserContentView.identifier = NSUserInterfaceItemIdentifier("hosts-page-browser")
+    browserContentView.translatesAutoresizingMaskIntoConstraints = false
+    root.addSubview(browserContentView)
+    // 无编辑面板时填满页面；打开后由面板左边缘确定共同边界，开合动画中也不重叠。
+    let fillWidth = browserContentView.trailingAnchor.constraint(equalTo: root.trailingAnchor)
+    // 高于工具栏的 hugging，低于面板的首选宽度；关闭后优先拉伸主内容。
+    fillWidth.priority = .init(NSLayoutConstraint.Priority.defaultHigh.rawValue - 1)
+    NSLayoutConstraint.activate([
+      browserContentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+      browserContentView.topAnchor.constraint(equalTo: root.topAnchor),
+      browserContentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+      browserContentView.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
+      fillWidth,
+    ])
+    buildBrowserLayout(in: browserContentView)
+  }
+
+  /// 左侧主内容随容器宽度布局，网格按可用宽度自动换列。
+  private func buildBrowserLayout(in root: NSView) {
     let searchBar = makeSearchBar()
     let toolbar = makeToolbar()
     configureBreadcrumb()

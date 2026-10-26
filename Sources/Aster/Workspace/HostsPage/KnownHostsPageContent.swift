@@ -27,6 +27,16 @@ struct KnownHostsPageSection: Equatable {
   let skippedLines: [Int]
 }
 
+/// 一页记录的展示快照；仅当前页生成行文案与视图所需的数据。
+struct KnownHostsPage {
+  static let size = 50
+  let index: Int
+  let total: Int
+  let sections: [KnownHostsPageSection]
+
+  var count: Int { max(1, (total + Self.size - 1) / Self.size) }
+}
+
 /// 删除确认里的一个选项。
 enum KnownHostsDeleteChoice: Equatable {
   /// 删除整行。
@@ -91,15 +101,33 @@ enum KnownHostsPageContent {
     return haystack.contains { $0.localizedCaseInsensitiveContains(needle) }
   }
 
-  /// 按文件分组；文件顺序与 aster-ssh 输出一致（默认文件在前，系统级在后）。
-  static func sections(
-    listing: SSHKnownHostsListing, query: String,
+  /// 先搜索全部记录，再跨文件分页；切片后才生成行文案，避免为屏幕外记录创建控件。
+  /// 文件与记录顺序沿用 aster-ssh；页码越界时收敛到有效页。空文件和无匹配的说明保留在第一页。
+  static func page(
+    listing: SSHKnownHostsListing, query: String, index: Int,
     names: (SSHHostPort) -> [String], isRemovable: (SSHKnownHostsListing.Entry) -> Bool
-  ) -> [KnownHostsPageSection] {
+  ) -> KnownHostsPage {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    return listing.files.map { file in
-      let own = listing.entries.filter { $0.file == file.path }
-      let rows = own.filter { matches($0, query: trimmed, names: names) }.map { entry in
+    let entries = Dictionary(grouping: listing.entries, by: \.file)
+    let skipped = Dictionary(grouping: listing.skipped, by: \.file)
+    let matching = listing.files.map { file in
+      (entries[file.path] ?? []).filter { matches($0, query: trimmed, names: names) }
+    }
+    let total = matching.reduce(0) { $0 + $1.count }
+    let pageCount = max(1, (total + KnownHostsPage.size - 1) / KnownHostsPage.size)
+    let pageIndex = min(max(index, 0), pageCount - 1)
+    let start = pageIndex * KnownHostsPage.size
+    let end = start + KnownHostsPage.size
+    var offset = 0
+    let sections = listing.files.enumerated().compactMap { fileIndex, file -> KnownHostsPageSection? in
+      let own = entries[file.path] ?? []
+      let matches = matching[fileIndex]
+      let lower = max(0, min(matches.count, start - offset))
+      let upper = max(lower, min(matches.count, end - offset))
+      offset += matches.count
+      // 其它页有记录的文件不画空卡片；无匹配/空文件的说明只在第一页显示。
+      guard lower < upper || (pageIndex == 0 && matches.isEmpty) else { return nil }
+      let rows = matches[lower..<upper].map { entry in
         KnownHostsPageRow(
           entry: entry, title: title(for: entry, names: names), covered: covered(by: entry),
           removable: isRemovable(entry))
@@ -109,13 +137,14 @@ enum KnownHostsPageContent {
         // 不存在的文件已由标题徽章说明，卡片不再重复。
         else if !file.exists { nil }
         else if own.isEmpty { L("没有记录") }
-        else if rows.isEmpty { L("没有匹配“\(trimmed)”的记录") }
+        else if matches.isEmpty { L("没有匹配“\(trimmed)”的记录") }
         else { nil }
       return KnownHostsPageSection(
         file: file, displayPath: SSHKnownHostsService.displayPath(file.path), total: own.count,
         rows: rows, placeholder: placeholder,
-        skippedLines: listing.skipped.filter { $0.file == file.path }.map(\.line))
+        skippedLines: (skipped[file.path] ?? []).map(\.line))
     }
+    return KnownHostsPage(index: pageIndex, total: total, sections: sections)
   }
 
   /// 文件分组的徽章：系统级 · 只读、文件不存在、不可写（存在但不能改）；系统级文件可能同时不存在。

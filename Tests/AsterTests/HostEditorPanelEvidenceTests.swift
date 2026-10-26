@@ -83,3 +83,69 @@ private func hostEditorView(_ identifier: String, in root: NSView) -> NSView? {
   }
   return nil
 }
+
+@Test("编辑面板：新建、编辑与默认设置和主内容并排，缩窗不遮挡，关闭恢复宽度",
+  arguments: [NSAppearance.Name.aqua, .darkAqua])
+@MainActor
+func hostEditorSharesWidthWithBrowser(appearance: NSAppearance.Name) async throws {
+  let fixture = try HostEditorFixture()
+  defer { try? FileManager.default.removeItem(at: fixture.root) }
+  let (page, window) = try makeEditorWindow(fixture, appearance: appearance)
+  defer { window.orderOut(nil) }
+  page.enterGroup("dx-test")
+  let browser = page.browserContentView
+  let fullWidth = browser.frame.width
+  #expect(abs(fullWidth - page.view.bounds.width) < 1)
+  let newHost = try #require(hostEditorView("hosts-page-new-host", in: browser) as? NSButton)
+  newHost.performClick(nil)
+
+  for (name, mode) in [("new-split", page.editorPanel?.mode), ("edit-split", .edit(fixture.full.id)),
+    ("defaults-split", .defaults)]
+  {
+    page.openEditor(try #require(mode))
+    // 等待真实 AppKit 开合动画收尾后再检查最终几何布局。
+    try await Task.sleep(for: .milliseconds(250))
+    window.contentView?.layoutSubtreeIfNeeded()
+    let panel = try #require(page.editorPanel)
+    #expect(browser.frame.width < fullWidth)
+    #expect(abs(browser.frame.maxX - panel.view.frame.minX) < 1)
+    #expect(abs(panel.view.frame.maxX - page.view.bounds.maxX) < 1)
+    let search = try #require(hostEditorView("hosts-page-search-bar", in: browser))
+    #expect(search.convert(search.bounds, to: page.view).maxX < panel.view.frame.minX)
+    let gridFrame = page.hostsGrid.convert(page.hostsGrid.bounds, to: page.view)
+    #expect(gridFrame.maxX < panel.view.frame.minX)
+    #expect(page.query.group == "dx-test" && page.listing.hosts.count == 2)
+    try await captureEditorWindow(window, name: name)
+    if panel.mode == .edit(fixture.full.id) {
+      let toggle = try #require(hostEditorView("hosts-page-layout-toggle", in: browser) as? NSButton)
+      toggle.performClick(nil)
+      window.contentView?.layoutSubtreeIfNeeded()
+      for card in page.hostsGrid.items {
+        #expect(card.convert(card.bounds, to: page.view).maxX < panel.view.frame.minX)
+      }
+      try await captureEditorWindow(window, name: "edit-list-split")
+      toggle.performClick(nil)
+    }
+  }
+
+  for width in [860.0, 700.0] {
+    window.setContentSize(NSSize(width: width, height: 640))
+    window.contentView?.layoutSubtreeIfNeeded()
+    let panel = try #require(page.editorPanel)
+    #expect(abs(browser.frame.maxX - panel.view.frame.minX) < 1)
+    #expect(abs(panel.view.frame.maxX - page.view.bounds.maxX) < 1)
+    let lastToolbarButton = try #require(hostEditorView("hosts-page-sort", in: browser))
+    #expect(lastToolbarButton.convert(lastToolbarButton.bounds, to: page.view).maxX <= panel.view.frame.minX)
+    try await captureEditorWindow(window, name: "split-\(Int(width))")
+  }
+
+  let panel = try #require(page.editorPanel)
+  let cancel = try #require(hostEditorView("host-editor-cancel", in: panel.view) as? NSButton)
+  cancel.performClick(nil)
+  try await Task.sleep(for: .milliseconds(250))
+  window.contentView?.layoutSubtreeIfNeeded()
+  #expect(page.editorPanel == nil)
+  #expect(abs(browser.frame.width - page.view.bounds.width) < 1)
+  #expect(window.firstResponder === page.searchField.currentEditor())
+  try await captureEditorWindow(window, name: "split-closed")
+}

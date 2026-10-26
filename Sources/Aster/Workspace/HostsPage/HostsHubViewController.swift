@@ -18,6 +18,15 @@ enum HostsHubSection: String, CaseIterable, Sendable {
     case .knownHosts: L("已知主机")
     }
   }
+
+  /// 与子页内容对应的图标，文字仍保留为导航与辅助功能标签。
+  var symbol: String {
+    switch self {
+    case .hosts: "server.rack"
+    case .keys: "key"
+    case .knownHosts: "checkmark.shield"
+    }
+  }
 }
 
 /// 子页在挂到外壳上时收到的回调（刷新数据、交出键盘焦点）。
@@ -89,14 +98,28 @@ final class HostsHubViewController: NSViewController {
   /// 标题带（居中分段控件）+ 子页内容区。
   private func buildLayout(in root: NSView) {
     let titleBand = WorkspaceTitleBarBackgroundView()
-    segmentedControl.segmentStyle = .rounded
+    segmentedControl.segmentStyle = .capsule
     segmentedControl.trackingMode = .selectOne
     segmentedControl.segmentCount = HostsHubSection.allCases.count
+    segmentedControl.controlSize = .large
+    segmentedControl.font = NSFont.interface(ofSize: 13, weight: .medium)
+    segmentedControl.segmentDistribution = .fillEqually
+    segmentedControl.selectedSegmentBezelColor = AsterTheme.accent
     for (index, item) in HostsHubSection.allCases.enumerated() {
       segmentedControl.setLabel(item.title, forSegment: index)
+      segmentedControl.setImage(
+        NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil)?
+          .withSymbolConfiguration(.init(pointSize: InterfaceScale.font(12), weight: .medium)),
+        forSegment: index)
       segmentedControl.setWidth(0, forSegment: index)
     }
-    segmentedControl.controlSize = .small
+    // 按最长本地化标题预留等宽分段，切页时控件不跳动；窄窗口仍允许原生控件压缩。
+    let longestTitle = HostsHubSection.allCases.map {
+      ($0.title as NSString).size(withAttributes: [.font: NSFont.interface(ofSize: 13, weight: .medium)]).width
+    }.max() ?? 0
+    let preferredWidth = segmentedControl.widthAnchor.constraint(
+      equalToConstant: max(InterfaceScale.length(100), ceil(longestTitle) + InterfaceScale.length(48)) * 3)
+    preferredWidth.priority = .defaultHigh
     segmentedControl.identifier = NSUserInterfaceItemIdentifier("hosts-hub-sections")
     segmentedControl.target = self
     segmentedControl.action = #selector(segmentChanged(_:))
@@ -110,9 +133,12 @@ final class HostsHubViewController: NSViewController {
       titleBand.topAnchor.constraint(equalTo: root.topAnchor),
       titleBand.leadingAnchor.constraint(equalTo: root.leadingAnchor),
       titleBand.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-      titleBand.heightAnchor.constraint(equalToConstant: 36),
+      titleBand.heightAnchor.constraint(equalToConstant: InterfaceScale.length(52)),
+      preferredWidth,
       segmentedControl.centerXAnchor.constraint(equalTo: titleBand.centerXAnchor),
-      segmentedControl.centerYAnchor.constraint(equalTo: titleBand.centerYAnchor, constant: 2),
+      segmentedControl.centerYAnchor.constraint(equalTo: titleBand.centerYAnchor),
+      segmentedControl.leadingAnchor.constraint(greaterThanOrEqualTo: titleBand.leadingAnchor, constant: 24),
+      segmentedControl.trailingAnchor.constraint(lessThanOrEqualTo: titleBand.trailingAnchor, constant: -24),
 
       contentView.topAnchor.constraint(equalTo: titleBand.bottomAnchor),
       contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),

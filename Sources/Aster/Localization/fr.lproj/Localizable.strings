@@ -2381,3 +2381,9 @@
 "%@ 未就绪，请先在新终端中完成启动，再选择该终端重试。" = "%@ n’est pas prêt. Terminez le démarrage dans le nouveau terminal, puis sélectionnez ce terminal et réessayez.";
 
 "请在本地工作区创建聊天目标。" = "Créez les cibles de discussion dans un espace de travail local.";
+
+"上一页" = "Précédente";
+
+"下一页" = "Suivante";
+
+"第 %@/%@ 页 · 共 %@ 条记录" = "Page %@/%@ · %@ entrées";

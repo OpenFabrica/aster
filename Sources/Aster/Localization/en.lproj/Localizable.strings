@@ -2383,3 +2383,9 @@
 "%@ 未就绪，请先在新终端中完成启动，再选择该终端重试。" = "%@ is not ready. Complete startup in the new terminal, then select that terminal and try again.";
 
 "请在本地工作区创建聊天目标。" = "Create chat targets in a local workspace.";
+
+"上一页" = "Previous";
+
+"下一页" = "Next";
+
+"第 %@/%@ 页 · 共 %@ 条记录" = "Page %@/%@ · %@ records";

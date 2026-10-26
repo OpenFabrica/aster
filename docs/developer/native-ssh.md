@@ -164,6 +164,19 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 - 删除防误删：`remove` 带 `lineDigest`（原行 SHA-256），行已变化时退出码 3（stale），App toast 提示并重新列出。`host` 非空时只删多主机行里命中的模式，其余字节不变。系统级文件一律拒绝。
 - App 侧规则只有一份：`SSHKnownHostsService`（`Sources/Aster/SSH/`，与界面形式无关）只接受上一次列表里出现过、所在文件可写、摘要一致的记录；指定主机时它必须是该记录的 `matches` 之一。同一时刻只跑一个删除，删除后不论成败都重新列出，旧行号不再复用。列出用加载代次丢弃过期结果，子进程不占主线程。结果提示走服务的 `toast`，状态变化走 `didChange`。
 - 使用方：侧栏主机页的「已知主机」子页（`KnownHostsPageViewController`，在 `HostsHubViewController.defaultFactories()` 登记）。设置里不再有已知主机页，网页页面与 `SettingsKnownHostsBridge` 已删除。
+
+- 分页与性能：`KnownHostsPageContent.page` 先按文件归并并搜索全量记录，再跨文件按原顺序切片，每页 50 条；仅为当前页构造行文案和 AppKit 控件，避免全部记录同时进入 `NSStackView` 的 Auto Layout 求解。底部分页条固定可见，单页时隐藏；搜索或 Esc 清空回第一页，翻页回列表顶部，刷新和删除后页码收敛到有效页。文件总数、原行号和摘要不随分页改写，删除仍经服务按最近列表验证；读取失败保留当前页。空文件、文件错误与无匹配说明在第一页保留，后续页只显示当前页记录所属文件。回归包含顶部原生分段控件入口、大列表有界渲染、跨文件不漏不重、搜索及末页删除。
+
+```mermaid
+flowchart LR
+  A[首次打开或重新加载] --> B[后台读取 known_hosts 列表]
+  B --> C[按文件归并并搜索全量记录]
+  D[搜索变化：回第一页] --> C
+  E[翻页：更新页码] --> C
+  C --> F[收敛页码并取当前 50 条]
+  F --> G[只创建当前页记录控件]
+  H[确认删除：校验原行号与摘要] --> B
+```
 - 原生页面：分组、徽章、hashed 记录的名称、搜索与删除选项由纯函数 `KnownHostsPageContent` 推导。删除用 `NSAlert` sheet：单模式行只有「删除」，多模式行再给每个命中主机一个「只删除 <host>」。首次显示时自动列出一次；之后只在点「重新加载」或删除后重新列出，因为工作区每次整树重建（例如弹出 toast）都会回调 `pageDidAppear`。提示写到外壳所属窗口的 `AppModel.notice`。
 - 写入修复：改写走 `atomic_file::write`，先顺着符号链接找到真实文件，在它的目录写临时文件（`create_new`）再 rename，保留原权限。之前 `replace()` 直接 rename 会把指向 dotfiles 的 `~/.ssh/known_hosts` 链接换成普通文件。
 
@@ -181,6 +194,7 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 
 - 状态：`AppModel.isHostsPagePresented`，只属于本窗口、不持久化。`selectedTabID` 的 `didSet` 在任何选中标签的入口（侧栏、Open Quickly、开 SSH 标签、CLI）都把它关掉；点当前工作区也会先关它（`selectWorkspaceGroupItem`）。命令面板有 `hosts` 命令，横向标签栏布局用它打开。
 - 管理入口只有这里：主机列表与编辑、密钥保险库、已知主机都不在设置里（子标签 主机 | 密钥 | 已知主机；设置「主机」分类只剩「Agent 访问」，页顶的「打开主机页」经桥接动作 `hosts.openHostsPage` 在最前面的工作区窗口打开本页）。
+- 顶部标签：`HostsHubViewController` 使用原生大尺寸胶囊分段控件，配图标和文字，按最长本地化标题等宽排列，标题带与字体随界面缩放。选中背景设置主题强调色，活动/非活动窗口的最终呈现由 AppKit 决定；原生键盘与辅助功能语义保留。
 - 编辑入口：终端标签右键菜单的「编辑主机…」（原生 SSH 标签）与 Open Quickly 主机行的「编辑主机…」都调 `AppModel.showHostEditor(hostID:)`：打开主机页并带出该主机的编辑面板；主机已不存在时显示列表并给出提示。「新建工作区」面板的「添加主机…」打开主机页并带出新建主机面板。请求先记在 `AppModel.pendingHostEditor`，由 `HostsPageViewController.pageDidAppear` 消费，主机页未显示、正显示别的子页或已显示时都走同一条路径。
 - 视图：`WorkspaceViewController.hostsPageController` 懒建并跨整树 `refresh()` 复用，搜索词、钻取的分组和滚动位置不丢；显示时终端视图不在树里，`refresh()` 不回焦终端，详情面板按钮隐藏。代码在 `Sources/Aster/Workspace/HostsPage/`，侧栏行在 `Workspace/Sidebar/HostsSidebarRowView.swift`（行自己订阅主机目录原地更新数量）。
 - 规则：搜索、分组、标签筛选、排序与回车意图都在 `HostBrowserCatalog`（AsterCore，纯函数）。顶层不过滤时只列分组和未分组主机；过滤时平铺所有分组的匹配主机，分组只留名称命中的。回车顺序：名称或连接串完全相同的已保存主机 → 像地址的输入走 `QuickConnectTarget` 临时连接 → 只剩一台可见主机。「最近使用」排序用 `HostUsageLedger.lastUsedByID`。
@@ -194,6 +208,8 @@ Rust 实现，参考 tty7 的 `ssh_config.rs`：
 ## 主机编辑面板
 
 主机页右侧滑出的原生编辑面板（AppKit，无 WebView），覆盖新建主机、编辑主机与「默认」项。它取代了原来设置里的网页表单，设置里已不再有主机编辑。
+
+- 布局：搜索框、工具栏与卡片区统一放在 `browserContentView` 中，与右侧编辑面板共享一条水平边界。面板打开及开合动画期间，左侧整体收窄，网格按剩余宽度换列，不被面板覆盖；面板移除后，低优先级的填满约束让左侧恢复页面宽度。
 
 - 分层：
   - `SSHHostDraft`（AsterCore）：表单草稿。`init(profile:)` 把主机拆成文本与选项，`makeProfile()` 按网页表单同样的规则组装（空文本存 nil 表示继承；转发规则只写端口时绑定补 `127.0.0.1`、目标补 `localhost`；动态转发目标固定为 `{"", 0}`），格式问题收集成 `SSHHostDraftError`。保险库密钥按原顺序保留，勾选追加末尾，找不到的 ID 原样带回。

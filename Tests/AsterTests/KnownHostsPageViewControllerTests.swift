@@ -96,7 +96,7 @@ private final class KnownHostsPageFixture {
 /// 设置了 `ASTER_KNOWN_HOSTS_EVIDENCE_DIR` 时按窗口号截下窗口，文件名 `aster-knownhosts-<name>-<外观>.png`。
 /// 按窗口号截图不受屏幕上其它窗口遮挡；sheet 是独立窗口，单独传入它的窗口。
 @MainActor
-private func captureKnownHostsWindow(_ window: NSWindow, name: String, appearanceOf owner: NSWindow? = nil) async throws {
+func captureKnownHostsWindow(_ window: NSWindow, name: String, appearanceOf owner: NSWindow? = nil) async throws {
   guard let directory = ProcessInfo.processInfo.environment["ASTER_KNOWN_HOSTS_EVIDENCE_DIR"] else { return }
   try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
   window.orderFront(nil)
