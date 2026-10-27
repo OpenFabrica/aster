@@ -365,7 +365,15 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       updateSourceLayout()
       return sourceScrollView
     }
-    let textView = FileSourceTextView()
+    // 行号标尺按 NSLayoutManager 取行框，必须从创建起就用 TextKit 1。默认的 TextKit 2
+    // 会在标尺首次绘制时被中途切换，切换前按零宽排出的折行残留到下一次整篇重排
+    // （语法高亮完成）才消失，表现为切回标签后正文挤成一条窄列。
+    let textView = FileSourceTextView(usingTextLayoutManager: false)
+    // 拿到真实视口宽度前不跟随零宽 frame（否则容器宽为负，整篇按每字一行排版）；
+    // 由 updateSourceLayout 在视口就绪后设定宽度并恢复跟随。
+    textView.textContainer?.widthTracksTextView = false
+    textView.textContainer?.containerSize = NSSize(
+      width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
     textView.contextMenuProvider = { [weak self, weak textView] in
       guard let self, let textView else { return NSMenu() }
       return FilePaneMenus.source(textView: textView, syntax: makeSyntaxMenu(), viewAs: makeViewAsMenu(),
@@ -418,7 +426,6 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     textView.isHorizontallyResizable = !softWrap
     // 宽度由这里按最终 viewport 统一设置；再开启 .width 会在 ruler tile 时重复扣减标尺宽度。
     textView.autoresizingMask = []
-    textView.textContainer?.widthTracksTextView = softWrap
     // Pane 初次挂载和 Source/Preview 切换时滚动区可能尚未完成布局。显式跟随
     // viewport 建立文本视图尺寸，避免零宽 documentView 只加载文本而不绘制字形。
     // ruler 在 clip view 内占据负 x 区间，正文从 x=0 开始；去掉该区间才是可用宽度。
@@ -426,6 +433,8 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     let clipBounds = scroll.contentView.bounds
     let viewport = NSSize(width: max(0, clipBounds.maxX - max(0, clipBounds.minX)), height: clipBounds.height)
     guard viewport.width > 0, viewport.height > 0 else { return }
+    // 视口就绪后才开启宽度跟随，零宽阶段的 frame 不会把容器宽度带成负数。
+    textView.textContainer?.widthTracksTextView = softWrap
     textView.minSize = viewport
     let size = NSSize(
       width: softWrap ? viewport.width : max(viewport.width, textView.frame.width),
