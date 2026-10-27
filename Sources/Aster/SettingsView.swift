@@ -63,9 +63,11 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     case view = "视图"
     case appearance = "外观"
     case recipes = "Recipes"
+    case tools = "工具"
     case shortcuts = "快捷键"
     case advanced = "高级"
 
+    /// 原生回退侧栏的 SF Symbol 名。
     var symbol: String {
       switch self {
       case .general: "exclamationmark.circle"
@@ -77,6 +79,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
       case .view: "square.grid.2x2"
       case .appearance: "paintpalette"
       case .recipes: "square.grid.2x2"
+      case .tools: "hammer"
       case .shortcuts: "bolt"
       case .advanced: "wrench.and.screwdriver"
       }
@@ -91,6 +94,8 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
   private let updateController: (any SoftwareUpdateControlling)?
   /// 「主机」分类（Agent 访问）的快照与动作协作者；回调在 viewDidLoad 接线，不向它开放本类的 private 成员。
   private let agentAccessBridge: SettingsAgentAccessBridge
+  /// 「工具」分类（插件管理与工具面板快捷键）的快照与动作协作者；接线方式同上。
+  private let toolsBridge: SettingsToolsBridge
   private var selection: Section = .general
   private var searchText = ""
   private var focusedThemeID: String?
@@ -230,18 +235,21 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     }
   }
 
+  /// 协作者都可注入（测试用）；缺省时用生产实现。
   init(
     preferences: AppPreferences,
     panelLayoutBinding: WorkspacePanelSettingsBinding = WorkspacePanelSettingsBinding(),
     agentSetupService: AgentSetupService = AgentSetupService(),
     updateController: (any SoftwareUpdateControlling)? = SoftwareUpdateService.shared,
-    agentAccessBridge: SettingsAgentAccessBridge? = nil
+    agentAccessBridge: SettingsAgentAccessBridge? = nil,
+    toolsBridge: SettingsToolsBridge? = nil
   ) {
     self.preferences = preferences
     self.panelLayoutBinding = panelLayoutBinding
     self.agentSetupService = agentSetupService
     self.updateController = updateController
     self.agentAccessBridge = agentAccessBridge ?? SettingsAgentAccessBridge()
+    self.toolsBridge = toolsBridge ?? SettingsToolsBridge(preferences: preferences)
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -298,6 +306,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     view = root
   }
 
+  /// 订阅偏好与各协作者的变化，接线后加载网页设置文档。
   override func viewDidLoad() {
     super.viewDidLoad()
     preferences.objectWillChange
@@ -327,6 +336,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
       }
       .store(in: &cancellables)
     connectAgentAccessBridge()
+    connectToolsBridge()
     TerminalNotificationService.shared.refreshAuthorizationStatus()
     refreshMemoryStoreSize()
     refreshMemoryMCPState()
@@ -613,6 +623,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     return scroll
   }
 
+  /// 原生回退页：当前分类的内容视图。
   private func sectionViews() -> [NSView] {
     switch selection {
     case .general: generalViews()
@@ -624,6 +635,7 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
     case .view: viewViews()
     case .appearance: appearanceViews()
     case .recipes: recipeViews()
+    case .tools: toolViews()
     case .shortcuts: shortcutViews()
     case .advanced: advancedViews()
     }
@@ -1529,6 +1541,32 @@ final class SettingsViewController: NSViewController, NSSearchFieldDelegate {
         ) { [weak self] value in
           self?.preferences.configuration.editor.previewRichDocuments = value
         },
+      ]),
+    ]
+  }
+
+  // MARK: - 工具
+
+  /// 把「工具」分类协作者接到本页的快照推送、toast 与设置窗口上，并开始监听工具中心。
+  private func connectToolsBridge() {
+    toolsBridge.pushSnapshot = { [weak self] in self?.pushWebSnapshot() }
+    toolsBridge.toast = { [weak self] text, isError in
+      self?.sendWebToast(text, level: isError ? "error" : "info")
+    }
+    toolsBridge.window = { [weak self] in self?.viewIfLoaded?.window }
+    toolsBridge.isPresented = { [weak self] in self?.viewIfLoaded?.window?.isVisible == true }
+    toolsBridge.start()
+  }
+
+  /// 原生回退页只做说明：插件管理只在网页设置页中提供。
+  private func toolViews() -> [NSView] {
+    [
+      sectionTitle(L("工具")),
+      card([
+        actionRow(
+          L("工具面板"), L("插件管理只在网页设置页中提供。"),
+          title: L("打开工具面板")
+        ) { [weak self] in self?.toolsBridge.openLauncher() }
       ]),
     ]
   }
@@ -3133,6 +3171,8 @@ private enum SettingsWebBridge {
     "quickTerminal.animationDuration": .number(0.15),
     "quickTerminal.autohide": .bool(true),
     "quickTerminal.followSpaces": .bool(true),
+    // 工具面板的全局快捷键（启动器读取）；默认不占用任何组合。
+    "tools.launcherShortcut": .string("none"),
     "pictureInPicture.style": .string("mirror"),
     "general.shell": .string(ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"),
     "general.hideDirtyIndicator": .bool(false),
@@ -3297,6 +3337,7 @@ extension SettingsViewController: WKNavigationDelegate {
     sendWebMessage(["type": "toast", "message": text, "level": level])
   }
 
+  /// 网页设置页的完整快照：字段值、能力位与各分类协作者的数据。
   private func makeWebSnapshot() -> [String: Any] {
     var values = SettingsWebBridge.compatibilityDefaults.mapValues(\.jsonValue)
     for (key, value) in preferences.settingsCompatibility { values[key] = value.jsonValue }
@@ -3514,6 +3555,7 @@ extension SettingsViewController: WKNavigationDelegate {
       "recipes": makeWebRecipes(),
       "shortcuts": makeWebShortcuts(),
       "hosts": agentAccessBridge.snapshot(),
+      "tools": toolsBridge.snapshot(),
     ]
   }
 
@@ -3743,6 +3785,7 @@ extension SettingsViewController: WKNavigationDelegate {
     }
   }
 
+  /// 写入网页提交的一个字段：先按键校验类型与取值，再写入强类型配置或兼容字段。
   private func applyWebSetting(key: String, value: Any) throws {
     let bool = { () throws -> Bool in
       guard let value = value as? NSNumber,
@@ -4142,10 +4185,10 @@ extension SettingsViewController: WKNavigationDelegate {
       guard SettingsWebBridge.compatibilityDefaults[key] != nil else {
         throw SettingsWebBridgeError.unknownKey
       }
-      preferences.setCompatibilityValue(
-        try validatedCompatibilityValue(key: key, jsonValue: value),
-        forKey: key
-      )
+      let validated = try validatedCompatibilityValue(key: key, jsonValue: value)
+      // Quick Terminal 与工具面板不能选同一组合，两个方向都拒绝（规则在 SettingsToolsBridge）。
+      try SettingsToolsBridge.validateShortcutChoice(key: key, value: validated, preferences: preferences)
+      preferences.setCompatibilityValue(validated, forKey: key)
     }
   }
 
@@ -4198,6 +4241,7 @@ extension SettingsViewController: WKNavigationDelegate {
       else { throw SettingsWebBridgeError.invalidValue }
       let choices: [String: Set<String>] = [
         "quickTerminal.shortcut": ["none", "controlGrave", "controlOptionSpace"],
+        SettingsToolsBridge.launcherShortcutKey: SettingsToolsBridge.launcherShortcutChoices,
         "quickTerminal.position": ["top", "bottom", "left", "right", "center"],
         "quickTerminal.screen": ["main", "mouse", "macos-menu-bar"],
         "general.windowWorkingDirectory": ["home", "currentSession", "custom"],
@@ -4290,6 +4334,7 @@ extension SettingsViewController: WKNavigationDelegate {
     refresh()
   }
 
+  /// 按 allowlist 分发网页动作；带分类前缀的动作交给对应协作者。
   private func handleWebAction(_ request: [String: Any]) {
     guard (request["baseRevision"] as? NSNumber)?.intValue == webRevision,
       let action = request["action"] as? String,
@@ -4496,6 +4541,11 @@ extension SettingsViewController: WKNavigationDelegate {
     case _ where action.hasPrefix("hosts."):
       // Agent 访问动作可能异步完成（审计分页、安装 MCP），回执由协作者在真正结束时触发。
       agentAccessBridge.handle(action: action, payload: payload) { [weak self] succeeded in
+        self?.completeWebMutation(request, succeeded: succeeded)
+      }
+    case _ where action.hasPrefix("tools."):
+      // 插件动作可能要等确认框或选择框，回执同样由协作者在真正结束时触发。
+      toolsBridge.handle(action: action, payload: payload) { [weak self] succeeded in
         self?.completeWebMutation(request, succeeded: succeeded)
       }
     case "resetAdvanced":
@@ -5533,6 +5583,7 @@ enum ShortcutOverrideApplier {
 }
 
 private extension SettingsViewController.Section {
+  /// 网页设置页里对应的分类 id。
   var webIdentifier: String {
     switch self {
     case .general: "general"
@@ -5544,6 +5595,7 @@ private extension SettingsViewController.Section {
     case .view: "view"
     case .appearance: "appearance"
     case .recipes: "recipes"
+    case .tools: "tools"
     case .shortcuts: "shortcuts"
     case .advanced: "advanced"
     }

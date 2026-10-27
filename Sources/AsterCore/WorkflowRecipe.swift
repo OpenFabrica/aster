@@ -232,6 +232,20 @@ public enum WorkflowRecipeTOMLError: Error, Equatable {
   case layoutTooDeep
   case duplicatePaneIdentifier
   case valueTooLong(String)
+  /// Recipe 里出现了不能进入 Recipe 的 Pane 类型（目前只有工具 Pane）。关联值是类型原文。
+  case unsupportedPaneKind(String)
+}
+
+extension WorkflowRecipeTOMLError: LocalizedError {
+  /// 只给需要向用户解释的错误配文案；其它情况返回 nil，保持系统默认描述不变。
+  public var errorDescription: String? {
+    switch self {
+    case .unsupportedPaneKind(let kind):
+      L("Recipe 不支持“\(kind)”类型的 Pane：工具 Pane 只在当前会话中使用，不能保存或从 Recipe 打开。")
+    default:
+      nil
+    }
+  }
 }
 
 /// Recipe 文件（`.asterrecipe`）的有界 TOML 编解码入口。
@@ -392,6 +406,7 @@ public enum WorkflowRecipeTOML {
       paneCount += tab.panes.count
       guard paneCount <= maximumPanes else { throw WorkflowRecipeTOMLError.tooManyPanes }
       for (index, pane) in tab.panes.enumerated() {
+        try validateKind(pane.kind)
         try validateText(
           pane.workingDirectory,
           maximumBytes: maximumPathBytes,
@@ -497,6 +512,7 @@ public enum WorkflowRecipeTOML {
         throw WorkflowRecipeTOMLError.duplicatePaneIdentifier
       }
       guard panes.count < maximumPanes else { throw WorkflowRecipeTOMLError.tooManyPanes }
+      try validateKind(pane.kind)
       try validateText(
         pane.workingDirectory,
         maximumBytes: maximumPathBytes,
@@ -553,12 +569,23 @@ public enum WorkflowRecipeTOML {
     }
   }
 
+  /// 工具 Pane 不进 Recipe：它的资源是插件功能 id，不是可移植路径，旧版本也不认识这个类型。
+  /// 导出前由调用方剔除；导入时出现就整份拒绝并说明原因，而不是悄悄换成别的 Pane。
+  private static func validateKind(_ kind: PaneKind) throws {
+    guard kind != .tool else { throw WorkflowRecipeTOMLError.unsupportedPaneKind(kind.rawValue) }
+  }
+
   /// 本地 Pane 使用可移植文件路径；Web Pane 则只允许带 host 的 HTTP(S) URL。
-  /// 两类资源在同一字段往返，但不能互相借用协议能力。
+  /// 两类资源在同一字段往返，但不能互相借用协议能力。工具 Pane 已由 `validateKind` 拒绝。
   private static func validateResource(_ value: String, kind: PaneKind) throws {
-    guard kind == .web else {
+    switch kind {
+    case .terminal, .editor, .fileBrowser, .preview:
       try WorkflowPortablePath.validateTemplate(value)
       return
+    case .tool:
+      throw WorkflowRecipeTOMLError.unsupportedPaneKind(kind.rawValue)
+    case .web:
+      break
     }
     guard let url = URL(string: value),
       ["http", "https"].contains(url.scheme?.lowercased() ?? ""),

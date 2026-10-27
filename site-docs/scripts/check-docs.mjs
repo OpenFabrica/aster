@@ -13,7 +13,7 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 const zh = pagesFor(read("docs/user/help.md"), "zh");
 const en = pagesFor(read("docs/user/help.en.md"), "en");
 validateLocales(zh, en);
-assert.equal(en.length, 22);
+assert.equal(en.length, 23);
 
 // 代码中的 ##、异种或过短围栏不能截断章节；缺章不能悄悄构建成功。
 const fenced = "## First\n````bash\n## Not a page\n```\n~~~\n````\n## Second\ntext";

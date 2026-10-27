@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.regex",
+  "name": "正则测试",
+  "version": "1.0.0",
+  "description": "实时高亮正则匹配并列出分组；JavaScript 语法，匹配超过 1 秒自动停止",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "ui": { "main": "index.html", "height": 520 },
+  "permissions": ["clipboard.write"],
+  "features": [
+    {
+      "code": "test",
+      "title": "正则测试",
+      "subtitle": "高亮匹配 · 分组 · 标志",
+      "keywords": ["regex", "regexp", "正则", "正则表达式", "pattern", "match"],
+      "action": { "type": "ui" }
+    }
+  ]
+}

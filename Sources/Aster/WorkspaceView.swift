@@ -2587,6 +2587,7 @@ final class WorkspaceViewController: NSViewController {
     }
   }
 
+  /// 按 Pane 类型建叶子视图（终端、文件、网页、工具），套上统一的 Pane 外框。
   private func makePaneLeaf(_ descriptor: PaneDescriptor, tab: TerminalTabItem) -> NSView {
     guard let runtime = tab.runtime(for: descriptor.id) else {
       return makeCenteredMessage(title: L("面板不可用"), symbol: "exclamationmark.triangle")
@@ -2639,6 +2640,15 @@ final class WorkspaceViewController: NSViewController {
       addChild(controller)
       retainedObjects.append(controller)
       content = controller.view
+    case .tool:
+      // 工具会话按 Pane id 缓存在模型上（工作区刷新会反复重建叶子），这里只借用并挂进视图树，
+      // 不能新建，否则网页工具每次刷新都会重新加载。功能已被停用或卸载时显示占位。
+      if let session = model.toolPaneSession(for: descriptor) {
+        addChild(session)
+        content = session.view
+      } else {
+        content = makeCenteredMessage(title: L("工具不可用"), symbol: "wrench.and.screwdriver")
+      }
     }
     host.installContent(content)
     // 单 Pane 无处可拖；只有分屏时安装顶部拖动把手。Pane 背景始终由主题负责，

@@ -14,7 +14,8 @@ enum TabTitleRuleService {
     let session = tab.activeSession
     let endpoint = session?.sshRemoteEndpoint
     let filePane = tab.activeRuntime?.descriptor
-    let file = filePane?.kind == .terminal ? nil : filePane?.resourcePath
+    // 工具 Pane 的 resourcePath 是功能 id 而不是文件，不能进入 `${file}` 与文件条件。
+    let file = filePane?.kind == .terminal || filePane?.kind == .tool ? nil : filePane?.resourcePath
     let cwd = tab.workingDirectory
     return TabTitleContext(
       cwd: cwd,

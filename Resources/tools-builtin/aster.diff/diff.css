@@ -1,0 +1,187 @@
+/* 文本对比工具的布局：上方左右两栏输入，中间选项，下方统一视图的逐行结果。 */
+
+:root {
+  --del-bg: rgb(255 59 48 / 9%);
+  --del-strong: rgb(255 59 48 / 24%);
+  --ins-bg: rgb(52 199 89 / 11%);
+  --ins-strong: rgb(52 199 89 / 30%);
+}
+
+:root[data-aster-appearance="dark"] {
+  --del-bg: rgb(255 69 58 / 14%);
+  --del-strong: rgb(255 69 58 / 34%);
+  --ins-bg: rgb(48 209 88 / 12%);
+  --ins-strong: rgb(48 209 88 / 32%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-aster-appearance="light"]) {
+    --del-bg: rgb(255 69 58 / 14%);
+    --del-strong: rgb(255 69 58 / 34%);
+    --ins-bg: rgb(48 209 88 / 12%);
+    --ins-strong: rgb(48 209 88 / 32%);
+  }
+}
+
+/* MARK: - 输入 */
+
+.inputs {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  height: 150px;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.pane-input {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  white-space: pre;
+}
+
+.toolbar {
+  flex: none;
+  gap: 12px;
+  min-height: 24px;
+}
+
+.toolbar .btn + .btn {
+  margin-left: -4px;
+}
+
+/* MARK: - 结果 */
+
+.result-card {
+  flex: 1;
+}
+
+.stats {
+  display: inline-flex;
+  gap: 6px;
+  font: 600 11px var(--mono);
+}
+
+.stats .added {
+  color: var(--ok);
+}
+
+.stats .removed {
+  color: var(--danger);
+}
+
+.stats .same {
+  color: var(--text-tertiary);
+  font-family: var(--sans);
+  font-weight: 400;
+}
+
+.diff {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0;
+  overflow: auto;
+  font: 12px/1.55 var(--mono);
+}
+
+.diff > .hint {
+  margin: 16px;
+  text-align: center;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 42px 42px 18px minmax(0, 1fr);
+  min-height: 1.55em;
+}
+
+.line .no {
+  padding-right: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: right;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.line .sign {
+  color: var(--text-tertiary);
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.line .text {
+  padding-right: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.line.del {
+  background: var(--del-bg);
+}
+
+.line.del .sign {
+  color: var(--danger);
+}
+
+.line.ins {
+  background: var(--ins-bg);
+}
+
+.line.ins .sign {
+  color: var(--ok);
+}
+
+.line .chg {
+  border-radius: 2px;
+}
+
+.line.del .chg {
+  background: var(--del-strong);
+}
+
+.line.ins .chg {
+  background: var(--ins-strong);
+}
+
+.fold {
+  display: block;
+  width: 100%;
+  padding: 3px 0 3px 102px;
+  border: 0;
+  background: var(--hover);
+  color: var(--text-secondary);
+  font: 11px var(--sans);
+  text-align: left;
+  cursor: default;
+}
+
+.fold:hover {
+  color: var(--accent);
+}
+
+.fold:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.more {
+  padding: 6px 12px;
+}

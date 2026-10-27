@@ -248,6 +248,8 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   /// 而不是依赖 Dictionary 的不稳定遍历顺序。
   private var activeWorkspaceWindowOrder: [ObjectIdentifier] = []
   private lazy var quickTerminalController = QuickTerminalController(preferences: preferences)
+  /// 工具面板（启动器 B）。启动时为注册全局快捷键创建；测试里没走启动流程时在第一次打开时创建。
+  private var toolLauncherController: ToolLauncherController?
   private var pictureInPictureController: (any PictureInPicturePresenting)?
   /// sheet 必须被应用生命周期强持有，避免系统动画期间控制器提前释放。
   private var feedbackSheetController: FeedbackSheetController?
@@ -323,6 +325,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     workspaceDirectory.host = self
   }
 
+  /// 启动：装配窗口、服务、全局快捷键（含工具面板）与菜单。
   func applicationDidFinishLaunching(_ notification: Notification) {
     if let resources = AsterResourceLocations.resourcesDirectory() {
       do {
@@ -389,12 +392,27 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
         ?? FileManager.default.homeDirectoryForCurrentUser.path
     }
     quickTerminalController.refresh()
+    // 工具中心先扫描插件，工具面板再按设置注册快捷键；`asterShowToolLauncher` 是设置页、Open Quickly
+    // 等不依赖面板控制器的入口。
+    ToolCenter.shared.start()
+    toolLauncher.refresh()
+    NotificationCenter.default.publisher(for: .asterShowToolLauncher)
+      .sink { [weak self] notification in
+        guard let self else { return }
+        if let box = notification.object as? ToolLauncherRequestBox {
+          self.showToolLauncher(request: box.request)
+        } else {
+          self.showToolLauncher()
+        }
+      }
+      .store(in: &cancellables)
     // 排在控制服务与主窗口之后：会话看板的数据来自控制桥，浮动窗不该抢在工作区之前出现。
     synchronizeUsageMonitor()
     preferences.objectWillChange
       .sink { [weak self] _ in
         DispatchQueue.main.async {
           self?.quickTerminalController.refresh()
+          self?.toolLauncherController?.refresh()
           self?.applyAppearance()
           self?.synchronizeWorkspaceConfiguration()
           self?.synchronizeUsageMonitor()
@@ -426,6 +444,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     SecureInputCoordinator.shared.setApplicationActive(false)
   }
 
+  /// 退出：停掉原生 SSH 与后台服务，注销全局快捷键，收起浮动面板。
   func applicationWillTerminate(_ notification: Notification) {
     isTerminating = true
     if relaunchAfterTerminate { Self.spawnRelauncher() }
@@ -436,6 +455,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // broker 读到 shutdown / stdin EOF 即断开全部原生 SSH 连接并退出。
     SSHBrokerSupervisor.shared.shutdown()
     quickTerminalController.shutdown()
+    toolLauncherController?.shutdown()
     AgentHostRuntime.shared?.shutdown()
     tearDownUsageMonitor()
     themeSwitcherPanelController?.dismiss(commit: false)
@@ -1228,13 +1248,16 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   }
   @objc private func openFile(_ sender: Any?) { activeWorkspaceModel.openFile() }
   @objc private func openFolder(_ sender: Any?) { activeWorkspaceModel.openFolder() }
+  /// 关闭标签；Quick Terminal 或工具面板拿着键盘时只收起它们。
   @objc private func closeTab(_ sender: Any?) {
     if quickTerminalController.ownsKeyWindow { quickTerminalController.hide() }
+    else if toolLauncherOwnsKeyWindow { toolLauncherController?.hide() }
     else { activeWorkspaceModel.closeSelectedTab() }
   }
   /// ⌘W：标签内还有分屏时只关闭聚焦面板，最后一个面板才关闭整个标签页。
   @objc private func closePaneOrTab(_ sender: Any?) {
     if quickTerminalController.ownsKeyWindow { quickTerminalController.hide() }
+    else if toolLauncherOwnsKeyWindow { toolLauncherController?.hide() }
     else if floatingPictureInPictureOwnsKeyWindow { closePictureInPicture(nil) }
     else if agentHostTerminalHandlesClose() { return }
     else { activeWorkspaceModel.closeSelectedPaneOrTab() }
@@ -1248,6 +1271,8 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     else if agentHostTerminalHandlesClose() { return }
     else { activeWorkspaceModel.closeActivePane() }
   }
+  /// 键盘焦点在工具面板里时，⌘W 收起面板；面板是非激活浮窗，菜单动作否则会落到背后的工作区。
+  private var toolLauncherOwnsKeyWindow: Bool { toolLauncherController?.ownsKeyWindow == true }
   /// 键盘焦点在可交互画中画小窗里时，关闭类快捷键收回小窗，不能误关工作区的活动 Pane。
   private var floatingPictureInPictureOwnsKeyWindow: Bool {
     (pictureInPictureController as? PaneFloatingTerminalController)?.ownsKeyWindow == true
@@ -2194,12 +2219,45 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
 
   @objc private func toggleQuickTerminal(_ sender: Any?) { quickTerminalController.toggle() }
   @objc private func restartQuickTerminal(_ sender: Any?) { quickTerminalController.restart() }
+  @objc private func openToolLauncher(_ sender: Any?) { showToolLauncher() }
 
+  /// 工具面板控制器；还没有时现建（启动流程会先建一次以注册快捷键）。
+  private var toolLauncher: ToolLauncherController {
+    if let toolLauncherController { return toolLauncherController }
+    let controller = ToolLauncherController(preferences: preferences) { [weak self] origin in
+      self?.toolLauncherWorkspaceModel(origin: origin)
+    }
+    toolLauncherController = controller
+    return controller
+  }
+
+  /// 呼出工具面板；来源取当前工作区窗口（没有 key 的工作区窗口时取最前的那个）的活动 Pane。
+  func showToolLauncher() { toolLauncher.show(request: nil) }
+
+  /// 呼出工具面板并直接打开请求里的工具。
+  func showToolLauncher(request: ToolLaunchRequest) { toolLauncher.show(request: request) }
+
+  /// 工具面板的目标工作区：有来源 Pane 时取它所在的窗口；否则取 key 工作区窗口，再退到最前的工作区窗口。
+  private func toolLauncherWorkspaceModel(origin: ToolTerminalOrigin?) -> AppModel? {
+    let windows = workspaceWindows
+    if let origin,
+      let owner = windows.first(where: { entry in
+        entry.model.tabs.contains { $0.layout.descriptor(forPane: origin.paneID) != nil }
+      })
+    {
+      return owner.model
+    }
+    return keyWorkspaceViewController?.model ?? windows.first?.model ?? model
+  }
+
+  /// 「窗口」菜单：Quick Terminal、工具面板、窗口与标签管理。
   private func windowMenuItem() -> NSMenuItem {
     let item = NSMenuItem()
     let submenu = NSMenu(title: L("窗口"))
     submenu.addItem(menuItem("Quick Terminal", #selector(toggleQuickTerminal(_:)), "", modifiers: []))
     submenu.addItem(menuItem(L("重新启动 Quick Terminal"), #selector(restartQuickTerminal(_:)), "", modifiers: []))
+    // 不设默认按键：全局快捷键在设置「工具」里选，菜单项只是入口。
+    submenu.addItem(menuItem(L("工具面板"), #selector(openToolLauncher(_:)), "", modifiers: []))
     if let agentHosts = AgentHostRuntime.shared { submenu.addItem(agentHosts.makeMenuItem()) }
     submenu.addItem(.separator())
     submenu.addItem(menuItem(L("新建窗口"), #selector(newWindow(_:)), "n"))
@@ -2247,6 +2305,7 @@ extension AsterAppDelegate: NSMenuItemValidation {
     #selector(togglePromptQueue(_:)), #selector(toggleActivePaneLiveView(_:)),
   ]
 
+  /// 菜单项可用性：按当前拿着键盘的窗口禁用落不到正确目标的命令。
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     guard let action = menuItem.action else { return true }
     if action == #selector(restartQuickTerminal(_:)) { return quickTerminalController.canRestart }
@@ -2259,8 +2318,8 @@ extension AsterAppDelegate: NSMenuItemValidation {
     {
       return MachineFleetModel.shared.activeMachineID != MachineProfile.localProfileID
     }
-    // 独立终端没有工作区分屏；不能把其菜单操作落到背后的普通工作区。
-    if quickTerminalController.ownsKeyWindow,
+    // 独立终端与工具面板没有工作区分屏；不能把其菜单操作落到背后的普通工作区。
+    if quickTerminalController.ownsKeyWindow || toolLauncherOwnsKeyWindow,
       Self.splitOnlySelectors.contains(action) || Self.activePaneSelectors.contains(action)
     { return false }
     // agent 主机终端拥有键盘时同理，查找也只会作用于背后的活动 Pane。

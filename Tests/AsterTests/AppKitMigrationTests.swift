@@ -597,7 +597,7 @@ func settingsUsesWebContainerAndEditorCategory() throws {
   controller.loadViewIfNeeded()
 
   #expect(controller.sections == [.general, .shell, .controls, .editor, .agents, .hosts, .view,
-                                  .appearance, .recipes, .shortcuts, .advanced])
+                                  .appearance, .recipes, .tools, .shortcuts, .advanced])
   let webView = try #require(controller.settingsWebViewForTesting)
   #expect(webView.superview === controller.view)
   #expect(!webView.configuration.websiteDataStore.isPersistent)

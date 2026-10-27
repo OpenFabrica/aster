@@ -101,6 +101,16 @@ chmod 755 "$RESOURCES_DIR/agent-integration/aster-agent-hook.sh"
 cp -R "$PROJECT_DIR/Resources/fonts" "$RESOURCES_DIR/fonts"
 # 设置页由签名 Bundle 内的本地网页提供；与 Shell 资源并列复制，运行时不访问网络。
 cp -R "$PROJECT_DIR/Resources/settings-ui" "$RESOURCES_DIR/settings-ui"
+# 内置网页工具（JWT、正则、Diff、颜色）与网页工具桥接脚本 aster-bridge.js：工具中心从
+# Contents/Resources/tools-builtin 扫描内置插件，网页运行时从 tool-runtime 注入桥接。
+# 缺了工具面板会少掉内置网页工具、网页插件拿不到 window.aster，因此缺目录直接让打包失败。
+for TOOL_RESOURCE in tools-builtin tool-runtime; do
+  if [[ ! -d "$PROJECT_DIR/Resources/$TOOL_RESOURCE" ]]; then
+    echo "Missing tool resources: Resources/$TOOL_RESOURCE" >&2
+    exit 1
+  fi
+  cp -R "$PROJECT_DIR/Resources/$TOOL_RESOURCE" "$RESOURCES_DIR/$TOOL_RESOURCE"
+done
 # 24 套内置主题的原始文件。首次启动由 AppPreferences 复制到 ~/.config/aster/themes，
 # 用户机器上装没装 Otty 都不影响初始化；缺了这一步只会回落到代码内真值表。
 cp -R "$PROJECT_DIR/Resources/themes" "$RESOURCES_DIR/themes"

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-Hans" class="aster-booting">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JWT 解析</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="jwt.css">
+</head>
+<body>
+  <main class="app">
+    <textarea id="token" class="field token" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off"
+      data-i18n-placeholder="tokenPlaceholder" data-i18n-label="tokenLabel"></textarea>
+
+    <div class="row toolbar">
+      <span id="state" class="badge" hidden></span>
+      <span id="state-detail" class="detail"></span>
+      <span class="spacer"></span>
+      <button id="copy-payload" class="btn" type="button" data-requires-bridge
+        data-i18n="copyPayload" data-i18n-title="copyPayloadTitle">复制 Payload</button>
+      <button id="insert-payload" class="btn" type="button" data-requires-bridge
+        data-i18n="insertPayload" data-i18n-title="insertPayloadTitle">预填到终端</button>
+    </div>
+
+    <div id="error" class="message error" role="alert" hidden></div>
+
+    <div id="empty" class="empty">
+      <p data-i18n="emptyHint">粘贴一个 JWT，立即解码 header 与 payload</p>
+      <button id="sample" class="btn" type="button" data-i18n="sample">试试示例</button>
+    </div>
+
+    <section id="result" class="result" hidden>
+      <div class="column">
+        <div class="card grow">
+          <div class="card-head">
+            <span class="label">Payload</span>
+            <span id="payload-note" class="hint"></span>
+          </div>
+          <pre id="payload" class="card-body code grow"></pre>
+        </div>
+        <div id="signature-card" class="card">
+          <div class="card-head">
+            <span class="label" data-i18n="signature">签名</span>
+            <span class="spacer"></span>
+            <span class="badge warn" data-i18n="notVerified" data-i18n-title="notVerifiedTitle">不验证签名</span>
+          </div>
+          <div id="signature" class="card-body signature"></div>
+        </div>
+      </div>
+      <div class="column">
+        <div class="card">
+          <div class="card-head"><span class="label" data-i18n="times">时间</span></div>
+          <div id="times" class="card-body times"></div>
+        </div>
+        <div class="card grow">
+          <div class="card-head">
+            <span class="label">Header</span>
+            <span id="meta" class="hint meta"></span>
+          </div>
+          <pre id="header" class="card-body code grow"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <script src="kit.js"></script>
+  <script src="i18n.js"></script>
+  <script src="jwt-core.js"></script>
+  <script src="jwt.js"></script>
+</body>
+</html>

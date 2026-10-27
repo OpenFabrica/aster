@@ -1,0 +1,112 @@
+/* Hello Web 示例的样式：Aster 指定的外观（data-aster-appearance）优先，没有时跟随系统深浅色。 */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --line: rgb(0 0 0 / 12%);
+  --field: #ffffff;
+  --accent: #007aff;
+}
+
+:root[data-aster-appearance="dark"] {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --fg: #ececee;
+  --muted: #a1a1a6;
+  --line: rgb(255 255 255 / 14%);
+  --field: #2a2a2c;
+  --accent: #0a84ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-aster-appearance="light"]) {
+    color-scheme: dark;
+    --bg: #1e1e1e;
+    --fg: #ececee;
+    --muted: #a1a1a6;
+    --line: rgb(255 255 255 / 14%);
+    --field: #2a2a2c;
+    --accent: #0a84ff;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 10px;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0.5px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+  resize: none;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button {
+  height: 24px;
+  padding: 0 12px;
+  border: 0.5px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--fg);
+  font: 12px -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+button:disabled {
+  opacity: 0.45;
+}
+
+#status {
+  min-height: 1.5em;
+  margin: 8px 0 0;
+  color: var(--accent);
+  font-size: 12px;
+}

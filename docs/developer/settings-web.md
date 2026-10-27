@@ -1,6 +1,6 @@
 # 网页设置架构
 
-当前设置界面有十一类 WebKit 分类（含编辑器、主机），由 AppKit 根容器和标题栏拖动条承载；原生设置控件保留为开发诊断回退。
+当前设置界面有十二类 WebKit 分类（含编辑器、主机、工具），由 AppKit 根容器和标题栏拖动条承载；原生设置控件保留为开发诊断回退。
 ## 背景
 
 Aster 设置页以 Otty 1.3.1 应用包内的 `settings-ui.html` 为功能与视觉基准，并以应用自有 HTML、CSS 和 JavaScript 实现。外观分类逐段对应原页的布局选择、标签页、窗口、主题详情、文本、四级字体来源、光标和 Dock 图标；主题详情同时覆盖语义 token 与 ANSI 16 色。
@@ -10,7 +10,7 @@ Aster 设置页以 Otty 1.3.1 应用包内的 `settings-ui.html` 为功能与视
 ## 领域边界
 
 - `Resources/settings-ui/index.html`：静态入口与 CSP，只允许同目录脚本、样式和图片，禁止网络连接、对象、表单和外部 base URL。
-- `Resources/settings-ui/settings.js`：十一类字段清单、搜索、Otty 外观页专用渲染器、主题/Agent/Recipe/快捷键列表和消息协议。
+- `Resources/settings-ui/settings.js`：十二类字段清单、搜索、Otty 外观页专用渲染器、主题/Agent/Recipe/快捷键列表和消息协议。
   Recipe 列表里的命令片段行（快照 `recipes[].snippet == true`）多出「编辑…」「删除…」，分别发 `editSnippet` / `deleteSnippet {id}`，由原生表单与确认框处理；见 [Workflows 与 Agent](workflows-and-agents.md)「命令片段」。
 - `Resources/settings-ui/settings.css`：Otty 风格的 200px 侧栏、单列卡片、外观预览、明暗外观、键盘焦点和响应式布局。
 - `Resources/settings-ui/nav-icons.js` / `nav-icons.css`：侧栏分区图标（24 网格，淡色填充 + 描边）与点击动画，对齐 Otty。`renderNav` 用 `AsterNavIcons.svg(id)` 填图标；点击时 `setSection` 会重建侧栏，所以动画要播在重建后的新按钮上（`AsterNavIcons.play`）。系统开启「减弱动态效果」时不播放。新增分区要同时补图标、动画名和测试 `SettingsNavIconsTests` 里的清单。
@@ -60,7 +60,7 @@ flowchart LR
 
 ## 验证
 
-`SettingsResponsivenessTests` 与 `AppKitMigrationTests` 覆盖窗口几何、原生标题栏拖动边界、设置打开期间 Tab/Pane 与标签栏布局实时刷新、单一非持久化 WebView、CSP/十一类资源、Otty 外观页结构与范围控件真值、主题详情快照、Windows capability、强类型与复合字段写入、动态 Agent 字段、菜单快捷键、兼容字段持久化和活动工作区 Panel 宽度。软件更新一组另有专门回归：`settingsBridgeRoutesUpdateSettingsToUpdaterAndPreferences`（真值归属）、`settingsSnapshotExposesUpdateStatusAndCapability`（状态点与取反派生键）、`settingsUpdateActionTriggersCheck`（action allowlist 与重入）、`settingsUpdateSectionMatchesBridge`（网页清单与 Swift 桥、CSS 状态色一致）。发布前还需运行：
+`SettingsResponsivenessTests` 与 `AppKitMigrationTests` 覆盖窗口几何、原生标题栏拖动边界、设置打开期间 Tab/Pane 与标签栏布局实时刷新、单一非持久化 WebView、CSP/十二类资源、Otty 外观页结构与范围控件真值、主题详情快照、Windows capability、强类型与复合字段写入、动态 Agent 字段、菜单快捷键、兼容字段持久化和活动工作区 Panel 宽度。软件更新一组另有专门回归：`settingsBridgeRoutesUpdateSettingsToUpdaterAndPreferences`（真值归属）、`settingsSnapshotExposesUpdateStatusAndCapability`（状态点与取反派生键）、`settingsUpdateActionTriggersCheck`（action allowlist 与重入）、`settingsUpdateSectionMatchesBridge`（网页清单与 Swift 桥、CSS 状态色一致）。「工具」分类见 `SettingsToolsBridgeTests`：快照形状与排序、动作参数校验、合并推送、快捷键兼容键与双向冲突、网页卡片渲染，以及网页动作名与 Swift 白名单一一对应。发布前还需运行：
 
 ```bash
 node --check Resources/settings-ui/settings.js
@@ -80,6 +80,20 @@ scripts/build-app.sh
 - 网页窗格：`WebPaneDataStorePolicy` 决定 `WKWebsiteDataStore`（持久 / 进程内共享的非持久），`clearAllBrowsingData()` 清两者；动作 `clearWebPaneData` 经 toast 回报真实结果。
 - 详情面板：`DetailsPanelViewController` 按 `resolvedDetailsPanelEntries` 生成 chip，`synchronizeSectionsIfNeeded()` 在偏好变化后重建；自定义视图由 `DetailsPanelCustomViewController` 承载——TUI 走 `GhosttySurfaceView.command`（libghostty surface `command` 字段，`wait_after_command`），网页走独立 WKWebView（移动版 = 自定义 UA）。选中态用 `inspectorSection` + `inspectorCustomSection` 两个键持久化。
 - 网页键：`view.rulesArrangement`、`view.badgePlacement`、`view.randomTabTitleColors`、`view.webPanePersistData`、`view.tabRules`（对象数组整体回写）、`view.detailsPanelSections`、`view.detailsPanelCustomViews`、`view.detailsPanelOrder`（`builtin:<id>` / `custom:<uuid>`，快照含隐藏项）。角标三个开关沿用 `shell.badge*` 键，只是从 Shell 分类移到了视图分类。
+
+## 「工具」分类
+
+「工具」排在「Recipes」之后，管理工具箱插件与工具面板的全局快捷键。插件格式、信任状态与运行方式见 [工具箱与插件](tools-and-plugins.md)。
+
+- 前端：页顶「工具面板」一组是 `settings.js` 的普通行——「打开工具面板」按钮（动作 `tools.openLauncher`）与「工具面板快捷键」下拉（兼容键 `tools.launcherShortcut`，取值 `none` / `optionSpace` / `controlOptionSpace`，默认 `none`，走普通 `set` 管线）。下面的插件管理由 `special:"tools"` 渲染器 `Resources/settings-ui/tools.js`（`window.AsterTools.render(ctx)`，`ctx` 为 `{ t, data, mutate }`，`data` 即快照里的 `tools`）画出：「已安装」插件卡片（名称、版本、来源徽章、说明、功能数、启用开关、待确认原因与「确认权限…」、按风险着色的权限、网络域名、在 Finder 中显示 / 卸载 / 移除开发目录）、「问题」（无问题时整组不显示）与「开发」（插件目录、从文件夹安装、开发目录列表、重新扫描）。除内置外没有插件时，「已安装」顶部给一句引导。新文案要补进 `i18n.js` 五种语言。
+- 搜索：`tools.js` 的 `searchEntries(t)` 给出本页条目，`settings.js` 把它们放进 `searchOnly` 组——只进全局搜索、不按普通行渲染。条目的 key 与行上的 `data-setting-key` 一致，点开搜索结果能定位高亮。`settings.js` 初始化时就读这份条目，所以 `index.html` 里 `tools.js` 必须排在 `settings.js` 之前。
+- 快捷键互斥：下拉行可以声明 `conflictKey`（对方的键）、`conflictNote` 与 `conflictWarning`。对方已占用的组合禁用并注明（`none` 不算占用）；当前值已经撞车（导入的旧配置）时保持可选，并在行内警告。「通用 → Quick Terminal → 全局快捷键」与工具面板快捷键互相声明。原生侧 `applyWebSetting` 写入兼容键前调用 `SettingsToolsBridge.validateShortcutChoice`，两个方向都抛 `SettingsShortcutConflict`，网页显示「设置值无效」toast 并恢复真值。导入配置不做这项检查，两个键相同时由启动器注册失败时提示。
+- 快照键 `tools`：`launcherShortcut`、`quickTerminalShortcut`、`pluginsDirectory`、`plugins[]`、`issues[]`、`developmentFolders[]`，形状见 [工具箱与插件](tools-and-plugins.md)「设置页「工具」」。`plugins` 先按来源（用户安装 → 开发中 → 内置）再按名称排序；`permissions` 按风险从高到低、同级保持清单里的声明顺序；`statusReason` 只在 `needsApproval` 时有值，其余为 `null`。
+- Swift 侧：协作者 `SettingsToolsBridge`（注入 `ToolManaging`，默认 `ToolCenter.shared`），`SettingsView` 只负责接线，没有放宽任何 private 成员。订阅 `changes` 后合并成下一轮主队列的一次推送；动作自己推快照时取消已排队的那次，同一次变化只推一份快照，避免网页下一次提交因 revision 又涨而被判过期。
+- 动作白名单（`tools.` 前缀）：`setEnabled {id, enabled}`、`approve {id}`、`uninstall {id}`、`reveal {id}`、`openPluginsFolder`、`reload`、`installFromFolder`、`addDevelopmentFolder`、`removeDevelopmentFolder {path}`、`openLauncher`。`id` 必须在当前插件列表里，`enabled` 只认 JSON 布尔值，`path` 必须是已登记开发目录的原值；不满足时用 toast 说明（插件不存在等沿用 `ToolCenterError` 的文案），并以失败回执。`openPluginsFolder` 在目录不存在时先创建；`reveal` 遇到没有目录的内置原生工具只提示。
+- 原生交互：卸载只对用户安装的插件，先弹原生确认「卸载插件「X」？」（插件目录会移到废纸篓，插件数据会删除）；内置插件不可卸载；开发中的插件只能在「开发」里移除登记，源码目录不动。授权确认、卸载确认与文件夹选择都以 sheet 挂在设置窗口上（不用 `runModal`，见 [工程陷阱](engineering-pitfalls.md)），同一时间只允许一个。用户取消、拒绝授权（`approve` 返回 false 或抛 `.declined`）不算错误，静默结束。异步动作完成时设置窗口已经关闭，就不再推快照、提示或回执。
+- 网页侧不依赖回执：确认框可能开很久，会超过 5 秒的回执超时，页面状态一律以下一次快照为准（`send` 吞掉 reject）。
+- 原生回退页（无法创建 WebKit 视图时）只显示一行说明与「打开工具面板」按钮。
 
 ## 「主机」分类
 

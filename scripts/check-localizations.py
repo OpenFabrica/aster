@@ -3,6 +3,8 @@
 
 check: 扫描 Sources/**/*.swift 里的 `L("…")` 调用，推导 .strings 的 key，
        核对每个 <lang>.lproj/Localizable.strings 是否都有翻译；缺失即失败。
+       内置网页工具清单（Resources/tools-builtin/*/aster-plugin.json）的 name、description、
+       feature title/subtitle 与 match label 由运行时动态查表，也按 key 一并核对。
        同时扫描网页设置页 Resources/settings-ui/*.js 里的 `t("…")`，核对 i18n.js 的 5 语字典。
 merge: 把 l10n-work/*.json（key → {lang: value}）合并写入各语言的 .strings（按 key 排序）。
 
@@ -18,6 +20,7 @@ LANGS = ["en", "ja", "fr", "de", "zh-Hant"]
 SOURCE_DIRS = ["Sources/Aster", "Sources/AsterCore", "Sources/AsterMemory"]
 WEB_DIR = os.path.join(ROOT, "Resources/settings-ui")
 WEB_I18N = os.path.join(WEB_DIR, "i18n.js")
+BUILTIN_TOOLS_DIR = os.path.join(ROOT, "Resources/tools-builtin")
 
 
 def extract_keys(text, path):
@@ -113,6 +116,22 @@ def all_source_keys():
     return keys, problems
 
 
+def builtin_tool_keys():
+    """内置网页工具清单里给用户看的文案：运行时用 `L(String.LocalizationValue(原文))` 查表，源码里没有字面量。"""
+    keys = {}
+    for path in sorted(glob.glob(os.path.join(BUILTIN_TOOLS_DIR, "*", "aster-plugin.json"))):
+        manifest = json.load(open(path, encoding="utf-8"))
+        rel = os.path.relpath(path, ROOT)
+        texts = [manifest.get("name"), manifest.get("description")]
+        for feature in manifest.get("features", []):
+            texts += [feature.get("title"), feature.get("subtitle")]
+            texts += [rule.get("label") for rule in feature.get("match", [])]
+        for text in texts:
+            if text:
+                keys.setdefault(text, rel)
+    return keys
+
+
 def web_source_keys():
     """扫描设置页脚本里字面量形式的 `t("…")`，返回 key → 首次出现的文件；t(变量) 无法静态推导，跳过。"""
     keys = {}
@@ -147,6 +166,8 @@ def check_web():
 
 def cmd_check(args):
     keys, problems = all_source_keys()
+    for k, rel in builtin_tool_keys().items():
+        keys.setdefault(k, rel)
     extra = set()
     for f in args:  # 额外的 key 清单（如动态 key）
         extra |= set(json.load(open(f)))

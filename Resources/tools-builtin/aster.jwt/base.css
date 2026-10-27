@@ -1,0 +1,409 @@
+/* 内置网页工具的共用外观：配色、字体、控件、卡片与提示。
+   插件页面只能读取自己目录里的文件，所以四个内置工具各带一份相同副本，改动时四份一起改。
+   外观：Aster 设置的 data-aster-appearance 优先；没有时跟随系统 prefers-color-scheme。 */
+
+/* MARK: - 配色与字体 */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f7;
+  --surface: #ffffff;
+  --surface-sunken: #f4f4f6;
+  --field: #ffffff;
+  --hover: rgb(0 0 0 / 4.5%);
+  --pressed: rgb(0 0 0 / 9%);
+  --border: rgb(0 0 0 / 8%);
+  --border-strong: rgb(0 0 0 / 15%);
+  --text: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #9b9ba1;
+  --accent: #007aff;
+  --accent-soft: rgb(0 122 255 / 12%);
+  --focus: rgb(0 122 255 / 35%);
+  --ok: #1d8a3a;
+  --ok-soft: rgb(52 199 89 / 15%);
+  --warn: #a15400;
+  --warn-soft: rgb(255 149 0 / 16%);
+  --danger: #d1242f;
+  --danger-soft: rgb(255 59 48 / 11%);
+  --button: #ffffff;
+  --button-border: rgb(0 0 0 / 13%);
+  --button-shadow: 0 0.5px 1px rgb(0 0 0 / 8%);
+  --toast: rgb(36 36 38 / 94%);
+  --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --radius: 6px;
+  --radius-lg: 9px;
+}
+
+/* 深色配色写两遍：一份给 Aster 指定深色，一份给没有指定时的系统深色（Aster 指定浅色时不生效）。 */
+:root[data-aster-appearance="dark"] {
+  color-scheme: dark;
+  --bg: #1d1d1f;
+  --surface: #262628;
+  --surface-sunken: #202022;
+  --field: #2a2a2c;
+  --hover: rgb(255 255 255 / 6%);
+  --pressed: rgb(255 255 255 / 11%);
+  --border: rgb(255 255 255 / 8%);
+  --border-strong: rgb(255 255 255 / 14%);
+  --text: #ececee;
+  --text-secondary: #a1a1a6;
+  --text-tertiary: #6e6e73;
+  --accent: #0a84ff;
+  --accent-soft: rgb(10 132 255 / 22%);
+  --focus: rgb(10 132 255 / 45%);
+  --ok: #30d158;
+  --ok-soft: rgb(48 209 88 / 16%);
+  --warn: #ffb340;
+  --warn-soft: rgb(255 159 10 / 18%);
+  --danger: #ff6b61;
+  --danger-soft: rgb(255 69 58 / 18%);
+  --button: rgb(255 255 255 / 10%);
+  --button-border: rgb(255 255 255 / 8%);
+  --button-shadow: none;
+  --toast: rgb(72 72 74 / 96%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-aster-appearance="light"]) {
+    color-scheme: dark;
+    --bg: #1d1d1f;
+    --surface: #262628;
+    --surface-sunken: #202022;
+    --field: #2a2a2c;
+    --hover: rgb(255 255 255 / 6%);
+    --pressed: rgb(255 255 255 / 11%);
+    --border: rgb(255 255 255 / 8%);
+    --border-strong: rgb(255 255 255 / 14%);
+    --text: #ececee;
+    --text-secondary: #a1a1a6;
+    --text-tertiary: #6e6e73;
+    --accent: #0a84ff;
+    --accent-soft: rgb(10 132 255 / 22%);
+    --focus: rgb(10 132 255 / 45%);
+    --ok: #30d158;
+    --ok-soft: rgb(48 209 88 / 16%);
+    --warn: #ffb340;
+    --warn-soft: rgb(255 159 10 / 18%);
+    --danger: #ff6b61;
+    --danger-soft: rgb(255 69 58 / 18%);
+    --button: rgb(255 255 255 / 10%);
+    --button-border: rgb(255 255 255 / 8%);
+    --button-shadow: none;
+    --toast: rgb(72 72 74 / 96%);
+  }
+}
+
+:root[data-aster-appearance="light"] {
+  color-scheme: light;
+}
+
+/* MARK: - 页面骨架 */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 等 Aster 送来界面语言前先隐藏，避免文案闪一下（kit.js 最迟 400 ms 撤掉）。 */
+html.aster-booting body {
+  visibility: hidden;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hint {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* MARK: - 按钮 */
+
+.btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0.5px solid var(--button-border);
+  border-radius: var(--radius);
+  background-color: var(--button);
+  box-shadow: var(--button-shadow);
+  color: var(--text);
+  font: 12px/1 var(--sans);
+  white-space: nowrap;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 悬停与按下用一层半透明叠色，深浅两套配色都不用另写颜色。 */
+.btn:hover:not(:disabled) {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+.btn:active:not(:disabled) {
+  background-image: linear-gradient(var(--pressed), var(--pressed));
+}
+
+.btn:disabled {
+  opacity: 0.45;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.btn.small {
+  height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.btn[aria-pressed="true"] {
+  border-color: transparent;
+  background-color: var(--accent-soft);
+  box-shadow: none;
+  color: var(--accent);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* MARK: - 输入框 */
+
+.field {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+
+/* 等宽输入框的占位提示也用系统字体：中文在等宽字体里字距发散，不好读。 */
+.field::placeholder {
+  color: var(--text-tertiary);
+  font-family: var(--sans);
+}
+
+.field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.field.invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+input.field {
+  height: 28px;
+}
+
+textarea.field {
+  display: block;
+  resize: none;
+  font: 12px/1.5 var(--mono);
+}
+
+/* MARK: - 卡片、徽标与提示 */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.card-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.card-body {
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+}
+
+.badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.badge.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.message {
+  flex: none;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.message.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.message.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 0;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.empty p {
+  margin: 0;
+}
+
+/* MARK: - 底部提示 */
+
+.status {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  z-index: 10;
+  max-width: calc(100% - 32px);
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: var(--toast);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  color: #ffffff;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 6px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.status.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* 错误提示固定用深红：深色配色里的 --danger 偏亮，白字对比度不够。 */
+.status.error {
+  background: #c4262e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status {
+    transition: none;
+  }
+}

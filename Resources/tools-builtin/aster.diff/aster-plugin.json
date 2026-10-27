@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.diff",
+  "name": "文本对比",
+  "version": "1.0.0",
+  "description": "逐行对比两段文本，标出增删行与行内改动，可复制统一 diff",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "ui": { "main": "index.html", "height": 560 },
+  "permissions": ["clipboard.write"],
+  "features": [
+    {
+      "code": "compare",
+      "title": "文本对比",
+      "subtitle": "逐行 diff · 行内改动 · 统一 diff",
+      "keywords": ["diff", "compare", "对比", "比较", "差异", "文本对比"],
+      "action": { "type": "ui" }
+    }
+  ]
+}

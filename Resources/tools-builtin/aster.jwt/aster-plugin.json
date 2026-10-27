@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.jwt",
+  "name": "JWT 解析",
+  "version": "1.0.0",
+  "description": "解码 JWT 的 header 与 payload，显示过期时间；只解码，不验证签名",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "ui": { "main": "index.html", "height": 520 },
+  "permissions": ["clipboard.write", "terminal.insert"],
+  "features": [
+    {
+      "code": "decode",
+      "title": "解析 JWT",
+      "subtitle": "header · payload · 过期时间",
+      "keywords": ["jwt", "token", "bearer", "令牌", "解析"],
+      "match": [
+        {
+          "type": "regex",
+          "label": "解析这个 JWT",
+          "pattern": "^eyJ[\\w-]+\\.[\\w-]+\\.[\\w-]*$",
+          "maxLength": 16384
+        },
+        {
+          "type": "regex",
+          "label": "解析这个 JWT",
+          "pattern": "^(?:[Aa]uthorization:\\s*)?[Bb]earer\\s+eyJ[\\w-]+\\.[\\w-]+\\.[\\w-]*$",
+          "maxLength": 16384
+        }
+      ],
+      "action": { "type": "ui" }
+    }
+  ]
+}

@@ -54,6 +54,7 @@
     recordingMode: [["off", t("关闭")], ["on", t("记录中")], ["incognito", t("隐身")]],
     updateChannel: [["stable", t("稳定版")], ["preview", t("预览版")]],
     sshEngine: [["native", t("原生（aster-ssh）")], ["openssh", "OpenSSH"]],
+    launcherShortcut: [["none", t("不启用")], ["optionSpace", "Option + Space"], ["controlOptionSpace", "Control + Option + Space"]],
     memoryExtractionProvider: [["claudeCode", "Claude Code"], ["codex", "Codex"], ["openCode", "OpenCode"], ["cursorCLI", "Cursor Agent"], ["kimiCode", "Kimi Code"], ["pi", "Pi"], ["omp", "OMP"]],
   };
 
@@ -72,7 +73,13 @@
           row("general.hideDirtyIndicator", t("隐藏关闭按钮圆点"), t("红绿灯不显示运行中或未保存状态")),
         ]},
         { title: "Quick Terminal", rows: [
-          row("quickTerminal.shortcut", t("全局快捷键"), t("Aster 运行时随时呼出或收起；隐藏后会话继续运行"), "select", { options: [["none", t("不启用")], ["controlGrave", "Control + `"], ["controlOptionSpace", "Control + Option + Space"]] }),
+          row("quickTerminal.shortcut", t("全局快捷键"), t("Aster 运行时随时呼出或收起；隐藏后会话继续运行"), "select", {
+            options: [["none", t("不启用")], ["controlGrave", "Control + `"], ["controlOptionSpace", "Control + Option + Space"]],
+            // 与「工具 → 工具面板快捷键」互斥：对方已占用的组合禁用并注明。
+            conflictKey: "tools.launcherShortcut",
+            conflictNote: t("已被工具面板使用"),
+            conflictWarning: t("与工具面板的快捷键相同，只有一个会生效"),
+          }),
           row("quickTerminal.position", t("位置"), t("从屏幕边缘或居中显示"), "select", { options: [["top", t("顶部")], ["bottom", t("底部")], ["left", t("左侧")], ["right", t("右侧")], ["center", t("居中")]] }),
           row("quickTerminal.screen", t("显示器"), t("选择呼出时使用的屏幕"), "select", { options: [["main", t("当前键盘所在屏幕")], ["mouse", t("鼠标所在屏幕")], ["macos-menu-bar", t("主菜单栏屏幕")]] }),
           row("quickTerminal.size", t("尺寸百分比"), t("边缘窗口主轴占比；居中时同时调整宽高。呼出后可直接拖拽窗口边缘微调，尺寸会被记住"), "number", { min: 10, max: 100, step: 5 }),
@@ -395,6 +402,19 @@
         row("recipes.fileReplayMode", t("外部 Recipe 文件"), t("打开外部 .asterrecipe 时如何运行命令"), "select", { options: options.replay }),
       ]},
     ]},
+    // 「工具」：页顶「工具面板」一组是普通行；插件管理由 tools.js 画，它的条目只进搜索（searchOnly）。
+    { id: "tools", title: t("工具"), description: t("打开工具面板、设置全局快捷键，管理插件与开发目录。"), special: "tools", groups: [
+      { title: t("工具面板"), rows: [
+        action("tools.openLauncher", t("搜索工具"), t("搜索工具，或粘贴一段内容让 Aster 推荐能处理它的工具"), t("打开工具面板")),
+        row("tools.launcherShortcut", t("工具面板快捷键"), t("Aster 运行时在任何应用里呼出工具面板；不能与 Quick Terminal 使用同一组合"), "select", {
+          options: options.launcherShortcut,
+          conflictKey: "quickTerminal.shortcut",
+          conflictNote: t("已被 Quick Terminal 使用"),
+          conflictWarning: t("与 Quick Terminal 的快捷键相同，只有一个会生效"),
+        }),
+      ]},
+      { title: t("插件"), searchOnly: true, rows: window.AsterTools?.searchEntries?.(t) ?? [] },
+    ]},
     { id: "shortcuts", title: t("快捷键"), description: t("为菜单、工作区、Pane、Recipe 和文本序列绑定按键。"), special: "shortcuts", groups: [] },
     { id: "advanced", title: t("高级"), description: t("配置文件、终端兼容性、调试和导入导出。"), groups: [
       { title: t("配置文件"), rows: [
@@ -622,6 +642,7 @@
     return base;
   }
 
+  /// 按行类型创建右侧控件（开关、下拉、数字、滑杆、多选、动作按钮或文本框）。
   function makeControl(item) {
     const value = Object.prototype.hasOwnProperty.call(item, "value") ? item.value : settingValue(item.key);
     const supported = !isDisabled(item);
@@ -650,11 +671,17 @@
       const select = document.createElement("select");
       select.className = "control";
       select.disabled = !supported;
+      const current = String(value ?? "");
+      // conflictKey：两个全局快捷键不能选同一组合。对方已占用的选项禁用并注明原因（"none" 不算占用）；
+      // 当前值本身已经撞车（导入的旧配置）时保持可选中，由行内警告说明。原生侧写入时也会拒绝冲突。
+      const taken = item.conflictKey ? String(settingValue(item.conflictKey) ?? "none") : "none";
       for (const [optionValue, label] of controlOptions(item)) {
         const option = document.createElement("option");
         option.value = optionValue;
-        option.textContent = label;
-        option.selected = String(value ?? "") === optionValue;
+        const conflicted = taken !== "none" && optionValue === taken;
+        option.textContent = conflicted ? t("{label}（{note}）", { label, note: item.conflictNote }) : label;
+        option.disabled = conflicted && optionValue !== current;
+        option.selected = current === optionValue;
         select.appendChild(option);
       }
       select.addEventListener("change", () => commit(select.value));
@@ -844,6 +871,14 @@
     return input;
   }
 
+  /// conflictKey 行（互斥的全局快捷键）的当前值与对方相同；"none" 不算占用。
+  function hasShortcutConflict(item) {
+    if (!item.conflictKey) return false;
+    const current = String(settingValue(item.key) ?? "none");
+    return current !== "none" && current === String(settingValue(item.conflictKey) ?? "none");
+  }
+
+  /// 一行设置：标题、说明（含状态与警告）与右侧控件。
   function makeRow(item) {
     const host = document.createElement("div");
     host.className = `setting-row${isDisabled(item) ? " is-disabled" : ""}`;
@@ -867,11 +902,12 @@
       ? (item.unsupportedDetail ?? t("{detail}（当前平台不可用）", {detail: item.detail}))
       : (isDisabled(item) ? (item.disabledDetail ?? item.detail) : item.detail);
     copy.append(label, detail);
-    // 橙色警告行（如 Dock 旋转的耗电提示）排在描述之后，对齐 Otty。
-    if (item.warning) {
+    // 橙色警告行（如 Dock 旋转的耗电提示）排在描述之后，对齐 Otty；全局快捷键撞车时也在这里提示。
+    const warningText = item.warning ?? (hasShortcutConflict(item) ? item.conflictWarning : null);
+    if (warningText) {
       const warning = document.createElement("span");
       warning.className = "setting-warning";
-      warning.textContent = `⚠ ${item.warning}`;
+      warning.textContent = `⚠ ${warningText}`;
       copy.appendChild(warning);
     }
     // statusKey 行（如通知系统权限）用彩色圆点 + 状态文本替代静态描述，状态由原生侧
@@ -3023,6 +3059,7 @@
     return page;
   }
 
+  /// 渲染当前分类（或搜索结果）到内容区。
   function renderContent() {
     if (!snapshot) return;
     if (searchText.trim()) {
@@ -3058,8 +3095,11 @@
     if (section.special === "view") page.appendChild(makeViewPage(section));
     if (section.special === "hosts") page.appendChild(window.AsterHosts.render(hostsContext()));
     if (section.special !== "appearance" && section.special !== "view") {
-      for (const group of section.groups) page.appendChild(makeGroup(group));
+      // searchOnly 组只进搜索，由分类自己的渲染器画出（工具页的插件管理）。
+      for (const group of section.groups.filter(group => !group.searchOnly)) page.appendChild(makeGroup(group));
     }
+    // 工具页：普通行（工具面板）之后接插件管理（tools.js）。
+    if (section.special === "tools") page.appendChild(window.AsterTools.render(toolsContext()));
     // MCP 卡片排在记录与提炼之后：先决定记不记、怎么提炼，才轮到交给谁用。
     if (section.special === "agents") page.appendChild(makeMemoryMCPGroup());
     // Agent 控制（CLI + skill）排在最后：先接入 Agent、决定记忆，再把控制权交给它。
@@ -3072,6 +3112,11 @@
   /// 「主机」页（hosts.js）用到的快照与工具；对话框与提交通道沿用本页实现。
   function hostsContext() {
     return { t, data: snapshot.hosts, send, mutate, showToast, makeDialog };
+  }
+
+  /// 「工具」页（tools.js）用到的快照与提交通道。
+  function toolsContext() {
+    return { t, data: snapshot.tools, mutate };
   }
 
   function render() {

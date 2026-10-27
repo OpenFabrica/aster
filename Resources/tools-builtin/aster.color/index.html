@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hans" class="aster-booting">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>颜色转换</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="color.css">
+</head>
+<body>
+  <main class="app">
+    <input id="color" class="field color-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
+      data-i18n-placeholder="inputPlaceholder" data-i18n-label="inputLabel">
+
+    <div id="error" class="message error" role="alert" hidden data-i18n="invalid">无法识别这个颜色</div>
+
+    <div id="empty" class="empty">
+      <p data-i18n="emptyHint">输入颜色值，或试试这些：</p>
+      <div class="examples">
+        <button class="btn example" type="button">#3478F6</button>
+        <button class="btn example" type="button">rgb(255 99 71 / 80%)</button>
+        <button class="btn example" type="button">hsl(150 60% 45%)</button>
+        <button class="btn example" type="button">rebeccapurple</button>
+      </div>
+    </div>
+
+    <section id="result" class="result" hidden>
+      <div class="preview">
+        <div class="swatch">
+          <div id="swatch" class="swatch-fill">
+            <span class="sample-light">Aa</span>
+            <span class="sample-dark">Aa</span>
+          </div>
+        </div>
+        <p id="alpha" class="hint alpha"></p>
+      </div>
+
+      <div class="details">
+        <div class="card formats">
+          <div class="format">
+            <span class="format-label">HEX</span>
+            <code id="value-hex" class="format-value"></code>
+            <button class="btn small" type="button" data-copy="hex" data-requires-bridge data-i18n="copy">复制</button>
+          </div>
+          <div class="format">
+            <span class="format-label">RGB</span>
+            <code id="value-rgb" class="format-value"></code>
+            <button class="btn small" type="button" data-copy="rgb" data-requires-bridge data-i18n="copy">复制</button>
+          </div>
+          <div class="format">
+            <span class="format-label">HSL</span>
+            <code id="value-hsl" class="format-value"></code>
+            <button class="btn small" type="button" data-copy="hsl" data-requires-bridge data-i18n="copy">复制</button>
+          </div>
+          <div class="format">
+            <span class="format-label" data-i18n-title="unitTitle">0–1</span>
+            <code id="value-unit" class="format-value"></code>
+            <button class="btn small" type="button" data-copy="unit" data-requires-bridge data-i18n="copy">复制</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="label" data-i18n="contrastTitle" data-i18n-title="levelTitle">对比度（WCAG 2）</span>
+          </div>
+          <div class="contrast">
+            <div class="contrast-item">
+              <div class="contrast-sample on-white"><span id="sample-white">Aa</span></div>
+              <div class="contrast-info">
+                <div class="row"><span id="ratio-white" class="ratio"></span><span id="level-white" class="badge"></span></div>
+                <span class="hint" data-i18n="onWhite">与白色</span>
+              </div>
+            </div>
+            <div class="contrast-item">
+              <div class="contrast-sample on-black"><span id="sample-black">Aa</span></div>
+              <div class="contrast-info">
+                <div class="row"><span id="ratio-black" class="ratio"></span><span id="level-black" class="badge"></span></div>
+                <span class="hint" data-i18n="onBlack">与黑色</span>
+              </div>
+            </div>
+          </div>
+          <p id="composite-note" class="hint contrast-note" data-i18n="compositeNote" hidden></p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <script src="kit.js"></script>
+  <script src="i18n.js"></script>
+  <script src="color-core.js"></script>
+  <script src="color.js"></script>
+</body>
+</html>

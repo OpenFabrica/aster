@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.color",
+  "name": "颜色转换",
+  "version": "1.0.0",
+  "description": "HEX、RGB(A)、HSL(A) 互相转换，预览色块并计算与白色、黑色的 WCAG 对比度",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "ui": { "main": "index.html", "height": 360 },
+  "permissions": ["clipboard.write"],
+  "features": [
+    {
+      "code": "convert",
+      "title": "颜色转换",
+      "subtitle": "HEX · RGB · HSL · 对比度",
+      "keywords": ["color", "colour", "hex", "rgb", "hsl", "颜色", "色值", "对比度"],
+      "match": [
+        {
+          "type": "regex",
+          "label": "转换这个颜色",
+          "pattern": "^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "maxLength": 9
+        },
+        {
+          "type": "regex",
+          "label": "转换这个颜色",
+          "pattern": "^(?=[0-9]*[a-fA-F])[0-9a-fA-F]{6}$",
+          "maxLength": 6
+        },
+        {
+          "type": "regex",
+          "label": "转换这个颜色",
+          "pattern": "^\\s*(?:rgb|hsl)a?\\(",
+          "maxLength": 64
+        }
+      ],
+      "action": { "type": "ui" }
+    }
+  ]
+}

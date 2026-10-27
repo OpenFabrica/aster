@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.hello-web",
+  "name": "Hello Web",
+  "version": "1.0.0",
+  "description": "网页工具示例：接收输入、私有存储、写剪贴板、调整高度、跟随外观",
+  "author": "Example",
+  "ui": { "main": "index.html", "height": 320 },
+  "permissions": ["clipboard.write"],
+  "features": [
+    {
+      "code": "hello",
+      "title": "Hello Web",
+      "subtitle": "网页工具示例",
+      "keywords": ["hello", "web", "示例"],
+      "action": { "type": "ui" }
+    }
+  ]
+}

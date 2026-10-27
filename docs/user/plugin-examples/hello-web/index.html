@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hello Web</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Hello Web</h1>
+    <dl>
+      <dt>收到的输入</dt>
+      <dd id="input" class="mono">（空）</dd>
+      <dt>来源</dt>
+      <dd id="source">—</dd>
+      <dt>界面语言</dt>
+      <dd id="locale">—</dd>
+      <dt>打开次数</dt>
+      <dd id="visits">—</dd>
+    </dl>
+    <label for="note">便签（保存在插件私有存储里）</label>
+    <textarea id="note" rows="2" spellcheck="false"></textarea>
+    <div class="actions">
+      <button id="copy" type="button">复制输入</button>
+      <button id="grow" type="button">展开</button>
+    </div>
+    <p id="status" role="status"></p>
+  </main>
+  <!-- 只能引用插件目录里的独立脚本：CSP 不执行内联脚本，也不允许 onclick 这类内联事件属性。 -->
+  <script src="app.js"></script>
+</body>
+</html>

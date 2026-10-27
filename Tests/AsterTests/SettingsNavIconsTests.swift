@@ -16,8 +16,8 @@ func settingsNavIconsCoverEverySection() throws {
   #expect(html.contains("<link rel=\"stylesheet\" href=\"nav-icons.css\">"))
   #expect(html.contains("id=\"content-topbar\"") && html.contains("id=\"topbar-page\""))
   let motions = ["general": "spin", "shell": "type", "controls": "nudge", "editor": "scroll", "agents": "rock",
-                 "hosts": "wave", "view": "cluster", "appearance": "draw", "recipes": "page", "shortcuts": "tilt",
-                 "advanced": "rock"]
+                 "hosts": "wave", "view": "cluster", "appearance": "draw", "recipes": "page", "tools": "lift",
+                 "shortcuts": "tilt", "advanced": "rock"]
   for (section, motion) in motions {
     #expect(icons.contains("    \(section): \"<svg"), "缺少 \(section) 图标")
     #expect(icons.contains("    \(section): \"\(motion)\","), "缺少 \(section) 动画")

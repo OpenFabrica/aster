@@ -87,6 +87,21 @@
 .nav-icon-wave .mgc-wave-2 { --wave-from: .571; animation-delay: .1s; }
 .nav-icon-wave .mgc-wave-3 { --wave-from: .7; animation-delay: .2s; }
 
+/* MARK: - 工具：提手上提，箱体随之轻轻一沉 */
+.mgc-handle { transform-box: view-box; }
+@keyframes nav-icon-lift {
+  0% { translate: 0 0; animation-timing-function: cubic-bezier(.33, 0, .67, 1); }
+  40% { translate: 0 -2.5px; animation-timing-function: cubic-bezier(.33, 0, .2, 1); }
+  to { translate: 0 0; }
+}
+@keyframes nav-icon-lift-settle {
+  0%, 30% { translate: 0 0; animation-timing-function: cubic-bezier(.33, 0, .67, 1); }
+  60% { translate: 0 6%; animation-timing-function: cubic-bezier(.33, 0, .2, 1); }
+  to { translate: 0 0; }
+}
+.nav-icon-lift { animation: nav-icon-lift-settle .5s; }
+.nav-icon-lift .mgc-handle { animation: nav-icon-lift .5s; }
+
 /* MARK: - 快捷键：键盘前倾 */
 @keyframes nav-icon-tilt {
   0% { transform: perspective(56px) rotateX(0); animation-timing-function: cubic-bezier(.3, 0, .2, 1); }
@@ -98,6 +113,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nav-icon-spin, .nav-icon-rock, .nav-icon-nudge, .nav-icon-draw *, .nav-icon-page *, .nav-icon-type *,
-  .nav-icon-scroll *, .nav-icon-wave *, .nav-icon-cluster *, .nav-icon-tilt { animation: none !important; }
+  .nav-icon-scroll *, .nav-icon-wave *, .nav-icon-cluster *, .nav-icon-tilt, .nav-icon-lift, .nav-icon-lift * { animation: none !important; }
   .nav-icon-draw [stroke], .nav-icon-type .mgc-inner, .nav-icon-scroll .mgc-inner { stroke-dasharray: none !important; }
 }
