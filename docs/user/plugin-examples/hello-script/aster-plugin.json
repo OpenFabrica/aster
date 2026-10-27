@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.hello-script",
+  "name": "Hello Script",
+  "version": "1.0.0",
+  "description": "脚本工具示例：一个返回文本，一个返回列表",
+  "author": "Example",
+  "permissions": ["exec"],
+  "features": [
+    {
+      "code": "upper",
+      "title": "转成大写",
+      "subtitle": "text 输出：读 stdin，返回大写文本",
+      "keywords": ["hello", "upper", "大写"],
+      "match": [
+        { "type": "regex", "label": "转成大写", "pattern": "(?i)^hello\\b", "maxLength": 4096 }
+      ],
+      "action": { "type": "script", "command": ["bin/upper.sh"], "output": "text", "stdin": "text", "timeout": 5 }
+    },
+    {
+      "code": "variants",
+      "title": "文本变体",
+      "subtitle": "list 输出：边输入边更新",
+      "keywords": ["hello", "variants", "变体"],
+      "action": { "type": "script", "command": ["bin/variants.sh"], "output": "list" }
+    }
+  ]
+}

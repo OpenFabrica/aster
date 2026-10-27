@@ -752,3 +752,36 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .agent-props dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-props.is-deleted { opacity: .55; text-decoration: line-through; }
 .agent-audit-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--border-subtle); }
+
+/* 「工具」分类：插件卡片、按风险着色的权限、扫描问题与开发目录（tools.js）。
+   风险色：高 = --danger（红），中 = 与 .setting-warning 同一橙色，低 = 三级文字灰。 */
+.tools-empty { min-height: 40px; }
+.tool-plugin { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border-subtle); }
+.tool-plugin:first-child { border-top: 0; }
+.tool-plugin-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 18px; }
+.tool-plugin-copy { display: grid; min-width: 0; gap: 2px; }
+.tool-plugin-title { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.tool-plugin-name { font-weight: 550; }
+.tool-plugin-version { color: var(--text-tertiary); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.tool-badge { padding: 0 6px; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 9.5px; white-space: nowrap; }
+.tool-badge[data-source="development"] { color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 40%, transparent); }
+.tool-plugin-meta { overflow-wrap: anywhere; color: var(--text-tertiary); font-size: 10.5px; }
+.tool-status[data-status="ready"] { color: var(--success); }
+.tool-status[data-status="needsApproval"] { color: #f59e0b; }
+.tool-approval { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 6px 10px; background: color-mix(in srgb, #f59e0b 9%, transparent); border-radius: var(--radius-control); }
+.tool-approval .setting-warning { margin-top: 0; }
+.tool-facet { display: grid; grid-template-columns: minmax(56px, max-content) minmax(0, 1fr); align-items: baseline; gap: 8px; font-size: 10.5px; }
+.tool-facet-label { color: var(--text-tertiary); }
+.tool-permissions { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.tool-permission { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 999px; }
+.tool-risk-dot { width: 6px; height: 6px; flex: 0 0 6px; background: var(--text-tertiary); border-radius: 50%; }
+.tool-permission[data-risk="high"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.tool-permission[data-risk="high"] .tool-risk-dot { background: var(--danger); }
+.tool-permission[data-risk="medium"] { color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 35%, transparent); }
+.tool-permission[data-risk="medium"] .tool-risk-dot { background: #f59e0b; }
+.tool-permission-state { color: var(--text-tertiary); }
+.tool-permission[data-granted="false"] .tool-permission-state { font-weight: 550; }
+.tool-domains { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.tool-domain, .tool-path { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; overflow-wrap: anywhere; user-select: text; }
+.tool-plugin-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.tool-issue .setting-label.tool-path { font-weight: 500; }

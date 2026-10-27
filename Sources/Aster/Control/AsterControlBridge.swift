@@ -444,7 +444,7 @@ final class AsterControlBridge {
     return PaneInfo(
       paneID: record.paneID.description, tabID: record.tabID.description,
       windowID: record.windowID.description, kind: descriptor.kind,
-      title: descriptor.resourcePath.map { ($0 as NSString).lastPathComponent },
+      title: descriptor.toolDisplayTitle ?? descriptor.resourcePath.map { ($0 as NSString).lastPathComponent },
       cwd: descriptor.workingDirectory, command: nil, focused: isFocused(record), running: false,
       agent: nil)
   }

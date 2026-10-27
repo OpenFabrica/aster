@@ -296,7 +296,7 @@ Title permissions are under **Advanced**: Shell Controlled allows OSC 0/1/2 titl
 
 `⌘F` searches the current terminal's full scrollback, with arrows for matches; Ghostty performs text, case-sensitive, and regex search. In a File Pane it instead searches that file as you type: `↩` next, `⇧↩` previous, Esc or another `⌘F` closes. Source shows match index/count and supports case/regex. Markdown/HTML previews, Agent transcripts, and PDF support find without regex; web previews indicate only whether a match exists. Images and binary files do not support find. **Find Globally** searches all terminal, editor, and preview Panes. Command Outline jumps with stable buffer anchors; entries whose pages were trimmed from scrollback become unavailable.
 
-`⇧⌘O` opens **Open Quickly**. Categories filter All / Opened / Recent / Folders / SSH / Agents / Current / Recipes; `⌘J` opens Current directly. Fuzzy results include type icons, relative times, badges, and group headers. Results jump to Panes, open frequent directories, prefill SSH, resume Agent history, or open Recipes. Current also shows foreground commands and a Prompts group of recent input: a running Agent receives it in its Pane; without a running Agent, selecting a Prompt prefills the current terminal without Return. Use arrows, Return, or `⌘1`–`⌘9`. `⌘K` within Open Quickly or its Actions button opens result actions such as close tab, Fork, Reveal in Finder, or copy prompt. Hold `⌘` to reveal category shortcuts: `⌘0/W/R/Z/S/G/J/E` for All/Opened/Recent/Folders/SSH/Agents/Current/Recipes and row shortcuts for the first nine results. Release hides hints. Esc, switching apps, or any mouse click outside the overlay within Aster, including the title bar, closes it. The `⇧⌘P` command palette shares this style and includes new window, Pin, both Picture in Picture modes, details, Agent, splits, files, find, modes, and close, grouped by Pane/Window/Application scope. Common fixed shortcuts appear at the row end.
+`⇧⌘O` opens **Open Quickly**. Categories filter All / Opened / Recent / Folders / SSH / Agents / Current / Recipes / Tools; `⌘J` opens Current directly and `⌘U` opens Tools (see **Tools and Plugins**). Fuzzy results include type icons, relative times, badges, and group headers. Results jump to Panes, open frequent directories, prefill SSH, resume Agent history, or open Recipes. Current also shows foreground commands and a Prompts group of recent input: a running Agent receives it in its Pane; without a running Agent, selecting a Prompt prefills the current terminal without Return. Use arrows, Return, or `⌘1`–`⌘9`. `⌘K` within Open Quickly or its Actions button opens result actions such as close tab, Fork, Reveal in Finder, or copy prompt. Hold `⌘` to reveal category shortcuts: `⌘0/W/R/Z/S/G/J/E/U` for All/Opened/Recent/Folders/SSH/Agents/Current/Recipes/Tools and row shortcuts for the first nine results. Release hides hints. Esc, switching apps, or any mouse click outside the overlay within Aster, including the title bar, closes it. The `⇧⌘P` command palette shares this style and includes new window, Pin, both Picture in Picture modes, details, Agent, splits, files, find, modes, and close, grouped by Pane/Window/Application scope. Common fixed shortcuts appear at the row end.
 
 Open Quickly focuses search immediately; clicking it does not dismiss the overlay. Its Agent category is localized with the app. Opening/closing overlays and switching categories do not rebuild the terminal workspace; existing result rows are reused, including while typing with many results.
 
@@ -484,11 +484,11 @@ Registration is under **Settings → Agents → Project Memory MCP**, after reco
 - Codex offers a copyable snippet. Aster does not edit `~/.codex/config.toml` for you.
 - Permission, symlink, size, or JSON errors reading `.mcp.json` are shown with installation disabled, rather than pretending it is unregistered.
 
-## Eleven Settings Categories
+## Twelve Settings Categories
 
 Settings uses one separate window, initially `700 × 460 pt`. The workspace stays fully visible at its existing size/content and terminals continue. While Settings is open, the main window can switch/create tabs and manipulate/split Panes. Drag the title bar to move it, or any edge to resize with minima 700×460 pt. Both dimensions are remembered, constrained to a smaller screen if necessary. Minimize is disabled; the red close button closes only Settings. The Dock context menu has no Open Settings entry and does not list this window as Aster Settings.
 
-Aster's embedded web UI renders Settings with General, Shell, Control, Editor, Agents, Hosts, View, Appearance, Recipes, Shortcuts, and Advanced navigation. Search covers every category and jumps to the matching setting. Toggles, menus, text, colors, and sliders save immediately; invalid values show an explanation and revert to the actual value. The Settings web page itself does not network or open Otty/other-product pages. Update's Check Now and the completion database's Update Now ask Aster's native app to fetch data. The Hosts category contains only Agent Access; hosts, keys, and known hosts are managed on the sidebar Hosts page.
+Aster's embedded web UI renders Settings with General, Shell, Control, Editor, Agents, Hosts, View, Appearance, Recipes, Tools, Shortcuts, and Advanced navigation. Search covers every category and jumps to the matching setting. Toggles, menus, text, colors, and sliders save immediately; invalid values show an explanation and revert to the actual value. The Settings web page itself does not network or open Otty/other-product pages. Update's Check Now and the completion database's Update Now ask Aster's native app to fetch data. The Hosts category contains only Agent Access; hosts, keys, and known hosts are managed on the sidebar Hosts page.
 
 - **Advanced → Configuration File** opens `~/Library/Application Support/Aster/settings.json`; use reload after edits. Format version is 3, with older Aster JSON still importable.
 - Windows text rendering is marked Windows. macOS preserves it for config round-trips but neither applies nor allows editing it.
@@ -498,7 +498,7 @@ Aster's embedded web UI renders Settings with General, Shell, Control, Editor, A
 - System-action failures, such as Shell/Agent integration, CLI installation, or config import, retain their actual error instead of showing a successful switch.
 - **General → Language** offers System, Simplified Chinese, Traditional Chinese, English, Japanese, French, and German. System matches macOS preferred languages in order (`zh-TW` to Traditional Chinese, `en-GB` to English), falling back to English if none match. Restart Aster for a whole-interface language change. Terminal programs use their own Shell `LANG`, unaffected by this setting.
 
-Navigation is fixed at 200 pt and reaches the window top. Widening fills the right column with responsive cards/controls rather than blank space. The neutral-gray search field does not autofocus; click it to search labels/descriptions across all eleven categories. Content starts at the top as group headings and rounded cards, with scrolling when needed. Switching categories changes only the right side; controls update in place, and Swift state snapshots preserve the selected category. Appearance's left/right Panel widths edit the most recently active workspace window.
+Navigation is fixed at 200 pt and reaches the window top. Widening fills the right column with responsive cards/controls rather than blank space. The neutral-gray search field does not autofocus; click it to search labels/descriptions across all twelve categories. Content starts at the top as group headings and rounded cards, with scrolling when needed. Switching categories changes only the right side; controls update in place, and Swift state snapshots preserve the selected category. Appearance's left/right Panel widths edit the most recently active workspace window.
 
 - **General**: language, launch behavior, window close behavior, tab/window/Pane close-confirmation policy, system integrations (default `ssh://` terminal, common external apps' default terminal, Finder Open in Aster service, Full Disk Access), and updates (automatic checks, download/install, stable/preview, check now).
 - **Shell**: working directories for windows/tabs/splits; Shell/SSH integration and connection reuse; Aster CLI installation, omitted prefix, command overrides, aliases; frequent folders with tracked/ignored management and Zoxide sync; restore for multiplexers, Code Agents, OSC protocol, and never/allowlist/all processes; bell/error beep; system notification permission, app/completion/error/watch notifications, foreground policy, sounds, and continuous Dock bounce until returning; terminal identity. `TERM=auto` prefers bundled `xterm-ghostty` matching the engine, falling back to `xterm-256color` if absent. Custom accepts an actually installed terminfo name. The arrangement follows Otty.
@@ -509,6 +509,7 @@ Navigation is fixed at 200 pt and reaches the window top. Widening fills the rig
 - **View**: four groups aligned with Otty. Tab/title rules organize by item (alias/icon/title lists) or project (all three together). Conditions for path, command, Agent, SSH host, file, etc. must all match; no condition means every tab. Rules set alias, colored built-in icon (61 choices) or emoji, and title templates. Variables include `${alias}`, `${cwd}`, `${folder}`, `${user}`, `${host}`, `${agent}`, `${branch}`, `${command}`, `${title}`, `${shell}`, `${index}`, `${file}`; `${title|folder|'Shell'}` takes the first nonempty value. Rule titles rank below fixed manual names but above auto titles. Tab icons/badges can share an indicator (status takes over) or separate left-icon/right-badge positions while hiding the Shell name, with completion/failure/awaiting-input switches. Web Panes can persist cookies for subsequently opened Panes and clear browsing data. Details Panel supports reorder/toggle for Info/Outline/Git/Files/Memory and Add View: a terminal program such as `lazydocker` with `${cwd}`/`${pid}` command/directory variables (empty directory uses `~/.config/aster/views/<name>`) or a web page, optionally requesting mobile content.
 - **Appearance**: interface text size and stronger interface text, workspace Panel widths, tab position/autohide, window size, Dock task state, light/dark themes, theme edit/import, text style, fonts/fallbacks, cursor color/style/blink/animation.
 - **Recipes**: replay and content-trust policies; confirm external commands according to the selected policy.
+- **Tools**: open the Tools panel, its global shortcut, installed plugins (enable, approve permissions, reveal in Finder, uninstall), plugins with manifest problems, development folders, and installing from a folder. See **Tools and Plugins**.
 - **Shortcuts**: view built-ins and edit bindings as described above.
 - **Advanced**: auto-progress commands, title write/read permissions, SSH engine (native `aster-ssh` or OpenSSH, after restart), JSON config import/export/reset, and runtime information.
 
@@ -621,6 +622,39 @@ Choose top/bottom/left/right/center, size, margin, display, animation duration, 
 Resize by dragging edges; width/height survive hide/show and restart. Changing position, size percentage, or margin in settings restores the percentage-based layout. The window cannot be moved by dragging; Position determines it.
 
 First open uses the recent workspace directory; afterward it keeps its own Shell/CWD. Hiding or Command+W does not stop tasks; Escape still reaches the terminal. `exit`/Control+D hides it, with a fresh terminal on next open. An abnormal early Shell exit (signal or immediate nonzero configuration failure) retains the view; use **Window → Restart Quick Terminal**. Quitting Aster ends it; this temporary session does not restore next launch. For an occupied shortcut, choose another or use the Window menu.
+
+## Tools and Plugins
+
+The toolbox is a set of small everyday tools, such as timestamps, Base64, JSON, JWT, regular expressions, and colors. You can also install plugins that you write yourself.
+
+- **Two entry points**:
+  - The Tools page in Open Quickly: press `⇧⌘O`, then `⌘U`.
+  - The Tools panel: choose **Window → Tools Panel**, or **Tools Panel** in the command palette. You can give it a global shortcut in **Settings → Tools**: `⌥Space` or `⌃⌥Space`. There is no shortcut by default. It cannot use the same combination as Quick Terminal.
+- **Paste content directly**: paste text into the search field. The **Detected** rows list the tools that can process it. Tools that recognize a specific format (a timestamp, JSON) go to the top; tools that accept any text (such as Calculate Hash) come after the search results. Built-in conversions show their result in the row; press `↩` to copy it. The All page in Open Quickly lists tools only after you type something.
+- **Tools panel keys**: `↑`/`↓` select, `↩` opens, `⌘↩` prefills the result into the terminal, `⌥↩` opens the tool as a Pane, `Esc` leaves the tool first and then closes the panel, `⌘1`–`⌘9` select quickly. After a tool opens, you can continue to type and the tool updates. You can drag files onto the panel as tool input. The panel hides when it loses focus, and focus returns to the previous app.
+- **Prefill into the terminal**: Aster writes only into the terminal Pane that was active when you opened the tool. It pastes the text and never presses Return. If that Pane is closed or is not a terminal, Aster tells you that it failed.
+- **Open as a Pane**: a tool can open as a split in the workspace. In this version, tool Panes are not saved with the workspace and do not come back after Aster restarts.
+- **Built-in tools**: timestamp and date conversion, Base64 encode and decode, URL encode, decode, and query split, hashes (MD5, SHA-1, SHA-256, SHA-512), UUIDs and random strings, local listening ports (you can end a process after you confirm), and JSON format, minify, and tree view. There are also four web tools: JWT decoder, regex tester, text diff, and color converter.
+
+### Plugins
+
+Plugins live in `~/Library/Application Support/Aster/Plugins/`. Manage them in **Settings → Tools**:
+
+- Enable or disable a plugin; see and approve the permissions it asks for; reveal it in Finder; uninstall it. Built-in plugins cannot be uninstalled.
+- **Install from Folder…** copies a folder that contains `aster-plugin.json` into the plugins folder.
+- **Add Development Folder…** only registers the path and does not copy files. When files change, Aster scans again and reloads open web tools.
+- **Problems** lists plugins that do not load because their manifest is wrong, with the reason.
+
+Before a plugin runs for the first time, Aster lists the permissions it asks for, and you decide. Aster asks again when:
+
+- A new version of the plugin asks for more permissions or network domains.
+- The files of an installed plugin changed.
+
+Approvals are stored in `~/Library/Application Support/Aster/tools-state.json`, not in `settings.json`. Importing settings never brings plugin approvals.
+
+Web tools run in a sandbox: they cannot access the network directly, cannot read your files on their own, and each plugin has separate storage. Script tools run programs that come with the plugin, with the same user permissions as you, so they must declare the `exec` permission and you must approve it. Install only plugins that you trust.
+
+To write your own plugin, see [Writing Aster Tool Plugins](https://github.com/OpenFabrica/aster/blob/master/docs/user/plugin-authoring.en.md).
 
 ## Remote Machines
 

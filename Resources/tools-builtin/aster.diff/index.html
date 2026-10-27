@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hans" class="aster-booting">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>文本对比</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="diff.css">
+</head>
+<body>
+  <main class="app">
+    <section class="inputs">
+      <div class="pane">
+        <div class="pane-head">
+          <span class="label" data-i18n="left">原文</span>
+          <span id="left-stats" class="hint"></span>
+        </div>
+        <textarea id="left" class="field pane-input" wrap="off" spellcheck="false" autocomplete="off" autocapitalize="off"
+          data-i18n-placeholder="leftPlaceholder" data-i18n-label="left"></textarea>
+      </div>
+      <div class="pane">
+        <div class="pane-head">
+          <span class="label" data-i18n="right">修改后</span>
+          <span id="right-stats" class="hint"></span>
+        </div>
+        <textarea id="right" class="field pane-input" wrap="off" spellcheck="false" autocomplete="off" autocapitalize="off"
+          data-i18n-placeholder="rightPlaceholder" data-i18n-label="right"></textarea>
+      </div>
+    </section>
+
+    <div class="row toolbar">
+      <label class="check"><input id="ignore-whitespace" type="checkbox"><span data-i18n="ignoreWhitespace">忽略空白</span></label>
+      <label class="check"><input id="ignore-case" type="checkbox"><span data-i18n="ignoreCase">忽略大小写</span></label>
+      <label class="check"><input id="only-changes" type="checkbox" checked><span data-i18n="onlyChanges">只看改动</span></label>
+      <span class="spacer"></span>
+      <button id="swap" class="btn" type="button" data-i18n="swap" data-i18n-title="swapTitle">交换</button>
+      <button id="copy-diff" class="btn" type="button" data-requires-bridge
+        data-i18n="copyDiff" data-i18n-title="copyDiffTitle">复制 diff</button>
+    </div>
+
+    <div id="note" class="message warn" hidden></div>
+
+    <section class="card result-card">
+      <div class="card-head">
+        <span class="label" data-i18n="resultLabel">对比结果</span>
+        <span id="stats" class="stats"></span>
+        <span class="spacer"></span>
+        <span id="elapsed" class="hint"></span>
+      </div>
+      <div id="result" class="diff" hidden></div>
+      <div id="empty" class="empty">
+        <p id="empty-hint" data-i18n="emptyHint">在左右两栏分别粘贴文本，立即逐行对比</p>
+        <button id="sample" class="btn" type="button" data-i18n="sample">试试示例</button>
+      </div>
+    </section>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <script src="kit.js"></script>
+  <script src="i18n.js"></script>
+  <script src="diff-core.js"></script>
+  <script src="diff.js"></script>
+</body>
+</html>

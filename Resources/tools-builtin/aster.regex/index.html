@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hans" class="aster-booting">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>正则测试</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="regex.css">
+</head>
+<body>
+  <main class="app">
+    <div class="row">
+      <label id="pattern-box" class="pattern-box">
+        <span class="slash" aria-hidden="true">/</span>
+        <input id="pattern" class="pattern-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
+          data-i18n-placeholder="patternPlaceholder" data-i18n-label="patternLabel">
+        <span class="slash" aria-hidden="true">/</span>
+        <span id="flag-text" class="flag-text" aria-hidden="true">g</span>
+      </label>
+      <div class="flags" role="group" data-i18n-label="flagsLabel">
+        <button class="btn flag" type="button" data-flag="g" aria-pressed="true" data-i18n-title="flag.g">g</button>
+        <button class="btn flag" type="button" data-flag="i" aria-pressed="false" data-i18n-title="flag.i">i</button>
+        <button class="btn flag" type="button" data-flag="m" aria-pressed="false" data-i18n-title="flag.m">m</button>
+        <button class="btn flag" type="button" data-flag="s" aria-pressed="false" data-i18n-title="flag.s">s</button>
+        <button class="btn flag" type="button" data-flag="u" aria-pressed="false" data-i18n-title="flag.u">u</button>
+        <button class="btn flag" type="button" data-flag="y" aria-pressed="false" data-i18n-title="flag.y">y</button>
+      </div>
+    </div>
+
+    <div class="row toolbar">
+      <span id="summary" class="summary"></span>
+      <span id="elapsed" class="hint"></span>
+      <span class="spacer"></span>
+      <span class="hint" data-i18n="syntaxNote">JavaScript 语法</span>
+      <button id="copy-regex" class="btn" type="button" data-requires-bridge
+        data-i18n="copyRegex" data-i18n-title="copyRegexTitle">复制正则</button>
+      <button id="copy-matches" class="btn" type="button" data-requires-bridge
+        data-i18n="copyMatches" data-i18n-title="copyMatchesTitle">复制匹配</button>
+    </div>
+
+    <div id="error" class="message error" role="alert" hidden></div>
+    <div id="note" class="message warn" hidden></div>
+
+    <section class="workspace">
+      <div class="card">
+        <div class="card-head">
+          <span class="label" data-i18n="textLabel">测试文本</span>
+          <span class="spacer"></span>
+          <span id="text-stats" class="hint"></span>
+        </div>
+        <div class="editor">
+          <div id="backdrop" class="editor-layer backdrop" aria-hidden="true"></div>
+          <textarea id="text" class="editor-layer editor-input" spellcheck="false" autocomplete="off" autocapitalize="off"
+            data-i18n-placeholder="textPlaceholder" data-i18n-label="textLabel"></textarea>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="label" data-i18n="matchesLabel">匹配结果</span></div>
+        <div id="matches" class="card-body matches" hidden></div>
+        <div id="empty" class="empty">
+          <p id="empty-hint" data-i18n="emptyHint">输入正则和测试文本，立即高亮匹配</p>
+          <button id="sample" class="btn" type="button" data-i18n="sample">试试示例</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <script src="kit.js"></script>
+  <script src="i18n.js"></script>
+  <script src="regex-core.js"></script>
+  <script src="regex.js"></script>
+</body>
+</html>

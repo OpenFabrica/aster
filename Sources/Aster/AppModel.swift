@@ -522,8 +522,9 @@ final class TerminalTabItem: ObservableObject, Identifiable {
   }
 
   /// 非终端 Pane 使用资源自身作为恢复后的标题回退；网页优先显示 host，避免会话恢复
-  /// 后暂时退回其创建来源目录名。
+  /// 后暂时退回其创建来源目录名。工具 Pane 显示功能标题，功能已不存在时显示「工具」。
   private static func displayName(for descriptor: PaneDescriptor) -> String {
+    if let toolTitle = descriptor.toolDisplayTitle { return toolTitle }
     if descriptor.kind == .web, let value = descriptor.resourcePath,
       let url = URL(string: value)
     {
@@ -745,11 +746,14 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     applyActiveTitleState(state)
   }
 
+  /// 在活动 Pane 旁拆出一个新 Pane 并聚焦它。
+  /// - Parameter paneID: 新 Pane 的身份。工具 Pane 需要先按这个 id 建好会话再拆分，其它调用用默认值。
   func split(
     direction: SplitDirection,
     kind: PaneKind = .terminal,
     resourcePath: String? = nil,
-    workingDirectory requestedWorkingDirectory: String? = nil
+    workingDirectory requestedWorkingDirectory: String? = nil,
+    paneID: UUID = UUID()
   ) {
     // Recipe 恢复必须在创建运行对象前给出目标目录；事后只改布局描述会让 PTY 仍从
     // 原目录启动。普通交互拆分继续继承当前 Pane 的实时 cwd。
@@ -757,6 +761,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
       ?? activeSession?.resolvedCurrentWorkingDirectory()
       ?? workingDirectory
     let descriptor = PaneDescriptor(
+      id: paneID,
       kind: kind,
       workingDirectory: directory,
       resourcePath: resourcePath
@@ -1767,6 +1772,9 @@ final class AppModel: ObservableObject {
   /// 快照；应用退出时 shell wrapper 仍可结束，但调用方会按本机传输超时失败。
   private var pendingWorkflowCLICommands: [UUID: PendingWorkflowCLICommand] = [:]
   private var appSubscriptions: Set<AnyCancellable> = []
+  /// 工具 Pane 的会话缓存（按 Pane id），见 `AppModel+Tools.swift`。懒加载：没开过工具 Pane 的窗口
+  /// 不建会话也不订阅标签变化。
+  private(set) lazy var toolPaneSessions = ToolPaneSessionCache(model: self)
 
   /// Local 受管 Pane 结束卡上「重新启动 Shell」/「关闭标签」的观察者。远端机器由
   /// RemoteWorkspaceCoordinator 处理（它设置了 remoteStructureHandler）；Local 没有协调器，
@@ -1978,6 +1986,7 @@ final class AppModel: ObservableObject {
       if descriptor.kind == .web {
         return URL(string: resourcePath)?.host ?? resourcePath
       }
+      if let toolTitle = descriptor.toolDisplayTitle { return toolTitle }
       return URL(fileURLWithPath: resourcePath).lastPathComponent
     }
     let tab = TerminalTabItem(
@@ -2167,6 +2176,19 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// 在新本地标签里运行一条已经转义好的命令（工具脚本的 `terminal` 输出）。与 `runShellFile`
+  /// 共用 Recipe 命令队列：等新 Shell 就绪再发送并回车，不用固定延时猜提示符。远端窗口返回 false。
+  @discardableResult
+  func runCommandInNewTab(_ command: String, workingDirectory: String) -> Bool {
+    guard isLocalMachineActive, remoteStructureHandler == nil else { return false }
+    let tab = TerminalTabItem(
+      title: TerminalTabItem.displayName(forDirectory: workingDirectory),
+      workingDirectory: workingDirectory)
+    pendingRecipeCommands[tab.activePaneID] = [command]
+    insertTab(tab, hasContent: true)
+    return true
+  }
+
   /// 跨窗口拖动标签时转移现有 TerminalTabItem，而不是从 snapshot 重建。PTY、编辑
   /// 草稿、滚动历史和 Agent 状态因此保持原对象；源窗口若被取走最后一项会补一个新
   /// Shell，继续满足工作区永不为空的不变量。
@@ -2300,16 +2322,18 @@ final class AppModel: ObservableObject {
       tabs[index].confirmCloseDocuments()
     else { return }
     let wasSelected = selectedTabID == id
-    let snapshot = tabs[index].snapshot
-    recentlyClosedTabs.record(snapshot)
-    recordClosedWorkspaceItem(.init(
-      event: WorkflowClosedItem(
-        id: UUID(), kind: .tab, originWindowID: windowID, closedAt: Date()),
-      tabID: snapshot.id,
-      tab: snapshot,
-      pane: nil
-    ))
-    persistRecentlyClosedTabs()
+    // 关闭历史同样落盘，工具 Pane 不进去；只剩工具 Pane 的标签不登记，也就无从「重新打开」。
+    if let snapshot = tabs[index].snapshot.removingToolPanes() {
+      recentlyClosedTabs.record(snapshot)
+      recordClosedWorkspaceItem(.init(
+        event: WorkflowClosedItem(
+          id: UUID(), kind: .tab, originWindowID: windowID, closedAt: Date()),
+        tabID: snapshot.id,
+        tab: snapshot,
+        pane: nil
+      ))
+      persistRecentlyClosedTabs()
+    }
     let removed = tabs[index]
     let groupIndex = indexInWorkspaceGroup(of: removed)
     removed.stop()
@@ -2492,10 +2516,12 @@ final class AppModel: ObservableObject {
   }
 
   /// 关闭指定 Pane 并登记到「重新打开」历史；确认弹窗由调用方决定是否需要。
+  /// 工具 Pane 不登记：关闭历史会落盘，而工具 Pane 不持久化。
   private func closePaneAndRecord(paneID: UUID, in tab: TerminalTabItem) -> Bool {
     guard let descriptor = tab.layout.allPanes.first(where: { $0.id == paneID }),
       tab.closePane(id: paneID)
     else { return false }
+    guard descriptor.kind != .tool else { return true }
     recordClosedWorkspaceItem(.init(
       event: WorkflowClosedItem(
         id: UUID(), kind: .pane, originWindowID: windowID, closedAt: Date()),
@@ -3513,7 +3539,7 @@ final class AppModel: ObservableObject {
             separator: "\n", omittingEmptySubsequences: false
           ).map(String.init)
           firstAbsoluteRow = 0
-        case .preview, .fileBrowser, .web:
+        case .preview, .fileBrowser, .web, .tool:
           return nil
         }
         return WorkspaceSearchDocument(
@@ -3808,6 +3834,7 @@ final class AppModel: ObservableObject {
     return row
   }
 
+  /// 把当前窗口或标签导出成 Recipe；工具 Pane 不导出。
   private func makeWorkflowRecipe(
     name: String,
     scope: WorkflowRecipeScope,
@@ -3828,8 +3855,13 @@ final class AppModel: ObservableObject {
       )
     }
     let home = FileManager.default.homeDirectoryForCurrentUser
-    let recipeTabs = try sourceTabs.map { tab in
-      let portableLayout = WorkflowRecipeWorkspaceMapper.makePortable(tab.layout, home: home)
+    // 工具 Pane 不进 Recipe（导入时会被拒绝）：导出前剔除，分屏由兄弟顶替；只剩工具 Pane 的标签跳过。
+    let exportedTabs = sourceTabs.compactMap { tab in tab.layout.removingToolPanes().map { (tab, $0) } }
+    guard !exportedTabs.isEmpty || sourceTabs.isEmpty else {
+      throw WorkflowRecipeTOMLError.unsupportedPaneKind(PaneKind.tool.rawValue)
+    }
+    let recipeTabs = try exportedTabs.map { tab, layout in
+      let portableLayout = WorkflowRecipeWorkspaceMapper.makePortable(layout, home: home)
       let panes = try portableLayout.allPanes.enumerated().map { index, pane in
         let session = tab.runtime(for: pane.id)?.terminalSession
         let commands = content == .layoutOnly
@@ -4592,6 +4624,7 @@ final class AppModel: ObservableObject {
     ).standardizedFileURL.path
   }
 
+  /// 命令面板列出的全部命令。
   var paletteCommands: [PaletteCommand] {
     var commands: [PaletteCommand] = [
       .init(id: "new-window", title: L("新建窗口"), keywords: ["new", "window"], scope: .application),
@@ -4611,6 +4644,10 @@ final class AppModel: ObservableObject {
       .init(id: "find", title: L("在当前 Pane 中查找"), keywords: ["search", "buffer"]),
       .init(id: "global-find", title: L("在全部 Pane 中查找"), keywords: ["search", "workspace"], scope: .window),
       .init(id: "open-quickly", title: "Open Quickly", keywords: ["jump", "recent", "ssh"], scope: .window),
+      .init(
+        id: "tool-launcher", title: L("工具面板"),
+        keywords: ["tools", "toolbox", "plugin", "launcher", "json", "base64", "timestamp"],
+        scope: .application),
       .init(id: "hosts", title: L("主机"), keywords: ["ssh", "hosts", "server"], scope: .window),
       .init(id: "inspector", title: L("切换详情面板"), keywords: ["git", "info", "outline"], scope: .window),
       .init(id: "pin-window", title: L("切换窗口置顶"), keywords: ["pin", "floating"], scope: .window),
@@ -4655,6 +4692,7 @@ final class AppModel: ObservableObject {
     return commands
   }
 
+  /// 执行命令面板里选中的命令。
   func performPaletteCommand(_ command: PaletteCommand, dismissesPalette: Bool = true) {
     switch command.id {
     case "new-window": _ = onRequestNewWindow?(nil)
@@ -4676,6 +4714,10 @@ final class AppModel: ObservableObject {
     case "find": presentFind()
     case "global-find": toggleGlobalFind()
     case "open-quickly": toggleOpenQuickly()
+    case "tool-launcher":
+      // 面板是独立的浮动窗口：等命令面板这一轮收起、焦点回到工作区之后再呼出，免得被抢回 key。
+      // 经通知交给 AppDelegate，模型不依赖面板控制器。
+      DispatchQueue.main.async { NotificationCenter.default.post(name: .asterShowToolLauncher, object: nil) }
     case "hosts": presentHostsPage()
     case "inspector": toggleInspector()
     case "pin-window": onRequestToggleWindowPin?()
@@ -4723,11 +4765,13 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// 把当前本地工作区写进快照（工具 Pane 不落盘）。
   func persistWorkspace() {
     // 远端机器的标签是服务端结构的投影，不是本客户端的工作区。把它们写进本地快照会
     // 污染下次启动的恢复内容，也会把远端受管引用混进 A09 的旧布局迁移路径。
     guard isLocalMachineActive else { return }
     guard let selectedTabID, !tabs.isEmpty else { return }
+    // v1 不持久化工具 Pane：旧版本不认识 `tool`，剔除后其分屏由兄弟顶替，只剩工具 Pane 的标签不保存。
     let snapshot = WorkspaceSnapshot(
       selectedTabID: selectedTabID,
       tabs: tabs.map(\.snapshot),
@@ -4735,7 +4779,7 @@ final class AppModel: ObservableObject {
       savedAt: Date(),
       workspaceGroups: workspaceGroups,
       selectedWorkspaceGroupID: selectedWorkspaceGroupID
-    )
+    ).removingToolPanes()
     guard let data = try? JSONEncoder().encode(snapshot) else { return }
     defaults.set(data, forKey: snapshotKey)
   }

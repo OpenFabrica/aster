@@ -877,7 +877,8 @@ public struct AgentInfo: Codable, Equatable, Sendable {
 }
 
 /// session.snapshot 与 pane.* 事件里的 pane 描述。kind 复用 WorkspaceLayout 的 PaneKind
-/// （terminal/editor/fileBrowser/preview/web）；只有 terminal 能读写。agent 为 nil 表示没在跑 agent。
+/// （terminal/editor/fileBrowser/preview/web/tool）；只有 terminal 能读写。agent 为 nil 表示没在跑 agent。
+/// tool 是工具箱 Pane，不进工作区快照；客户端遇到不认识的 kind 应按只读 Pane 处理。
 public struct PaneInfo: Codable, Equatable, Sendable {
   public var paneID: String
   public var tabID: String

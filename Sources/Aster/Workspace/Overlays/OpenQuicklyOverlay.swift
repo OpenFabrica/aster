@@ -118,6 +118,12 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
       self.rebuildTargets()
       self.reload()
     })
+  /// 「工具」页与「全部」里的工具行（数据源与动作在 OpenQuicklyToolTargets）。工具行不进索引，
+  /// 插件变化时只需重做一次搜索。
+  private lazy var toolTargets = OpenQuicklyToolTargets(model: model) { [weak self] in
+    guard let self, self.isViewLoaded else { return }
+    self.reload()
+  }
 
   init(model: AppModel) {
     self.model = model
@@ -275,6 +281,7 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     setCommandHintsVisible(false)
   }
 
+  /// 浮层展示期间的按键入口：Esc 关闭、⌘ 键帽提示与 ⌘0–⌘U、⌘F 等过滤器快捷键。
   private func handleOverlayEvent(_ event: NSEvent) -> NSEvent? {
     if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
       guard let window = view.window, event.window === window else { return event }
@@ -300,7 +307,7 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     else { return event }
     let shortcuts: [String: OpenQuicklyFilter] = [
       "0": .all, "k": .workspace, "w": .opened, "r": .recent, "z": .folder,
-      "s": .ssh, "g": .agent, "j": .current, "e": .recipe, "f": .file,
+      "s": .ssh, "g": .agent, "j": .current, "e": .recipe, "u": .tool, "f": .file,
     ]
     guard let filter = shortcuts[character] else { return event }
     selectFilter(filter)
@@ -361,15 +368,14 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
   }
 #endif
 
-  /// 顶部分类标签条:替代原 NSPopUpButton,与参考设计一致。
+  /// 顶部分类标签条:替代原 NSPopUpButton,与参考设计一致。放不下时由 `OpenQuicklyFilterStrip`
+  /// 收紧 chip，仍放不下再裁掉末尾。
   private func makeFilterStrip() -> NSView {
-    let strip = NSStackView()
-    strip.orientation = .horizontal
-    strip.spacing = 4
+    var stripChips: [OpenQuicklyChip] = []
     let titles: [OpenQuicklyFilter: String] = [
       .all: L("全部"), .workspace: L("工作区"), .opened: L("已打开"), .recent: L("最近"), .folder: L("文件夹"),
       .ssh: "SSH", .agent: L("智能体"), .current: L("当前"), .recipe: "Recipes",
-      .file: L("文件"),
+      .tool: L("工具"), .file: L("文件"),
     ]
     for filter in OpenQuicklyFilter.allCases {
       let chip = OpenQuicklyChip(
@@ -381,12 +387,9 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
       chip.identifier = NSUserInterfaceItemIdentifier("open-quickly-chip-\(filter.rawValue)")
       chip.isChipSelected = filter == selectedFilter
       chips[filter] = chip
-      strip.addArrangedSubview(chip)
+      stripChips.append(chip)
     }
-    let spacer = NSView()
-    spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    strip.addArrangedSubview(spacer)
-    return strip
+    return OpenQuicklyFilterStrip(chips: stripChips)
   }
 
   /// 快捷键与用户按住 ⌘ 时 chip 下方的动态提示保持同一数据源。
@@ -401,6 +404,7 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     case .agent: "⌘G"
     case .current: "⌘J"
     case .recipe: "⌘E"
+    case .tool: "⌘U"
     case .file: "⌘F"
     }
   }
@@ -486,9 +490,13 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
   /// 「文件」过滤器搜索的是磁盘上的文件而不是内存里的目标，因此 placeholder 与底部
   /// 主动作文案都要跟着换，否则用户会以为自己还在搜标签。
   private func updateFilterChrome() {
-    search.placeholderString =
-      selectedFilter == .file ? L("搜索当前目录下的文件…") : Self.defaultPlaceholder
-    footerJumpLabel?.stringValue = selectedFilter == .file ? L("打开 ↩") : L("跳转到 ↩")
+    switch selectedFilter {
+    case .file: search.placeholderString = L("搜索当前目录下的文件…")
+    case .tool: search.placeholderString = L("搜索工具，或粘贴要处理的内容…")
+    default: search.placeholderString = Self.defaultPlaceholder
+    }
+    footerJumpLabel?.stringValue =
+      selectedFilter == .file || selectedFilter == .tool ? L("打开 ↩") : L("跳转到 ↩")
   }
 
   func controlTextDidChange(_ obj: Notification) {
@@ -496,14 +504,15 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     reload()
   }
 
+  /// 按查询与过滤器重排结果：索引结果补上快连行与工具行后重建结果行。
   private func reload() {
     for row in rows { row.detachFromResultsStack() }
     for view in resultsStack.arrangedSubviews { view.removeFromSuperview() }
-    let items = withQuickConnectRows(searchIndex.search(
+    let items = withToolRows(withQuickConnectRows(searchIndex.search(
       query: search.stringValue,
       filter: selectedFilter,
       maximumResults: 50
-    ))
+    )))
     visibleTargets = items.compactMap { targetsByID[$0.id] }
     rows.removeAll()
     if visibleTargets.isEmpty {
@@ -593,6 +602,7 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     case .ssh: "SSH"
     case .agent: L("智能体")
     case .recipe: "Recipes"
+    case .tool: L("工具")
     case .file: L("文件")
     }
   }
@@ -703,7 +713,8 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
               title: command ?? "Pane \(index + 1) · \(pane.kind.rawValue)",
               detail: pane.workingDirectory,
               timestamp: matchedHistory?.metadata.updatedAt),
-            symbol: pane.kind == .terminal ? "terminal" : "doc.text",
+            symbol: pane.kind == .terminal
+              ? "terminal" : pane.kind == .tool ? "wrench.and.screwdriver" : "doc.text",
             badge: command != nil ? "Cmd" : "Pane",
             accented: command != nil, actionTitle: L("聚焦 Pane")
           ) { [weak model, weak current] in
@@ -1033,6 +1044,22 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     return OpenQuicklyHostCatalog.inserting(entries.map(\.item), into: items)
   }
 
+  /// 工具行随查询变化，不进内存索引：每次 reload 现算、登记到 `targetsByID`，再插到工具小节。
+  private func withToolRows(_ items: [OpenQuicklyItem]) -> [OpenQuicklyItem] {
+    let entries = toolTargets.entries(query: search.stringValue, filter: selectedFilter)
+    for entry in entries { targetsByID[entry.item.id] = Self.target(from: entry) }
+    return OpenQuicklyToolCatalog.inserting(entries.map(\.item), into: items)
+  }
+
+  /// 工具条目（「识别到」与搜索行）转成浮层行。
+  private static func target(from entry: OpenQuicklyToolEntry) -> Target {
+    var target = Target(
+      item: entry.item, symbol: entry.symbol, badge: entry.badge, accented: entry.accented,
+      actionTitle: entry.actionTitle, action: entry.action)
+    target.menuActions = entry.menuActions
+    return target
+  }
+
   /// SSH 类条目（机器、主机、alias、快连）转成浮层行。
   private static func target(from entry: OpenQuicklyHostEntry) -> Target {
     var target = Target(
@@ -1099,7 +1126,15 @@ final class OpenQuicklyChip: NSButton {
 
   private let fullTitle: String
   private let commandHint: String
-  private let stableWidth: CGFloat
+  /// 标题与快捷键提示中较宽者的宽度（不含内边距）。
+  let contentWidth: CGFloat
+  /// 左右内边距之和。过滤器标签条放不下时由它收紧（见 `OpenQuicklyFilterStrip`）。
+  var horizontalPadding = OpenQuicklyFilterStrip.regularPadding {
+    didSet {
+      guard horizontalPadding != oldValue else { return }
+      invalidateIntrinsicContentSize()
+    }
+  }
 
   /// 创建文字 chip;点击经闭包桥接,避免 target/action 样板。
   init(title: String, commandHint: String, handler: @escaping () -> Void) {
@@ -1111,7 +1146,7 @@ final class OpenQuicklyChip: NSButton {
     let hintWidth = (commandHint as NSString).size(withAttributes: [
       .font: NSFont.interfaceMonospaced(ofSize: 9.5, weight: .medium)
     ]).width
-    stableWidth = ceil(max(titleWidth, hintWidth)) + 20
+    contentWidth = ceil(max(titleWidth, hintWidth))
     super.init(frame: .zero)
     isBordered = false
     wantsLayer = true
@@ -1133,7 +1168,7 @@ final class OpenQuicklyChip: NSButton {
   /// 宽度按标题和快捷键的较大者预留，按下/松开 ⌘ 只改变高度，不让标签条
   /// 水平跳动。快捷键可见时增高为双行 pill。
   override var intrinsicContentSize: NSSize {
-    NSSize(width: stableWidth, height: InterfaceScale.length(showsCommandHint ? 42 : 26))
+    NSSize(width: contentWidth + horizontalPadding, height: InterfaceScale.length(showsCommandHint ? 42 : 26))
   }
 
   override func viewDidChangeEffectiveAppearance() {

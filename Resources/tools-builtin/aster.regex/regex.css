@@ -1,0 +1,293 @@
+/* 正则测试工具的布局：上方正则与标志，左侧带高亮的测试文本，右侧匹配与分组列表。 */
+
+/* MARK: - 正则输入 */
+
+.pattern-box {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  font: 13px var(--mono);
+}
+
+.pattern-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.pattern-box.invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+.slash {
+  color: var(--text-tertiary);
+}
+
+.pattern-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 3px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.pattern-input::placeholder {
+  color: var(--text-tertiary);
+  font-family: var(--sans);
+}
+
+.flag-text {
+  min-width: 1ch;
+  color: var(--accent);
+}
+
+.flags {
+  display: flex;
+  flex: none;
+  gap: 3px;
+}
+
+.flag {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: 12px/1 var(--mono);
+}
+
+.toolbar {
+  flex: none;
+  min-height: 24px;
+}
+
+.summary {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* MARK: - 测试文本与高亮
+   背景层（div）与输入框（textarea）叠在一起，字体、内边距、折行规则与滚动条宽度完全一致，
+   匹配处用 <mark> 在背景层垫底色，文字由上层透明背景的 textarea 绘制。 */
+
+.workspace {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.editor-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  font: 12px/1.6 var(--mono);
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: break-word;
+  tab-size: 4;
+}
+
+/* 两层都用自绘滚动条：宽度固定且总是占位，折行宽度才能一致（系统覆盖式滚动条可能只在一层出现）。 */
+.editor-layer::-webkit-scrollbar {
+  width: 10px;
+}
+
+.editor-layer::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 5px;
+  background-clip: padding-box;
+}
+
+.editor-input::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+}
+
+.backdrop {
+  color: transparent;
+  pointer-events: none;
+}
+
+.backdrop::-webkit-scrollbar-thumb {
+  background-color: transparent;
+}
+
+.editor-input {
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  caret-color: var(--text);
+}
+
+.editor-input::placeholder {
+  color: var(--text-tertiary);
+  font-family: var(--sans);
+}
+
+.backdrop mark {
+  border-radius: 2px;
+  background: rgb(255 204 0 / 42%);
+  color: transparent;
+}
+
+.backdrop mark.alt {
+  background: rgb(255 149 0 / 32%);
+}
+
+.backdrop mark.active {
+  background: rgb(0 122 255 / 30%);
+}
+
+/* 零宽匹配没有文字可垫底色，用一条竖线标出位置；竖线绝对定位，不改变折行。 */
+.backdrop mark.empty {
+  position: relative;
+  background: none;
+}
+
+.backdrop mark.empty::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  border-left: 2px solid var(--accent);
+  content: "";
+}
+
+:root[data-aster-appearance="dark"] .backdrop mark { background: rgb(255 214 10 / 30%); }
+:root[data-aster-appearance="dark"] .backdrop mark.alt { background: rgb(255 159 10 / 34%); }
+:root[data-aster-appearance="dark"] .backdrop mark.active { background: rgb(10 132 255 / 45%); }
+:root[data-aster-appearance="dark"] .backdrop mark.empty { background: none; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-aster-appearance="light"]) .backdrop mark { background: rgb(255 214 10 / 30%); }
+  :root:not([data-aster-appearance="light"]) .backdrop mark.alt { background: rgb(255 159 10 / 34%); }
+  :root:not([data-aster-appearance="light"]) .backdrop mark.active { background: rgb(10 132 255 / 45%); }
+  :root:not([data-aster-appearance="light"]) .backdrop mark.empty { background: none; }
+}
+
+/* MARK: - 匹配列表 */
+
+.matches {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.matches > .hint {
+  margin: auto;
+}
+
+.match {
+  display: block;
+  flex: none;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.match:hover,
+.match:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.match-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.match-no {
+  flex: none;
+  min-width: 18px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.match-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.match-pos {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 11px var(--mono);
+}
+
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 5px 0 0 26px;
+}
+
+.group {
+  display: inline-flex;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  font-size: 11px;
+}
+
+.group-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.group-text {
+  min-width: 0;
+  overflow: hidden;
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.muted-text {
+  color: var(--text-tertiary);
+  font-family: var(--sans);
+  font-style: italic;
+}

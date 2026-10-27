@@ -18,6 +18,9 @@ public enum OpenQuicklyKind: String, CaseIterable, Codable, Sendable {
   /// 当前 Pane 所跑 Agent 会话的近期提示词,只出现在「当前」与「全部」过滤器下。
   case prompt
   case recipe
+  /// 工具箱里的功能（含按查询内容「识别到」的行）。这类行不进索引：浮层每次按查询向工具中心
+  /// 现取（关键词、拼音与使用频次排序都在那边），再按本类型的优先级插到文件之前。
+  case tool
   /// 当前标签工作目录下递归枚举出的普通文件,数量可达数千,因此排序上永远垫底。
   case file
 }
@@ -33,6 +36,8 @@ public enum OpenQuicklyFilter: String, CaseIterable, Codable, Sendable {
   case agent
   case current
   case recipe
+  /// 工具箱（`⌘U`）：排在 Recipes 之后、文件之前。
+  case tool
   /// 「文件」排在 chip 条最后:它的数据来自磁盘扫描,和其它内存来源的过滤器不同源。
   case file
 
@@ -124,7 +129,7 @@ public struct OpenQuicklyIndex: Sendable {
   }
 
   /// 小节顺序的唯一真值:窗口 → 工作区 → 标签页 → 最近标签页 → 最近文件夹 → 当前 → 提示词
-  /// → Recipes → 机器 → 主机 → SSH → 智能体 → 文件。文件必须垫底,否则工作目录里的几千个文件会把
+  /// → Recipes → 机器 → 主机 → SSH → 智能体 → 工具 → 文件。文件必须垫底,否则工作目录里的几千个文件会把
   /// 其它类型整体挤出 50 条结果上限。
   private static func priority(_ kind: OpenQuicklyKind) -> Int {
     switch kind {
@@ -140,7 +145,8 @@ public struct OpenQuicklyIndex: Sendable {
     case .host: 9
     case .ssh: 10
     case .agent: 11
-    case .file: 12
+    case .tool: 12
+    case .file: 13
     }
   }
 

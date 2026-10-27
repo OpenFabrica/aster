@@ -116,13 +116,16 @@ public enum SidebarTabOrder: String, CaseIterable, Codable, Equatable, Sendable 
   case updatedTime
 }
 
-/// 面板内容类型。终端、文件工具与网页共享同一分屏树，因此可以任意组合。
+/// 面板内容类型。终端、文件工具、网页与工具共享同一分屏树，因此可以任意组合。
 public enum PaneKind: String, Codable, Equatable, Sendable {
   case terminal
   case editor
   case fileBrowser
   case preview
   case web
+  /// 工具箱里的一个功能；`resourcePath` 保存功能 id（`<pluginID>/<code>`）。
+  /// v1 不持久化：保存快照与导出 Recipe 前由 `removingToolPanes()` 剔除。
+  case tool
 }
 
 public enum SplitAxis: String, Codable, Equatable, Sendable {
@@ -180,9 +183,18 @@ public struct PaneDescriptor: Identifiable, Codable, Equatable, Sendable {
   public init(from decoder: any Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     id = try values.decode(UUID.self, forKey: .id)
-    kind = try values.decode(PaneKind.self, forKey: .kind)
     workingDirectory = try values.decode(String.self, forKey: .workingDirectory)
-    resourcePath = try values.decodeIfPresent(String.self, forKey: .resourcePath)
+    // 新版本写出的类型（例如以后持久化的工具 Pane）对本版本是未知值。降级成同目录的终端
+    // 并丢掉资源路径，而不是抛错：`kind` 解码失败会让整份工作区快照失败，用户会丢掉全部标签。
+    // 字段缺失或不是字符串仍按结构损坏处理，只有「是字符串但不认识」才降级。
+    let rawKind = try values.decode(String.self, forKey: .kind)
+    if let known = PaneKind(rawValue: rawKind) {
+      kind = known
+      resourcePath = try values.decodeIfPresent(String.self, forKey: .resourcePath)
+    } else {
+      kind = .terminal
+      resourcePath = nil
+    }
     managedTerminal =
       (try? values.decodeIfPresent(ManagedTerminalReference.self, forKey: .managedTerminal))
       ?? nil
@@ -468,6 +480,22 @@ extension PaneLayout {
     return sibling.edgePaneID(alongAxis: axis, takeFirst: branch == 0)
   }
 
+  /// 分屏树里离指定叶最近、且满足条件的另一片叶，例如工具 Pane 找同标签里最近的终端。
+  ///
+  /// 自底向上逐层查看兄弟子树，第一层有命中就返回其中最靠近分隔条的一片：兄弟在后侧时取
+  /// 中序最靠前的，在前侧时取最靠后的。比「布局里第一个终端」更符合用户对「旁边那个」的预期。
+  public func nearestPaneID(to paneID: UUID, where matches: (PaneDescriptor) -> Bool) -> UUID? {
+    guard var path = path(toPane: paneID) else { return nil }
+    while let branch = path.popLast() {
+      guard let parent = node(at: path), case .split(_, let first, let second, _) = parent else {
+        return nil
+      }
+      let candidates = (branch == 0 ? second : first).allPanes.filter(matches)
+      if let nearest = branch == 0 ? candidates.first : candidates.last { return nearest.id }
+    }
+    return nil
+  }
+
   /// 读取指定叶的描述符；面板不存在时返回 nil。
   public func descriptor(forPane paneID: UUID) -> PaneDescriptor? {
     allPanes.first { $0.id == paneID }
@@ -503,6 +531,31 @@ extension PaneLayout {
     return remaining.splitting(paneID: targetID, direction: direction, with: moved)
   }
 
+  /// 删除所有满足条件的叶节点。被删叶所在的分屏由兄弟子树顶替，不留单子节点的空容器，
+  /// 其余节点的方向、比例与 Pane 身份不变。整棵树都被删掉时返回 nil。
+  public func removingPanes(where shouldRemove: (PaneDescriptor) -> Bool) -> PaneLayout? {
+    switch self {
+    case .leaf(let pane):
+      return shouldRemove(pane) ? nil : self
+    case .split(let axis, let first, let second, let ratio):
+      switch (first.removingPanes(where: shouldRemove), second.removingPanes(where: shouldRemove)) {
+      case (let keptFirst?, let keptSecond?):
+        return .split(axis: axis, first: keptFirst, second: keptSecond, ratio: ratio)
+      case (let keptFirst?, nil):
+        return keptFirst
+      case (nil, let keptSecond?):
+        return keptSecond
+      case (nil, nil):
+        return nil
+      }
+    }
+  }
+
+  /// 去掉工具 Pane 后的布局（v1 不持久化工具 Pane）；只剩工具 Pane 时返回 nil。
+  public func removingToolPanes() -> PaneLayout? {
+    removingPanes { $0.kind == .tool }
+  }
+
   /// 对每个叶节点应用变换，保持树形结构与比例不变。
   private func mappingLeaves(_ transform: (PaneDescriptor) -> PaneDescriptor) -> PaneLayout {
     switch self {
@@ -530,6 +583,49 @@ extension PaneLayout {
       }
       return (takeFirst ? first : second).edgePaneID(alongAxis: axis, takeFirst: takeFirst)
     }
+  }
+}
+
+// MARK: - 工具 Pane 不持久化
+
+// v1 的工具 Pane 只活在内存里：旧版本不认识 `tool`，在容错解码随正式版发布之前，
+// 任何落盘的快照（工作区、最近关闭）都不能出现它。
+
+extension WorkspaceTabSnapshot {
+  /// 去掉工具 Pane 后的标签快照；标签只剩工具 Pane 时返回 nil，表示不保存这个标签。
+  public func removingToolPanes() -> WorkspaceTabSnapshot? {
+    guard let kept = layout.removingToolPanes() else { return nil }
+    guard kept != layout else { return self }
+    var result = self
+    result.layout = kept
+    return result
+  }
+}
+
+extension WorkspaceSnapshot {
+  /// 保存前剔除工具 Pane 与只剩工具 Pane 的标签。
+  ///
+  /// 选中的标签被整个剔除时，改选同一工作区里离它最近的标签（先往后找再往前找）；
+  /// 同一工作区没有剩下的标签时保持原 id，由恢复逻辑回退到第一个标签。
+  public func removingToolPanes() -> WorkspaceSnapshot {
+    let keptTabs = tabs.map { $0.removingToolPanes() }
+    var result = self
+    result.tabs = keptTabs.compactMap { $0 }
+    let keptIDs = Set(result.tabs.map(\.id))
+    result.dividerAfterTabIDs = dividerAfterTabIDs?.filter { keptIDs.contains($0) }
+    if !keptIDs.contains(selectedTabID),
+      let selectedIndex = tabs.firstIndex(where: { $0.id == selectedTabID })
+    {
+      let groupID = tabs[selectedIndex].workspaceGroupID
+      let candidates = Array(keptTabs.indices[(selectedIndex + 1)...])
+        + keptTabs.indices[..<selectedIndex].reversed()
+      if let replacement = candidates.lazy.compactMap({ keptTabs[$0] })
+        .first(where: { $0.workspaceGroupID == groupID })
+      {
+        result.selectedTabID = replacement.id
+      }
+    }
+    return result
   }
 }
 
