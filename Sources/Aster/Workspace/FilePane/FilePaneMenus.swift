@@ -6,6 +6,7 @@ import AsterCore
 enum FilePaneMenus {
   static func source(
     textView: NSTextView, syntax: NSMenu, viewAs: NSMenu? = nil,
+    json: (format: () -> Void, minify: () -> Void)? = nil,
     reload: (() -> Void)?, sendToChat: @escaping () -> Void
   ) -> NSMenu {
     let menu = NSMenu()
@@ -45,6 +46,11 @@ enum FilePaneMenus {
       let view = NSMenuItem(title: L("显示为"), action: nil, keyEquivalent: "")
       view.submenu = viewAs
       menu.addItem(view)
+    }
+    if let json {
+      menu.addItem(.separator())
+      item(L("格式化 JSON"), enabled: textView.isEditable, action: json.format)
+      item(L("压缩 JSON"), enabled: textView.isEditable, action: json.minify)
     }
     if let reload {
       menu.addItem(.separator())

@@ -121,11 +121,15 @@ Pane 通过目标文件父目录的 vnode 事件检查 `contentModificationDate`
 
 Open In 与原生预览公共文件菜单共用 `FilePaneFileActions`：在访达中显示、复制绝对路径、使用默认应用打开和 Open With。后者使用系统关联应用的返回顺序，最多 20 项；不改变默认应用。打开失败显示错误，特殊文件拒绝打开，可执行文件继续确认。
 
+JSON（`.json`、`.geojson`；`.jsonl` 仍按源码或 transcript）在 `FileDocumentClassifier` 中归为 `.json`，走与 Markdown 相同的 Source/Preview 双形态，Preview 是原生 `FileJSONTreeView`（`NSOutlineView`）而非 WebKit。解析在 `FileRenderPipeline` actor 中由 AsterCore 的 `JSONDocumentParser` 完成：不用 `JSONSerialization`，以保留键顺序、重复键和数字原文；解析用显式栈而非递归，因为后台线程栈只有 512 KiB，几百层嵌套的递归下降会栈溢出；嵌套上限 512 层，限制的是仍按层递归的节点释放与序列化。结果以 `.jsonTree` / `.jsonInvalid` 值类型跨 actor 返回，过期修订按既有 revision 丢弃。树节点 `JSONTreeItem` 在展开时才创建子项；树从 `root` 行开始，非空容器的最后一个子项是闭合括号行，`JSONOutlineView.frameOfCell` 把它左移一级与父行文字对齐，且不可选择；容器行文字随展开状态在 `{` 与 `{…} N 项` 之间切换，展开/折叠通知只重载该行。配色取主题 ANSI（键 1、字符串 2、数字 4），布尔与 null 用正文色，标点用半透明正文色。重渲染按位置标识恢复展开状态（对象允许重复键，所以不按键名）。顶层超过 50 项时不自动展开，避免长数组首屏卡顿。树视图暂不接入查找栏。
+
+格式化由 `JSONDocumentFormatter` 完成：先完整解析校验，再只重排 token 之间的空白，字符串、数字和字面量逐字节照抄，所以 `\u4e2d` 转义、大整数和 `1.0` 不被改写；缩进单位取第一条有缩进行的前导空白（tab 或 1–8 个空格），找不到用 2 空格。写回走 `FileSourceTextView.replaceAllText`（`shouldChangeText` → `replaceCharacters` → `didChangeText`），因此进入撤销栈、文档标脏，不会自动保存；解析失败只经 `model.notice` 提示行列。工具栏“格式化”仅在 `.json` 的可编辑 Source 中显示。
+
 图片和 SVG 预览支持倍率、放大/缩小、实际大小和适应窗口；预设为 25/50/75/100/150/200/400%，步进 ×/÷1.25、范围 0.1…16。Markdown、RST、HTML 和纯源码不显示倍率按钮；预览倍率不改变源码字号。仅本地 `.sh` 显示 Run：`AppModel.runShellFile` 创建以脚本父目录为 CWD 的新终端，通过已有就绪命令队列执行 `bash` 加安全转义路径。Run 执行磁盘版本，未保存稿留在原 Pane；远端或非 `.sh` 拒绝。
 
 布局和菜单证据来自现有 Otty 数据库所对应的同 SHA arm64 切片：toolbar `0x1000c2f00`、状态 `0x1000c3670`、源码菜单 `0x1000ca1f0`/`0x1000b7be4`、Web 菜单 `0x1000f1e28`、QL 菜单 `0x1000ac614`、公共动作 `0x1000fd114`、Run `0x1000e2044`。新补证是 LLVM 指令核对，并非新的 REA/Hopper 伪代码导出；不能据此声称实际 Otty 窗口逐像素验收完成。Swift 枚举元数据已恢复 DualMode 的 markdown / rst / svg / html 顺序，kind==2 对应 SVG；倍率按钮因此仅用于 SVG 和图片。
 
-验证入口：`FilePaneMenuTests`、`FilePaneToolbarTests`，连同原有主题、布局、查找与 Chat 测试定向串行运行，避免并发 AppKit 窗口/全局焦点干扰。
+验证入口：`FilePaneMenuTests`、`FilePaneToolbarTests`、`FilePaneJSONTests` 与 AsterCore 的 `JSONDocumentTests`，连同原有主题、布局、查找与 Chat 测试定向串行运行，避免并发 AppKit 窗口/全局焦点干扰。
 
 ### File Pane 文字主题、行号与 Chat 选区
 

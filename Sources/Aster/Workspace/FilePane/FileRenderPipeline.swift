@@ -8,6 +8,9 @@ import Markdown
 enum FileRenderArtifact: Sendable {
   case highlightedRTF(Data)
   case webBody(String)
+  /// JSON 树数据；`JSONNode` 是纯值类型，可安全跨 actor 传递。
+  case jsonTree(JSONNode)
+  case jsonInvalid(JSONParseError)
 }
 
 /// File Pane 只依赖这一条窄渲染边界。生产实现由 actor 串行执行，测试可注入轻量
@@ -50,6 +53,7 @@ actor FileRenderPipeline: FileRendering {
 
   func renderPreview(_ text: String, kind: FilePresentationKind) -> FileRenderArtifact? {
     guard !Task.isCancelled else { return nil }
+    if kind == .json { return Self.jsonArtifact(text) }
     let body: String
     switch kind {
     case .markdown:
@@ -62,6 +66,17 @@ actor FileRenderPipeline: FileRendering {
       return nil
     }
     return Task.isCancelled ? nil : .webBody(body)
+  }
+
+  /// JSON 在 actor 上解析；任务取消时返回 nil，由调用方按过期结果丢弃。
+  private static func jsonArtifact(_ text: String) -> FileRenderArtifact? {
+    do {
+      return .jsonTree(try JSONDocumentParser.parse(text))
+    } catch let error as JSONParseError {
+      return error.reason == .cancelled || Task.isCancelled ? nil : .jsonInvalid(error)
+    } catch {
+      return nil
+    }
   }
 
   private static func restructuredTextHTML(_ text: String) -> String {

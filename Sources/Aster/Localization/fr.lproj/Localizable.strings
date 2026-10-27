@@ -2387,3 +2387,25 @@
 "下一页" = "Suivante";
 
 "第 %@/%@ 页 · 共 %@ 条记录" = "Page %@/%@ · %@ entrées";
+
+/* File Pane JSON 树视图与格式化 */
+"格式化" = "Formater";
+"格式化 JSON" = "Formater le JSON";
+"压缩 JSON" = "Minifier le JSON";
+"复制值" = "Copier la valeur";
+"复制键" = "Copier la clé";
+"全部展开" = "Tout développer";
+"全部折叠" = "Tout réduire";
+"查看源码" = "Voir la source";
+"JSON 树" = "Arbre JSON";
+"文件意外结束" = "Fin de fichier inattendue";
+"意外的字符" = "Caractère inattendu";
+"字符串无效" = "Chaîne invalide";
+"数字无效" = "Nombre invalide";
+"嵌套层级过深" = "Imbrication trop profonde";
+"末尾有多余内容" = "Contenu superflu en fin de fichier";
+"已取消" = "Annulé";
+"无法格式化 JSON。" = "Impossible de formater le JSON.";
+"JSON 无效：第 %@ 行第 %@ 列，%@" = "JSON invalide ligne %@, colonne %@ : %@";
+"树视图" = "Vue arborescente";
+"%@ 项" = "%@ éléments";

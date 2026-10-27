@@ -15,6 +15,10 @@ func fileDocumentClassifierCoversPresentationKinds() {
     FileDocumentClassifier.classify(fileName: "icon.svg", prefix: Data("<svg/>".utf8)) == .svg)
   #expect(FileDocumentClassifier.classify(fileName: "photo.webp", prefix: Data()) == .image)
   #expect(FileDocumentClassifier.classify(fileName: "change.patch", prefix: Data()) == .diff)
+  #expect(FileDocumentClassifier.classify(fileName: "daily.json", prefix: Data("{}".utf8)) == .json)
+  #expect(FileDocumentClassifier.classify(fileName: "map.GeoJSON", prefix: Data("{}".utf8)) == .json)
+  #expect(FileDocumentClassifier.classify(fileName: "events.jsonl", prefix: Data("{}".utf8)) == .sourceText)
+  #expect(FilePresentationKind.json.supportsSourcePreviewToggle && FilePresentationKind.json.supportsEditing)
   #expect(
     FileDocumentClassifier.classify(fileName: "unknown", prefix: Data("plain text".utf8))
       == .sourceText)

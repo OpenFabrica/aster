@@ -46,6 +46,9 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   private var previewRenderRevision = 0
   private var renderedPreviewText: String?
   private var pendingPreviewBody: String?
+  /// JSON 的最近一次解析结果；树视图首次创建时直接使用，不必再等一轮渲染。
+  private var pendingJSONResult: Result<JSONNode, JSONParseError>?
+  private weak var jsonTreeView: FileJSONTreeView?
   private var sourceRenderTask: Task<Void, Never>?
   private var previewRenderTask: Task<Void, Never>?
   /// 监听目标文件的父目录可同时覆盖原位写入与 atomic replace；事件合并后仍由 mtime
@@ -149,6 +152,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       discard: { [weak self] in self?.reloadFromDisk() },
       run: { [weak self] in self?.runShellFile() },
       resume: { [weak self] in self?.resumeHistory() },
+      format: { [weak self] in self?.formatJSON(minify: false) },
       close: { [weak self] in
         guard let self, let tab, tab.runtime(for: runtime.id) === runtime else { return }
         model.select(tab)
@@ -215,6 +219,8 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       previewWebView = nil
       renderedPreviewText = nil
       pendingPreviewBody = nil
+      pendingJSONResult = nil
+      jsonTreeView = nil
       configureModeControl()
       renderContent()
     }.store(in: &cancellables)
@@ -230,6 +236,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     toolbarView?.showZoom(showingPreview && [.svg, .image].contains(presentationKind))
     toolbarView?.runButton.isHidden = fileURL?.pathExtension.lowercased() != "sh" || !model.isLocalMachineActive
     toolbarView?.resumeButton.isHidden = presentationKind != .agentTranscript || !showingPreview
+    toolbarView?.formatButton.isHidden = presentationKind != .json || showingPreview || observedReadOnly
     configureModeControl()
   }
 
@@ -244,10 +251,12 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     renderContent()
   }
 
-  /// Markdown 等双形态文本使用 code/eye；普通源码使用 code/lock。预览专用类型不显示
-  /// 无效开关，避免 transcript、图片或 PDF 出现点了也不能编辑的控件。
+  /// Markdown 等双形态文本使用 code/eye，JSON 使用 code/树；普通源码使用 code/lock。
+  /// 预览专用类型不显示无效开关，避免 transcript、图片或 PDF 出现点了也不能编辑的控件。
   private func configureModeControl() {
     let canPreview = presentationKind.supportsSourcePreviewToggle
+    let previewSymbol = presentationKind == .json ? "list.bullet.indent" : "eye"
+    let previewName = presentationKind == .json ? "Tree" : "Preview"
     modeControl.isHidden = !canPreview && !presentationKind.supportsEditing
     modeControl.setImage(
       NSImage(
@@ -258,13 +267,13 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     )
     modeControl.setImage(
       NSImage(
-        systemSymbolName: canPreview ? "eye" : "lock.fill",
-        accessibilityDescription: canPreview ? "Preview" : "Lock editing"
+        systemSymbolName: canPreview ? previewSymbol : "lock.fill",
+        accessibilityDescription: canPreview ? previewName : "Lock editing"
       ),
       forSegment: 1
     )
     modeControl.setToolTip("Source", forSegment: 0)
-    modeControl.setToolTip(canPreview ? "Preview" : "Lock editing", forSegment: 1)
+    modeControl.setToolTip(canPreview ? previewName : "Lock editing", forSegment: 1)
     modeControl.selectedSegment =
       canPreview ? (showingPreview ? 1 : 0) : (observedReadOnly ? 1 : 0)
   }
@@ -360,6 +369,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     textView.contextMenuProvider = { [weak self, weak textView] in
       guard let self, let textView else { return NSMenu() }
       return FilePaneMenus.source(textView: textView, syntax: makeSyntaxMenu(), viewAs: makeViewAsMenu(),
+      json: makeJSONMenuActions(),
       reload: runtime.isReadOnly || fileURL.map({ !FileManager.default.fileExists(atPath: $0.path) }) != false
         ? nil : { [weak self] in self?.reloadFromDisk() },
         sendToChat: { [weak self] in self?.sendCurrentContentToChat() })
@@ -450,6 +460,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     if let web = transcriptWebView, let body = transcriptBody {
       web.loadHTMLString(AgentTranscriptHTML.document(body: body, style: FilePaneStyle(theme: theme)), baseURL: nil)
     }
+    jsonTreeView?.apply(theme: theme, font: font)
     if let preview = cachedPreviewView as? QLPreviewView { applyPreviewTheme(preview) }
     if let pdf = cachedPreviewView as? PDFView { pdf.backgroundColor = NSColor(theme.palette.renderedTerminalBackground) }
     if presentationKind == .image, let scroll = cachedPreviewView as? NSScrollView {
@@ -474,7 +485,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
 
   private func scheduleSourceRendering(debounced: Bool = false) {
     guard let textView = sourceTextView,
-      [.sourceText, .diff, .markdown, .restructuredText, .html, .svg, .agentTranscript].contains(presentationKind)
+      [.sourceText, .diff, .markdown, .restructuredText, .html, .svg, .json, .agentTranscript].contains(presentationKind)
     else { return }
     sourceRenderRevision += 1
     let revision = sourceRenderRevision
@@ -525,7 +536,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   private func schedulePreviewRendering(text requestedText: String? = nil, debounced: Bool = false) {
     guard presentationKind.supportsSourcePreviewToggle else { return }
     let text = requestedText ?? sourceTextView?.string ?? sourceText()
-    if renderedPreviewText == text, pendingPreviewBody != nil { return }
+    if renderedPreviewText == text, pendingPreviewBody != nil || pendingJSONResult != nil { return }
     previewRenderRevision += 1
     let revision = previewRenderRevision
     let renderer = self.renderer
@@ -542,15 +553,57 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       if revision == previewRenderRevision, showingPreview {
         statusSpinner?.stopAnimation(nil)
       }
-      guard !Task.isCancelled, revision == previewRenderRevision,
-        case .webBody(let body)? = artifact
-      else { return }
-      renderedPreviewText = text
-      pendingPreviewBody = body
-      if showingPreview {
-        let webView = previewWebView ?? (ensurePreviewContent() as? WKWebView)
-        if let webView { loadWebPreview(body, into: webView) }
+      guard !Task.isCancelled, revision == previewRenderRevision, let artifact else { return }
+      switch artifact {
+      case .webBody(let body):
+        renderedPreviewText = text
+        pendingPreviewBody = body
+        if showingPreview {
+          let webView = previewWebView ?? (ensurePreviewContent() as? WKWebView)
+          if let webView { loadWebPreview(body, into: webView) }
+        }
+      case .jsonTree(let node):
+        renderedPreviewText = text
+        applyJSONResult(.success(node))
+      case .jsonInvalid(let error):
+        renderedPreviewText = text
+        applyJSONResult(.failure(error))
+      case .highlightedRTF:
+        return
       }
+    }
+  }
+
+  /// 记下最新 JSON 结果；树视图已存在时就地更新，并保留展开状态。
+  private func applyJSONResult(_ result: Result<JSONNode, JSONParseError>) {
+    pendingJSONResult = result
+    jsonTreeView?.update(result: result)
+  }
+
+  /// 源码右键菜单里的 JSON 动作；非 JSON 文件返回 nil，菜单不显示这一组。
+  private func makeJSONMenuActions() -> (format: () -> Void, minify: () -> Void)? {
+    guard presentationKind == .json else { return nil }
+    return (format: { [weak self] in self?.formatJSON(minify: false) },
+      minify: { [weak self] in self?.formatJSON(minify: true) })
+  }
+
+  /// JSON 格式化 / 压缩当前编辑稿（含未保存修改），沿用文档原有缩进。
+  /// 语法错误时不改文本，只提示出错行列。
+  private func formatJSON(minify: Bool) {
+    guard presentationKind == .json, let textView = sourceTextView as? FileSourceTextView,
+      textView.isEditable
+    else { return }
+    let text = textView.string
+    do {
+      let formatted = minify
+        ? try JSONDocumentFormatter.minify(text)
+        : try JSONDocumentFormatter.format(text, indent: JSONDocumentFormatter.detectIndent(in: text))
+      guard formatted != text else { return }
+      textView.replaceAllText(formatted)
+    } catch let error as JSONParseError {
+      model.notice = error.localizedSummary
+    } catch {
+      model.notice = L("无法格式化 JSON。")
     }
   }
 
@@ -566,6 +619,8 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     switch presentationKind {
     case .markdown, .restructuredText, .html, .svg:
       return makeWebPreview(baseURL: fileURL.deletingLastPathComponent())
+    case .json:
+      return makeJSONTree()
     case .image:
       guard let image = NSImage(contentsOf: fileURL) else {
         return messageView("Unable to decode this image.", symbol: "photo")
@@ -642,6 +697,20 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       }
       return hex
     }
+  }
+
+  private func makeJSONTree() -> NSView {
+    let tree = FileJSONTreeView(theme: preferences.activeTheme, font: preferences.terminalFontVariants.normal)
+    tree.onShowSource = { [weak self] in
+      guard let self else { return }
+      modeControl.selectedSegment = 0
+      changePresentationMode()
+    }
+    tree.onSendToChat = { [weak self] in self?.sendCurrentContentToChat() }
+    tree.fileActionsMenu = { [weak self] in self?.fileActionsMenu() ?? NSMenu() }
+    if let pendingJSONResult { tree.update(result: pendingJSONResult) }
+    jsonTreeView = tree
+    return tree
   }
 
   private func applyPreviewTheme(_ preview: QLPreviewView) {
@@ -900,6 +969,9 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
           self.model.notice = L("无法读取预览选区，请重试。")
         }
       }
+    } else if showingPreview, let tree = jsonTreeView {
+      model.presentFileChat(FileChatContext(path: fileURL.path, selection: tree.selectionTextForChat(),
+        lines: nil), originPaneID: paneID)
     } else if let pdf = cachedPreviewView as? PDFView {
       model.presentFileChat(FileChatContext(path: fileURL.path, selection: pdf.currentSelection?.string,
         lines: nil), originPaneID: paneID)

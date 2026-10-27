@@ -2389,3 +2389,25 @@
 "下一页" = "Next";
 
 "第 %@/%@ 页 · 共 %@ 条记录" = "Page %@/%@ · %@ records";
+
+/* File Pane JSON 树视图与格式化 */
+"格式化" = "Format";
+"格式化 JSON" = "Format JSON";
+"压缩 JSON" = "Minify JSON";
+"复制值" = "Copy Value";
+"复制键" = "Copy Key";
+"全部展开" = "Expand All";
+"全部折叠" = "Collapse All";
+"查看源码" = "View Source";
+"JSON 树" = "JSON Tree";
+"文件意外结束" = "Unexpected end of file";
+"意外的字符" = "Unexpected character";
+"字符串无效" = "Invalid string";
+"数字无效" = "Invalid number";
+"嵌套层级过深" = "Nesting too deep";
+"末尾有多余内容" = "Unexpected trailing content";
+"已取消" = "Cancelled";
+"无法格式化 JSON。" = "Unable to format JSON.";
+"JSON 无效：第 %@ 行第 %@ 列，%@" = "Invalid JSON at line %@, column %@: %@";
+"树视图" = "Tree View";
+"%@ 项" = "%@ items";

@@ -10,6 +10,8 @@ final class FilePaneToolbar: NSView {
   let openButton: NSButton
   let runButton: NSButton
   let resumeButton: NSButton
+  /// JSON 源码模式的“格式化”；显隐由文件 Pane 按分类与可编辑状态决定。
+  let formatButton: NSButton
   private let saveButton: NSButton
   private let discardButton: NSButton
   private let closeButton: NSButton
@@ -23,7 +25,7 @@ final class FilePaneToolbar: NSView {
 
   init(mode: NSSegmentedControl, send: @escaping () -> Void, open: @escaping () -> Void,
     save: @escaping () -> Void, discard: @escaping () -> Void, run: @escaping () -> Void,
-    resume: (() -> Void)? = nil, close: @escaping () -> Void) {
+    resume: (() -> Void)? = nil, format: (() -> Void)? = nil, close: @escaping () -> Void) {
     func action(_ title: String, symbol: String, id: String, handler: @escaping () -> Void) -> NSButton {
       let button = ActionButton(title: title, bezelStyle: .inline, handler: handler)
       button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)?
@@ -49,6 +51,8 @@ final class FilePaneToolbar: NSView {
     savedButton.isEnabled = false
     resumeButton = action("Resume", symbol: "play.circle", id: "file-pane-resume") { resume?() }
     resumeButton.isHidden = resume == nil
+    formatButton = action(L("格式化"), symbol: "curlybraces", id: "file-pane-format") { format?() }
+    formatButton.isHidden = true
     let chat = IconHoverButton(symbol: "bubble.left", accessibilityDescription: "Send to Chat", handler: send)
     chat.identifier = .init("file-pane-send-to-chat")
     chat.toolTip = L("发送到 Chat") + "…"
@@ -60,7 +64,7 @@ final class FilePaneToolbar: NSView {
     runButton.identifier = .init("file-pane-run")
     runButton.toolTip = L("运行脚本")
     self.runButton = runButton
-    let captions = [(saveButton, L("保存")), (discardButton, L("放弃更改")),
+    let captions = [(formatButton, L("格式化")), (saveButton, L("保存")), (discardButton, L("放弃更改")),
       (savedButton, L("已保存")), (resumeButton, "Resume"), (closeButton, L("关闭文件"))]
     self.captions = captions
     captionWidths = captions.map { button, _ in
@@ -115,7 +119,7 @@ final class FilePaneToolbar: NSView {
     spinner.style = .spinning
     spinner.controlSize = .small
     spinner.isDisplayedWhenStopped = false
-    let trailing = NSStackView(views: [spinner, status, saveButton, discardButton, savedButton, resumeButton, closeButton])
+    let trailing = NSStackView(views: [spinner, status, formatButton, saveButton, discardButton, savedButton, resumeButton, closeButton])
     trailing.orientation = .horizontal
     trailing.alignment = .centerY
     trailing.spacing = 5

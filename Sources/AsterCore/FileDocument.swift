@@ -11,13 +11,15 @@ public enum FilePresentationKind: String, Equatable, Sendable {
   case pdf
   case richDocument
   case diff
+  /// JSON 文档：源码可编辑，Preview 为可折叠树。
+  case json
   case agentTranscript
   case sourceText
   case binary
 
   public var supportsSourcePreviewToggle: Bool {
     switch self {
-    case .markdown, .restructuredText, .html, .svg, .agentTranscript: true
+    case .markdown, .restructuredText, .html, .svg, .json, .agentTranscript: true
     default: false
     }
   }
@@ -26,14 +28,14 @@ public enum FilePresentationKind: String, Equatable, Sendable {
   /// renderer 直接、有界读取，不能先尝试 UTF-8 解码并制造伪错误状态。
   public var usesTextContent: Bool {
     switch self {
-    case .markdown, .restructuredText, .html, .svg, .diff, .agentTranscript, .sourceText: true
+    case .markdown, .restructuredText, .html, .svg, .json, .diff, .agentTranscript, .sourceText: true
     case .image, .pdf, .richDocument, .binary: false
     }
   }
 
   public var supportsEditing: Bool {
     switch self {
-    case .markdown, .restructuredText, .html, .svg, .sourceText: true
+    case .markdown, .restructuredText, .html, .svg, .json, .sourceText: true
     default: false
     }
   }
@@ -70,6 +72,7 @@ public enum FileDocumentClassifier {
     if ["rst", "rest"].contains(ext) { return .restructuredText }
     if ["html", "htm"].contains(ext) { return .html }
     if ext == "svg" { return .svg }
+    if ["json", "geojson"].contains(ext) { return .json }
     if imageExtensions.contains(ext) { return .image }
     if ext == "pdf" { return .pdf }
     if ["diff", "patch"].contains(ext) { return .diff }
