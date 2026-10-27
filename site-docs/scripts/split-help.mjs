@@ -25,6 +25,7 @@ const SLUGS = {
   "Working with Agents": "working-with-agents",
   "项目记忆（Session Memory）": "session-memory", "Project Memory (Session Memory)": "session-memory",
   "十类设置": "settings", "十一类设置": "settings", "Eleven Settings Categories": "settings",
+  "让编程 agent 在主机上执行命令": "agent-host-access", "Let Coding Agents Run Commands on Hosts": "agent-host-access",
   "Quick Terminal 快速终端": "quick-terminal", "Quick Terminal": "quick-terminal",
   "远端会话恢复": "remote-session-restore", "Remote Session Restore": "remote-session-restore",
   "SSH 主机与快速连接": "ssh-hosts", "SSH Hosts and Quick Connect": "ssh-hosts",
@@ -37,7 +38,7 @@ const SLUGS = {
 const GROUPS = [
   { zh: "开始", en: "Start", slugs: ["index", "getting-started"] },
   { zh: "界面", en: "Interface", slugs: ["tabs-and-layouts", "splits-and-panes", "files-and-preview", "search-and-command-palette", "quick-terminal", "workspaces"] },
-  { zh: "工作流", en: "Workflows", slugs: ["recipes-and-restore", "cli-and-deep-links", "working-with-agents", "remote-machines", "remote-session-restore", "ssh-hosts", "session-memory", "frequent-directories"] },
+  { zh: "工作流", en: "Workflows", slugs: ["recipes-and-restore", "cli-and-deep-links", "working-with-agents", "remote-machines", "remote-session-restore", "ssh-hosts", "agent-host-access", "session-memory", "frequent-directories"] },
   { zh: "配置", en: "Configuration", slugs: ["settings", "themes", "software-update", "diagnostics", "faq"] },
 ];
 
