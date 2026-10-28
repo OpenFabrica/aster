@@ -422,6 +422,15 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     scroll.hasHorizontalRuler = false
     scroll.rulersVisible = preferences.configuration.editor.showLineNumbers
     sourceScrollView = scroll
+    // 滚动区嵌在 Pane 外框深处，`viewDidLayout` 运行时它可能还没拿到 frame。以前分屏首轮
+    // 布局会多出一次「整宽再缩回」的尺寸变化，碰巧再触发一次排版；现在分屏一次到位，
+    // 必须由滚动区自己的尺寸变化驱动，否则切回标签后正文容器停在无限宽。
+    scroll.postsFrameChangedNotifications = true
+    NotificationCenter.default.publisher(for: NSView.frameDidChangeNotification, object: scroll)
+      .sink { [weak self] _ in
+        MainActor.assumeIsolated { self?.updateSourceLayout() }
+      }
+      .store(in: &cancellables)
     updateSourceLayout()
     return scroll
   }

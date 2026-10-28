@@ -79,7 +79,7 @@ PiP 从现有 `TerminalSession` 的 Ghostty GPU 帧构建系统 AVKit 镜像；�
 
 Ghostty surface 不挂 AppKit overlay `NSScroller`；滚动历史由 surface 自己处理，不在右侧预留额外宽度。
 
-**分屏容器的尺寸约束**：`NSSplitView` 的子视图走 autoresizing，它无法反推内容尺寸，于是给每个子视图加 `PreferredSize/FallbackSize`（`height == 0 @250`）回退约束，自身在分隔方向的垂直方向上只剩分隔条厚度的固有尺寸。因此容器链两个方向都必须给必需约束：内容区绑定到外层 stack 的宽/高，`wrapper` 钉到 stack 底边，无 Composer 时 Pane 区直接钉到 `inner` 底边，有 Composer 时由 Composer 占据底边。只约束宽度时，上下分屏会把整个内容区塌成一条分隔条，两个终端高度都是 0（表现为窗口大面积空白、标题区被挤到垂直中央）。`PersistedSplitView.layout()` 还要等容器给出有效尺寸（>1pt）后才定位分隔条，否则首轮布局会把比例锁死在无效值上。
+**分屏容器的尺寸约束**：`NSSplitView` 的子视图走 autoresizing，它无法反推内容尺寸，于是给每个子视图加 `PreferredSize/FallbackSize`（`height == 0 @250`）回退约束，自身在分隔方向的垂直方向上只剩分隔条厚度的固有尺寸。因此容器链两个方向都必须给必需约束：内容区绑定到外层 stack 的宽/高，`wrapper` 钉到 stack 底边，无 Composer 时 Pane 区直接钉到 `inner` 底边，有 Composer 时由 Composer 占据底边。只约束宽度时，上下分屏会把整个内容区塌成一条分隔条，两个终端高度都是 0（表现为窗口大面积空白、标题区被挤到垂直中央）。`PersistedSplitView.layout()` 还要等容器给出有效尺寸（>1pt）后才定位分隔条，否则首轮布局会把比例锁死在无效值上。首轮求解里回退约束会先把整块长度给第一个子视图、第二个为 0，`layout()` 的 `setPosition` 随后才拉回比例；切回标签时工作区整树重建，终端 Pane 会把这个瞬时整宽当成真实尺寸写进 PTY（实测 110 列先跳到 223 列再回来），Claude Code 等内联 TUI 按错误宽度重画一次后画面错乱、点一下才恢复。因此 `PersistedSplitView` 额外给第一个子视图加一条 `@251` 的按比例约束（只比回退约束高一级），首轮求解就落在比例位置；比例变化（拖动、双击等分）时整条换掉。依赖「多一轮尺寸变化」的子视图要自己监听尺寸：文件 Pane 的源码滚动区用 `frameDidChangeNotification` 驱动排版。
 
 **分隔条与 Pane 拖放**：`PersistedSplitView` 的 `dividerThickness` 是 6pt 的命中区，`drawDivider(in:)` 只画中间 1pt（悬停 2pt）——默认 `AsterTheme.divider`，仅在「窗口是 key 且指针压在命中区上」时换成 `NSColor.controlAccentColor`（系统强调色，默认蓝；分隔条是工作区结构控件，与把手一样不走终端主题）；命中区 `NSTrackingArea` 由两个子视图的间隙算出，并在 `splitViewDidResizeSubviews` 里重建（自身 frame 不变时 AppKit 不会重建它）。移除感应区不会补发 `mouseExited`，指针恰好停在旧感应区里时高亮会卡住，因此每次重建后用 `mouseLocationOutsideOfEventStream` 对齐一次悬停状态。比例一律针对「扣掉分隔条的可用长度」，否则第一块会固定多出一个分隔条厚度。双击分隔条恢复等分。
 

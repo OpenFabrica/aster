@@ -10,7 +10,17 @@ final class PersistedSplitView: NSSplitView, NSSplitViewDelegate {
   private static let hitThickness: CGFloat = 6
   /// 当前生效的分割比例。初始为持久化值；用户拖动分隔条或双击等分时同步更新,
   /// `layout()` 以它为真值把分隔条收敛到位(见 `layout()` 注释)。
-  private var currentRatio: Double
+  private var currentRatio: Double {
+    didSet {
+      // 约束的 multiplier 不可变：比例变了就换一条，下一轮 `updateConstraints()` 重建。
+      guard oldValue != currentRatio else { return }
+      ratioConstraint?.isActive = false
+      ratioConstraint = nil
+      needsUpdateConstraints = true
+    }
+  }
+  /// 让第一个子视图按 `currentRatio` 占可用长度的约束，见 `updateConstraints()`。
+  private var ratioConstraint: NSLayoutConstraint?
   private let onRatioChanged: (Double) -> Void
   private var isUserResizing = false
   /// `setPosition` 会同步触发下一轮 `layout()`;没有门闩会在帧未就位时无限重入直至爆栈。
@@ -32,6 +42,30 @@ final class PersistedSplitView: NSSplitView, NSSplitViewDelegate {
   required init?(coder: NSCoder) { nil }
 
   override var dividerThickness: CGFloat { Self.hitThickness }
+
+  /// 新建的分屏（切回标签时整树重建）首轮约束求解里没有分隔条位置，NSSplitView 的
+  /// `FallbackSize == 0 @250` 回退约束会先把整块长度给第一个子视图、第二个为 0，
+  /// 之后才被 `layout()` 里的 `setPosition` 拉回比例。终端 Pane 会把这个瞬时整宽当成
+  /// 真实尺寸上报给 PTY，内联 TUI（Claude Code）按错误宽度重画一次，再被挤回原宽度后
+  /// 画面错乱。这条按比例分配的约束只比回退约束高一级，首轮求解就落在比例位置。
+  /// 它与 `setPosition` 写入的 @250 位置约束指向同一个比例：拖动和双击等分都先更新
+  /// `currentRatio`（随即换掉这条约束），所以两者不会互相拉扯，拖动也不受阻。
+  override func updateConstraints() {
+    if ratioConstraint == nil, arrangedSubviews.count == 2 {
+      let first = arrangedSubviews[0]
+      let ratio = CGFloat(currentRatio)
+      let constraint =
+        isVertical
+        ? first.widthAnchor.constraint(
+          equalTo: widthAnchor, multiplier: ratio, constant: -dividerThickness * ratio)
+        : first.heightAnchor.constraint(
+          equalTo: heightAnchor, multiplier: ratio, constant: -dividerThickness * ratio)
+      constraint.priority = NSLayoutConstraint.Priority(251)
+      constraint.isActive = true
+      ratioConstraint = constraint
+    }
+    super.updateConstraints()
+  }
 
   /// 只画中间 1pt（悬停时 2pt）的线，命中区其余部分留白透出容器底色，
   /// 视觉上仍是 Otty 那条细分隔线。
