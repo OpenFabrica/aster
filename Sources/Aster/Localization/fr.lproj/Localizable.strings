@@ -2838,3 +2838,6 @@
 "在运行 Claude Code 的 Pane 底部显示这个会话的模型、状态、输出速率、上下文与累计输出" = "Affiche le modèle, l’état, le débit de sortie, le contexte et la sortie totale de la session en bas des volets qui exécutent Claude Code";
 "Claude Code 速率" = "Débit Claude Code";
 "调整状态条高度" = "Redimensionner la barre d’état";
+"系统状态条" = "Barre d’état du système";
+"在窗口底部显示本机的 CPU、内存、磁盘与网络" = "Affiche le processeur, la mémoire, le disque et le réseau de ce Mac en bas de la fenêtre";
+"系统状态" = "État du système";

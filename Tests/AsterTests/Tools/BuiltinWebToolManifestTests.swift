@@ -26,7 +26,7 @@ func builtinWebToolManifestsDecode() throws {
   let manifests = try builtinManifests()
   #expect(manifests.map(\.directory) == [
     "aster.claudebar", "aster.codexbar", "aster.color", "aster.diff", "aster.gitbar", "aster.jwt", "aster.password",
-    "aster.regex",
+    "aster.regex", "aster.sysbar",
   ])
   for (directory, manifest) in manifests {
     #expect(manifest.id == directory)

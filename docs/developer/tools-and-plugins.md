@@ -28,7 +28,7 @@ v1 范围：
 | 网页运行时 | `Sources/Aster/Tools/Web/` | `WebToolViewController`、`aster-plugin://` scheme handler、桥接、`Resources/tool-runtime/aster-bridge.js`。 |
 | 入口 | `Sources/Aster/Tools/Launcher/`、Open Quickly、`AppModel+Tools.swift` | 工具面板、全局快捷键、Open Quickly「工具」页、工具 Pane、命令面板与菜单入口。 |
 | 设置 | `SettingsToolsBridge.swift`、`Resources/settings-ui/tools.js` | 设置页「工具」分类（含视图的开关与位置）。 |
-| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写；`aster.gitbar`、`aster.codexbar`、`aster.claudebar` 只贡献视图。 |
+| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写；`aster.gitbar`、`aster.codexbar`、`aster.claudebar`、`aster.sysbar` 只贡献视图。 |
 
 应用层只通过 `Sources/Aster/Tools/ToolContracts.swift` 里的类型交互：入口与设置页不直接读插件目录、
 不直接创建 WebView 或进程。
@@ -178,6 +178,7 @@ v1 范围：
 | `aster.gitbar` | 示例：`activePane.bottom` 状态条（跟着当前 Pane 走），显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
 | `aster.codexbar` | `pane.bottom` 状态条：运行 Codex 的 Pane 显示该会话的模型 · 思考等级、状态、最近用量区间的输入 / 输出速率、累计；见「内置 Agent 速率条」 | — | `exec`、`clipboard.write` |
 | `aster.claudebar` | `pane.bottom` 状态条：运行 Claude Code 的 Pane 显示该会话的模型 · 思考等级、状态、最近一条回复的输出速率、上下文大小、累计输出 | — | `exec`、`clipboard.write` |
+| `aster.sysbar` | `window.bottom` 状态条：本机 CPU、内存（已用 / 总量）、数据卷剩余空间、Wi-Fi / 以太网上下行速率；只用系统命令，不需要 Python；见「内置系统状态条」 | — | `exec` |
 | `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
 - 输入分配：JWT 与颜色的 `enter`/`query` 都填输入框；正则的 `enter` 填测试文本（单行 `/…/flags` 填进正则），
@@ -672,6 +673,22 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 - 状态优先用 stdin 里 Aster 的 `agent.state`（`processing` 进行中、`awaitingInput` 等待确认、其它待输入）；进行中 `ttl` 5，
   否则 30。点击模型项复制会话 ID。文案按 `ASTER_LOCALE` 选中文或英文。
 
+### 内置系统状态条：`aster.sysbar`
+
+只贡献一个 `window.bottom` 的 bar `stats`（权限只有 `exec`；`refresh {interval: 10, on: []}`，只按时间刷新，超时 5 s）。
+`bin/sysbar.sh` 是纯 `sh` + `awk`，只调系统自带命令，没装 Command Line Tools 也能用；一次约 80 ms。
+
+- **CPU**：`ps -A -o %cpu` 求和 ÷ `hw.logicalcpu`。`ps` 的 `%cpu` 是近期衰减平均，不用像 `top -l 2` 那样采样等一秒。≥ 80% 显示 warning 色。
+- **内存**：按活动监视器的「已使用内存」= App 内存（`vm_stat` 的匿名页 − 可清除页）+ 联动内存 + 被压缩，总量取 `hw.memsize`，
+  按 1024 进位；≥ 90% warning。
+- **磁盘**：`df -Pk /System/Volumes/Data`（没有时用 `/`）的可用空间，按 1000 进位（和访达一致）；不含可清除空间，所以比访达略少。
+  剩余 < 10% warning、< 5% error。
+- **网络**：`netstat -ibn` 只累计名字是 `en<数字>`（在线，名字不带 `*`）的 `<Link#>` 行；VPN 的 `utun` 流量也经过 `en`，再算会重复。
+  从行尾数列取 `Ibytes` / `Obytes`。速率要两次采样：上次的「时间 收 发 下行 上行 间隔」存在
+  `$ASTER_PLUGIN_DATA/network.state`，各窗口共用、写临时文件再改名；两次间隔 < 2 s（别的窗口刚跑过）时沿用上次速率、不改基准；
+  计数变小（接口重置）时这次不显示网速。刚存下基准时输出 `ttl: 5`，让网速尽快出现；没有数据目录时不显示网速。
+- 文案按 `ASTER_LOCALE` 选中文或英文；没有点击动作。
+
 ### 内置示例：`aster.gitbar`
 
 `Resources/tools-builtin/aster.gitbar/`：没有功能、没有网页，只贡献一个 `activePane.bottom` 的 bar `branch`（用户可在设置页改回 `tab.bottom`）（权限 `exec`、
@@ -760,7 +777,7 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 只跑定向用例：`./scripts/test.sh --filter <name>`。覆盖：清单校验（每条拒绝规则）、匹配与拼音、信任状态机、
 摘要、脚本协议解析与上限、桥接参数与授权、内置转换；scheme handler 路径越界、桥接未授权拒绝、脚本超时与
 输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作；加密存储的密文格式、密钥丢失与预埋条目、
-剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）。
+剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）、`aster.sysbar` 脚本（预置网速基准，`BuiltinSysbarTests`）。
 
 ## 独立工具窗口
 

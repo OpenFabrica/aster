@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.sysbar",
+  "name": "系统状态条",
+  "version": "1.0.0",
+  "description": "在窗口底部显示本机的 CPU、内存、磁盘与网络",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "permissions": ["exec"],
+  "contributes": {
+    "views": [
+      {
+        "id": "stats",
+        "title": "系统状态",
+        "kind": "bar",
+        "slot": "window.bottom",
+        "source": { "type": "script", "command": ["bin/sysbar.sh"], "timeout": 5 },
+        "refresh": { "interval": 10, "on": [] }
+      }
+    ]
+  }
+}
