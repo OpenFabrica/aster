@@ -78,7 +78,6 @@ final class ToolBarListView: NSView {
       return { [weak self] in self?.onItem?(segmentID, item) }
     case .failure: return { [weak self] in self?.onRetry?(segmentID) }
     case .approval: return { [weak self] in self?.onApprove?(segmentID) }
-    case .overflow: return nil
     }
   }
 

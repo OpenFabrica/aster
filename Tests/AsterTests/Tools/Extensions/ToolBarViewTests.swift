@@ -1,5 +1,5 @@
-// 原生 bar：放不下的项目收进「…」菜单、全空时整条隐藏且高度归零、失败段显示错误摘要并可点重跑、
-// 按钮跨刷新复用、运行超过 1 s 才出 spinner。
+// 原生 bar：单行放不下时左右滚动、全空时整条隐藏且高度归零、失败段显示错误摘要并可点重跑、
+// 按钮跨刷新复用、运行超过 1 s 才出 spinner。拖高与多行布局见 ToolBarViewResizeTests.swift。
 import AppKit
 import AsterCore
 import Testing
@@ -9,21 +9,21 @@ import Testing
 @MainActor
 @Suite("界面扩展：原生 bar 视图")
 struct ToolBarViewTests {
-  private func segment(
+  func segment(
     _ id: String = "p/view:bar", items: [ToolBarItem], runningSince: Date? = nil
   ) -> ToolBarSegment {
     ToolBarSegment(id: id, pluginName: "Test", iconPath: nil, content: .items(items), runningSince: runningSince)
   }
 
-  private func makeBar(width: CGFloat) -> ToolBarView {
+  func makeBar(width: CGFloat) -> ToolBarView {
     let bar = ToolBarView(slot: .tabBottom, height: 26)
     bar.translatesAutoresizingMaskIntoConstraints = true
     bar.frame = NSRect(x: 0, y: 0, width: width, height: 26)
     return bar
   }
 
-  @Test("总宽放不下时从第一个放不下的项目起收进「…」菜单，选菜单项等同点击")
-  func overflowItemsMoveIntoMenu() {
+  @Test("单行放不下时不再收进「…」菜单：全部项目排成一行，左右滚动，滚轮纵向输入转成横向")
+  func singleRowOverflowScrollsHorizontally() throws {
     let bar = makeBar(width: 200)
     var clicked: [String] = []
     bar.onItem = { _, item in clicked.append(item.text ?? "") }
@@ -31,22 +31,36 @@ struct ToolBarViewTests {
     bar.apply(segments: [segment(items: items)])
     bar.layoutSubtreeIfNeeded()
     #expect(!bar.isHidden)
-    #expect(bar.isOverflowVisible)
-    #expect(!bar.overflowedButtons.isEmpty)
-    #expect(bar.visibleButtons.count + bar.overflowedButtons.count == 10)
-    #expect(bar.visibleButtons.allSatisfy { $0.frame.maxX <= 200 - 8 })
-    let menu = bar.makeOverflowMenu()
-    #expect(menu.items.count == bar.overflowedButtons.count)
-    #expect(menu.items.first?.title == "item \(bar.visibleButtons.count)")
-    let first = menu.items[0]
-    if let action = first.action { NSApp.sendAction(action, to: first.target, from: first) }
-    #expect(clicked == ["item \(bar.visibleButtons.count)"])
+    #expect(bar.rows == 1)
+    #expect(bar.visibleButtons.count == 10)
+    #expect(Set(bar.visibleButtons.map(\.frame.minY)).count == 1, "单行不换行")
+    let scroll = bar.scrollView
+    #expect(scroll.convertsVerticalWheel)
+    #expect(scroll.canScrollHorizontally)
+    #expect(!scroll.canScrollVertically)
+    #expect(scroll.contentView.bounds.origin.x == 0)
 
-    // 加宽后全部放得下，「…」消失。
+    // 鼠标滚轮向下（deltaY 为负）= 往右看后面的项目。
+    let wheel = try #require(
+      CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -30, wheel2: 0, wheel3: 0)
+        .flatMap(NSEvent.init(cgEvent:)))
+    scroll.scrollWheel(with: wheel)
+    #expect(abs(scroll.contentView.bounds.origin.x - 30) < 0.5)
+    // 夹在内容范围内。
+    scroll.scrollHorizontally(by: -10_000)
+    let maxX = try #require(scroll.documentView).frame.width - scroll.contentView.bounds.width
+    #expect(abs(scroll.contentView.bounds.origin.x - maxX) < 0.5)
+    // 最后一项滚进来后照常可点。
+    let last = try #require(bar.visibleButtons.last)
+    #expect(last.frame.maxX <= scroll.contentView.bounds.maxX)
+    last.onPress?()
+    #expect(clicked == ["item 9"])
+
+    // 加宽后全部放得下，不再能滚，滚动位置收回。
     bar.frame.size.width = 2_000
     bar.layoutSubtreeIfNeeded()
-    #expect(!bar.isOverflowVisible)
-    #expect(bar.visibleButtons.count == 10)
+    #expect(!scroll.canScrollHorizontally)
+    #expect(scroll.contentView.bounds.origin.x == 0)
   }
 
   @Test("全部段都为空时整条隐藏且高度归零；有项目时恢复条高")
@@ -103,7 +117,9 @@ struct ToolBarViewTests {
     bar.now = { now }
     bar.apply(segments: [segment(items: [ToolBarItem(text: "main")], runningSince: start)])
     bar.layoutSubtreeIfNeeded()
-    let spinners = { bar.subviews.compactMap { $0 as? NSProgressIndicator }.filter { !$0.isHidden } }
+    let spinners = {
+      (bar.scrollView.documentView?.subviews ?? []).compactMap { $0 as? NSProgressIndicator }.filter { !$0.isHidden }
+    }
     #expect(spinners().isEmpty)
     now = start.addingTimeInterval(1.5)
     bar.needsLayout = true

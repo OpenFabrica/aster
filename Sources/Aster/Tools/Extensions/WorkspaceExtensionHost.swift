@@ -73,6 +73,8 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   private let catalog: ToolViewCatalog
   private let services: ToolBridgeServices
   private var bars: [ToolViewSlot: ToolBarView] = [:]
+  /// 拖高后的条高，按窗口 suite 记住；`pane.bottom` 所有 Pane 共用一个值。
+  let barHeights: ToolBarHeightStore
   private let panelEntriesSubject = PassthroughSubject<Void, Never>()
   private var cancellables: Set<AnyCancellable> = []
   private var tabSubscriptions: Set<AnyCancellable> = []
@@ -93,6 +95,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     self.preferences = preferences
     self.catalog = catalog
     self.services = services
+    barHeights = ToolBarHeightStore(defaults: model.defaults)
     context = ToolBarContext()
     scheduler = ToolBarScheduler(runner: runner ?? ToolBarFeed.liveRunner(), clock: clock)
     panelCache = ToolPanelSessionCache(model: model)
@@ -375,7 +378,16 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     bar.onItem = { [weak self] id, item in self?.perform(item, entryID: id) }
     bar.onRetry = { [weak self] id in self?.scheduler.refresh(entryID: id) }
     bar.onApprove = { [weak self] id in self?.approve(entryID: id) }
+    bar.restoreHeight(barHeights.height(for: slot))
+    bar.onHeightCommit = { [weak self] height in self?.barHeightDidCommit(height, slot: slot) }
     return bar
+  }
+
+  /// 条拖高松开或双击复位：按位置记住；`pane.bottom` 共用一个值，其它 Pane 的条跟着变。
+  private func barHeightDidCommit(_ height: Double, slot: ToolViewSlot) {
+    barHeights.setHeight(height, for: slot)
+    guard slot == .paneBottom else { return }
+    paneBars.paneIDs.compactMap(paneBars.existingBar(for:)).forEach { $0.restoreHeight(height) }
   }
 
   /// 某个视图的内容变了：只重画它所在的那条。

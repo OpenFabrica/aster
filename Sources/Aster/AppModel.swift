@@ -1734,7 +1734,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var floatingPaneID: UUID?
   /// 控制协议 `pane.focus` 需要把本窗口前置；AppKit 窗口由 AppDelegate 持有，模型只发意图。
   var onRequestWindowFocus: (() -> Void)?
-  private let defaults: UserDefaults
+  /// 本窗口的 UserDefaults suite（主窗口是标准域，附加窗口各自独立）；窗口级的界面状态（如插件条高度）也存这里。
+  let defaults: UserDefaults
   private let snapshotKey = "aster.workspace.snapshot.v1"
   /// 合并窗口内是否已有待执行的快照写入；见 `schedulePersistWorkspace()`。
   private var workspacePersistScheduled = false

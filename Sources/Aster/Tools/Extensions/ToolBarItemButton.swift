@@ -68,11 +68,9 @@ final class ToolBarItemButton: NSControl {
     case failure(message: String, iconPath: String?)
     /// 需要授权，点击弹授权确认。
     case approval(pluginName: String)
-    /// 溢出菜单入口「…」。
-    case overflow
   }
 
-  private(set) var content: Content = .overflow
+  private(set) var content: Content = .item(ToolBarItem())
   var palette = ToolBarPalette.resolve(theme: nil) {
     didSet { applyColors() }
   }
@@ -125,11 +123,6 @@ final class ToolBarItemButton: NSControl {
       iconView.image = Self.symbol("lock", size: symbolSize)
       label.stringValue = L("需要授权")
       toolTip = L("插件「\(pluginName)」需要授权才能运行")
-      setAccessibilityLabel(toolTip)
-    case .overflow:
-      iconView.image = Self.symbol("ellipsis", size: symbolSize)
-      label.stringValue = ""
-      toolTip = L("更多")
       setAccessibilityLabel(toolTip)
     }
     label.isHidden = label.stringValue.isEmpty
@@ -206,7 +199,7 @@ final class ToolBarItemButton: NSControl {
     switch content {
     case .item(let item): tint = palette.color(for: item.color)
     case .approval: tint = palette.accent
-    case .failure, .overflow: tint = palette.text
+    case .failure: tint = palette.text
     }
     label.textColor = tint
     iconView.contentTintColor = tint
@@ -234,7 +227,7 @@ final class ToolBarItemButton: NSControl {
     setPressed(false)
   }
 
-  /// 隐藏（溢出）时收不到 `mouseExited`，重新显示会残留悬停态。
+  /// 隐藏时收不到 `mouseExited`，重新显示会残留悬停态。
   override var isHidden: Bool {
     didSet {
       guard isHidden else { return }
@@ -263,18 +256,14 @@ final class ToolBarItemButton: NSControl {
     return true
   }
 
-  /// 菜单里显示的标题：文字，否则 tooltip，否则符号名。
+  /// 项目的文字标题（侧栏列表与测试用）：文字，否则 tooltip，否则符号名。
   var menuTitle: String {
     switch content {
     case .item(let item): item.text ?? item.tooltip ?? item.symbol ?? L("项目")
     case .failure(let message, _): L("运行失败：\(message)")
     case .approval: L("需要授权")
-    case .overflow: L("更多")
     }
   }
-
-  /// 菜单项图标（与按钮相同）。
-  var menuImage: NSImage? { iconView.image }
 
   private func setHovering(_ hovering: Bool) {
     guard isHovering != hovering else { return }

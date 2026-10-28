@@ -300,6 +300,10 @@ There is only one `activePane.bottom` bar per window. While a file, tool, or web
 it comes back when a terminal pane has the focus again. You can use it together with `pane.bottom`; the `pane.bottom` bar
 is above it.
 
+Except for `window.top` and `sidebar.section`, users can drag the edge of a horizontal bar to make it taller (up to 8 rows).
+The items then wrap into rows and scroll when they do not fit. In a one-row bar, items that do not fit scroll from side to
+side. The user decides the height of the bar; the manifest `height` is only the height of one row.
+
 `window.top`, `window.bottom`, and `sidebar.section` take their context from the active pane of the current tab, like
 `tab.*`. `window.top` is always 28 pt and stays even when it has no items (the traffic lights are on its left). Drag its
 empty area to move the window; double-click it to zoom. In `sidebar.section`, a status bar is a vertical list with one

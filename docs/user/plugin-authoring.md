@@ -293,6 +293,9 @@ await aster.openURL("https://example.com"); // 先弹确认，返回用户是否
 `activePane.bottom` 每个窗口只有一条：焦点在文件、工具或网页 Pane 上时先收起，回到终端 Pane 再出现；和 `pane.bottom`
 可以同时用，`pane.bottom` 在上面。
 
+除了 `window.top` 和 `sidebar.section`，横条都可以由用户拖边缘拉高（最多 8 行），项目自动换行，放不下时滚动；只有一行时
+放不下的项目左右滚动。条的高度由用户决定，清单里的 `height` 只是单行的高度。
+
 `window.top`、`window.bottom` 与 `sidebar.section` 都按当前标签的活动 Pane 取上下文，和 `tab.*` 一样。`window.top` 固定 28pt，
 没有项目时也保留（红绿灯在它左边）；空白处可以拖动窗口、双击缩放。`sidebar.section` 的状态条是竖排列表，每项一行，
 最多 32 项（横条最多 12 项）；面板高度取清单 `height`（80–400，缺省 240），页面也可以用 `aster.setHeight()` 改，同样夹到

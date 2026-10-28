@@ -482,6 +482,19 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
   Inspector 页签仍忽略高度请求。会话走 `ToolPanelSessionCache`，整树重建只借用。
 - **重建**：侧栏视图从无到有 / 从有到无时整树重建一次（`mountedSlots` 含 `.sidebarSection`），个数变化只改区块。
 
+横条的高度与滚动（`tab.top`、`tab.bottom`、`window.bottom`、`pane.bottom`、`activePane.bottom`；`window.top` 与
+`sidebar.section` 不参与）：
+
+- **拖高**：底部类位置拖条的上边缘，`tab.top` 拖下边缘（`ToolBarResizeHandle`，命中区 4pt，悬停 / 拖动时上下调整光标、边线强调色）。
+  按整行吸附，拖过半行才跳；最少 1 行（该位置生效的单行高度），最多 8 行或 240pt 取小（规则在 AsterCore `ToolBarHeights`）。
+  拖动中只改条自己的高度约束，不整树重建、不重跑脚本；松开且行数变了才保存，双击边缘恢复单行并保存。
+- **多行**：能容纳 N 行时项目从左到右流式换行，行首不画段分隔线；内容超过可见行数时在 `ToolBarScrollView` 里上下滚动，
+  滚动条只在需要时出现（固定 overlay 样式）。
+- **单行放不下**：左右滚动，滚轮的纵向输入转成横向。原来的「…」溢出菜单已去掉，`window.top` 也改为横向滚动。
+- **持久化**：按窗口 UserDefaults suite（`AppModel.defaults`）存，键 `aster.workspace.tool-bar-heights.v1`，值是
+  `{"tab.bottom": 78}` 这样未缩放的点数；读取时吸附并夹到范围内，坏数据回到单行（`ToolBarHeightStore`）。`pane.bottom`
+  所有 Pane 共用一个值，拖一个 Pane 的条，其它 Pane 的条一起变。挂载点不得从外面给条加高度约束，高度只由条自己持有。
+
 `activePane.bottom` 的规则：
 
 - **每个窗口一条**，宿主长期持有，挂在选中标签活动终端 Pane 的 `ActivePaneHostView` 底部链里（`setActivePaneBar(_:)`）。
