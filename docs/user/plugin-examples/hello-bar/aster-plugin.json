@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.hello-bar",
+  "name": "Hello Bar",
+  "version": "1.0.0",
+  "description": "状态条示例：在终端标签底部显示当前时间和所在文件夹名",
+  "author": "Example",
+  "permissions": ["exec", "clipboard.write"],
+  "contributes": {
+    "views": [
+      {
+        "id": "clock",
+        "title": "时间和文件夹",
+        "kind": "bar",
+        "slot": "tab.bottom",
+        "source": { "type": "script", "command": ["python3", "bin/bar.py"], "timeout": 5 },
+        "refresh": { "interval": 30, "on": ["cwd", "activePane"] }
+      }
+    ]
+  }
+}

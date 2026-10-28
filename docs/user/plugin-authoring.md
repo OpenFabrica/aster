@@ -8,7 +8,9 @@ Aster 的工具箱可以装你自己写的插件。一个插件就是一个文�
 - **脚本工具**：运行插件自带的程序或脚本（任何语言），把输出显示出来。
 - **网页工具**：一个本地网页（HTML + JS + CSS），在沙箱里运行，经 `window.aster` 与 Aster 通信。
 
-两个可以直接照抄的例子在 [plugin-examples](plugin-examples/)：`hello-script`（脚本）和 `hello-web`（网页）。
+插件还可以把状态条或面板常驻挂到窗口上（例如终端底部的 Git 状态条），见「把界面挂到窗口上」。
+
+可以直接照抄的例子在 [plugin-examples](plugin-examples/)：`hello-script`（脚本）、`hello-web`（网页）和 `hello-bar`（状态条）。
 
 ## 五分钟上手
 
@@ -63,7 +65,8 @@ Aster 严格检查清单。任何一条不对，整个插件都不加载，并�
 | `ui` | 网页工具必填。`main` 是入口 HTML 的相对路径；`height` 是希望的高度，120–800，缺省 480。 |
 | `permissions` | 要用的权限，见下文「权限」。 |
 | `network` | 声明了 `network` 权限时必填：允许访问的主机名，例如 `api.github.com` 或 `*.example.com`，最多 16 个。 |
-| `features` | 1–32 个功能。 |
+| `features` | 1–32 个功能。只想把界面挂到窗口上的插件可以不写，但功能和 `contributes` 视图至少要有一个。 |
+| `contributes` | 可选。`views` 里声明挂到窗口上的状态条和面板，见「把界面挂到窗口上」。 |
 
 其它规则：
 
@@ -111,8 +114,8 @@ Aster 严格检查清单。任何一条不对，整个插件都不加载，并�
 ```
 
 - 清单必须声明 `exec` 权限。
-- `command` 是参数数组，**不经过 shell**。`command[0]` 写相对路径时相对插件目录，并且必须有可执行权限
-  （`chmod +x bin/upper.sh`）。
+- `command` 是参数数组，**不经过 shell**。`command[0]` 有三种写法，见下文「用 Python / Node.js 写脚本」；写成插件内的
+  相对路径时，文件必须有可执行权限（`chmod +x bin/upper.sh`）。
 - 工作目录：来源终端的目录；没有时用主目录。
 - `timeout`：1–60 秒，缺省 10 秒（`list` 缺省 3 秒）。超时先发 `SIGTERM`，1 秒后 `SIGKILL`。
 
@@ -156,6 +159,25 @@ Aster 严格检查清单。任何一条不对，整个插件都不加载，并�
 整份输出作废。
 
 上限：标准输出 1 MiB、错误输出 64 KiB，超出即停止并报错。退出码不是 0 时显示错误输出的前 4 KiB。
+
+### 用 Python / Node.js 写脚本
+
+脚本可以用任何语言写。`command[0]` 有三种写法：
+
+| 写法 | 例子 | 怎么找到程序 |
+| --- | --- | --- |
+| 裸名（不含 `/`） | `["python3", "bin/main.py"]`、`["node", "bin/main.js"]` | 先看插件目录里有没有同名可执行文件，有就用它；没有就按固定 PATH 逐个目录找。 |
+| 插件内的相对路径 | `["bin/main.py"]` | 相对插件目录，必须可执行（`chmod +x`），文件第一行写 shebang，例如 `#!/usr/bin/env python3`。解析后必须仍在插件目录内。 |
+| 绝对路径 | `["/opt/homebrew/bin/python3", "bin/main.py"]` | 原样使用。 |
+
+Aster 的固定 PATH 是 `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`。**它不读你的 shell 配置**
+（`.zshrc` 等），所以用 nvm、fnm、volta、pyenv 装的 Python 或 Node 找不到。
+
+- 用 Homebrew 装（`brew install python node`）最省事：装到 `/opt/homebrew/bin`，裸名直接可用。
+- 或者用 shebang 加绝对路径：`#!/Users/你/.nvm/versions/node/v22.0.0/bin/node`，`command` 只写 `["bin/main.js"]`。
+- 找不到时，bar 视图的失败提示会写「PATH 里没有 node」这类文字；功能脚本会显示同样的错误。
+
+脚本的输入和输出和别的语言完全一样：stdin、环境变量、stdout。Python 例子见 `plugin-examples/hello-bar/bin/bar.py`。
 
 ## 网页工具
 
@@ -240,6 +262,137 @@ await aster.openURL("https://example.com"); // 先弹确认，返回用户是否
 
 开发目录里的网页工具可以用 Safari 的 Web 检查器调试：打开 Safari「设置 → 高级 → 显示网页开发者功能」，
 然后在 Safari「开发」菜单里找到 Aster 和你的插件页面。正式安装的插件不开放检查器。
+
+## 把界面挂到窗口上
+
+除了在工具面板里被调用，插件还可以把一块界面常驻在窗口上，例如终端底部的 Git 状态条。做法是在清单里加
+`contributes.views`。视图有两种：
+
+- **状态条（`bar`）**：一条窄横条。你的脚本输出一份 JSON 项目列表，Aster 用原生控件画出来（类似 xbar）。
+- **面板（`panel`）**：一个网页，写法和网页工具一样，只是入口用视图的 `main`。
+
+> 使用 `contributes` 的插件需要新版 Aster。旧版本读到这一节会拒绝整个插件。
+
+### 放在哪里
+
+| 位置（`slot`） | 类型 | 说明 | 本版本 |
+| --- | --- | --- | --- |
+| `tab.top` | 状态条 | 终端区域上方 | 可用 |
+| `tab.bottom` | 状态条 | 终端区域下方 | 可用 |
+| `pane.bottom` | 状态条 | 每个终端 Pane 的底部，每个 Pane 一条；脚本拿到的是这个 Pane 自己的目录与 Pane id | 可用 |
+| `inspector.panel` | 面板 | 详情面板（Inspector）里的一个页签 | 可用 |
+| `window.top`、`window.bottom`、`sidebar.section`、`pane.header` | — | 窗口顶部 / 底部、侧栏、Pane 顶部 | 后续版本；现在可以写进清单，但不会显示 |
+
+`pane.bottom` 只挂在终端 Pane 上（工具、文件 Pane 不挂），只有当前标签里的 Pane 会运行脚本；切到别的标签时暂停，
+切回来补跑一次。切换焦点到别的 Pane 不会让它重跑；条上的 `terminal` 动作写到这条所在的 Pane。
+
+用户可以在「设置 → 工具 → 视图」里关掉视图，或把它改放到别的位置（只能改到同类型、本版本可用的位置）。
+
+### 清单
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "aster.gitbar",
+  "name": "Git 状态条",
+  "version": "1.0.0",
+  "permissions": ["exec", "clipboard.write", "terminal.insert"],
+  "contributes": {
+    "views": [
+      {
+        "id": "branch",
+        "title": "Git 分支",
+        "kind": "bar",
+        "slot": "tab.bottom",
+        "source": { "type": "script", "command": ["bin/gitbar.sh"], "timeout": 5 },
+        "refresh": { "interval": 30, "on": ["cwd", "branch", "activePane"] }
+      }
+    ]
+  }
+}
+```
+
+这是 Aster 内置的「Git 状态条」。它没有 `features`，只有视图，这是允许的。
+
+| 字段 | 规则 |
+| --- | --- |
+| `views` | 1–16 个视图。 |
+| `id` / `title` | `id` 的写法同功能的 `code`，插件内唯一；`title` 1–64 个字符。 |
+| `kind` / `slot` | 类型和位置；位置必须接受这个类型（`inspector.panel` 只接受 `panel`，`tab.top` 等只接受 `bar`）。 |
+| `height` | 状态条的高度，22–28，缺省 26。 |
+| `source` | 状态条必填：`{"type": "script", "command": […], "timeout": 秒}`。`command` 的规则同脚本工具；清单必须声明 `exec`。`timeout` 1–30，缺省 5。 |
+| `refresh` | 状态条的刷新策略：`interval` 是定时间隔（秒），0 表示只在触发时刷新，否则 5–3600，缺省 60；`on` 是触发条件，最多 4 个，可选 `cwd`（目录变了）、`branch`（Git 分支变了）、`activePane`（切换了 Pane）、`agent`（Agent 状态变了），缺省 `["cwd"]`。 |
+| `main` | 面板必填：入口 HTML，相对路径，以 `.html` 结尾。面板不能有 `source` / `refresh`。 |
+
+### 状态条脚本
+
+Aster 在合适的时候运行你的脚本：窗口里第一次显示、定时到点、`on` 里的条件发生、用户点了刷新。脚本不经过 shell，规则同脚本工具。
+
+**输入。** stdin 是一段 JSON：
+
+```json
+{ "view": "branch", "trigger": "cwd",
+  "context": { "workingDirectory": "/Users/me/repo", "isRemote": false, "locale": "zh-Hans",
+               "appearance": "dark", "branch": "main", "tabID": "…", "paneID": "…", "agent": null } }
+```
+
+`trigger` 是这次运行的原因：`initial`、`interval`、`cwd`、`branch`、`activePane`、`agent` 或 `manual`。
+环境变量和脚本工具一样（`ASTER_CWD`、`ASTER_LOCALE`、`ASTER_PLUGIN_DIR` 等），另有 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`。
+远端（SSH）标签没有本地目录：`isRemote` 为 `true`，`ASTER_CWD` 不存在。
+
+**输出。** stdout 写一份 JSON，不超过 64 KiB：
+
+```json
+{
+  "items": [
+    { "id": "branch", "text": "main", "icon": "arrow.triangle.branch", "tooltip": "分支 main",
+      "onClick": { "type": "copy", "text": "main" } },
+    { "id": "ahead", "text": "↑2",
+      "onClick": { "type": "terminal", "text": "git push", "mode": "insert" } },
+    { "id": "dirty", "text": "●3", "color": "warning", "tooltip": "3 个文件有改动" },
+    { "id": "refresh", "icon": "arrow.clockwise", "onClick": { "type": "refresh" } }
+  ],
+  "ttl": 30
+}
+```
+
+- 最多 12 项。每项的 `text`（≤ 64 个字符，单行）和图标至少有一个；`tooltip` ≤ 256 个字符。
+- `icon` 是 SF Symbol 的名字（小写字母、数字和点，例如 `arrow.triangle.branch`）；系统里没有这个符号时只显示文字。
+  也可以用 `iconFile` 指向插件里的图标文件。
+- `color`：`#RRGGBB`、`#RRGGBBAA`，或 `accent`、`success`、`warning`、`error`、`secondary`（跟随主题，推荐）。
+- `ttl`（5–3600 秒）可选：告诉 Aster 多久之后再运行。
+- `{"items": []}` 表示现在没有内容，这一段隐藏。退出码不是 0 表示出错，状态条上会显示警告，点击可重试。
+- 格式有问题的单项会被丢掉；整份 JSON 不合法则整份作废。
+
+**点击动作（`onClick`）。** 只有下面几种，其它的会被忽略。每种动作需要的权限不同，没有声明就不会执行：
+
+| `type` | 参数 | 做什么 | 需要 |
+| --- | --- | --- | --- |
+| `copy` | `text`，可选 `concealed` | 复制到剪贴板 | `clipboard.write` |
+| `terminal` | `text`，`mode` 为 `insert` 或 `submit` | `insert` 把文字预填到活动终端、不回车；`submit` 预填并回车执行 | `terminal.insert` |
+| `openURL` | `url`（`http` / `https`） | 用浏览器打开，每次都会先让用户确认 | — |
+| `openPanel` | `view` | 打开同一插件的某个面板视图 | — |
+| `refresh` | — | 立即重新运行脚本 | — |
+| `feature` | `code`，可选 `text` | 在工具面板里打开同一插件的某个功能 | — |
+
+`submit` 最敏感：文字里不能有控制字符，并且 Aster 会把「↩ 执行：…」加到提示里，让用户点之前就看到要执行的命令。
+能用 `insert` 就用 `insert`，让用户自己按回车。
+
+**运行频率。** Aster 对状态条脚本很克制：窗口看不见（被遮住或最小化）时不运行，重新看见时补跑一次；触发后等
+300 毫秒再运行，同一视图两次运行至少隔 5 秒；连续失败 3 次后会拉长间隔。所以脚本要快，别在里面做耗时的网络请求。
+
+**Git 状态条的脚本**（`bin/gitbar.sh`）读 `ASTER_CWD`，用 `git status --porcelain=v2 --branch` 取分支、领先 / 落后和改动数；
+不在 Git 仓库里、`isRemote` 为 `true` 或 `git` 失败时输出 `{"items":[],"ttl":600}`。内置插件的脚本在 Aster 的
+`Contents/Resources/tools-builtin/aster.gitbar/` 里，可以照着改。完整的最小例子见 `plugin-examples/hello-bar`（Python）。
+
+### 面板
+
+`panel` 视图是一个网页，沙箱和 `window.aster` 都与网页工具相同，入口是视图的 `main`。额外多两样东西：
+
+- `aster.context.get()` 返回当前标签的上下文（目录、分支、语言、外观等）。
+- `aster.onContextChange(callback)` 在用户切换标签、目录或分支时收到新的上下文。网页不会被重新加载。
+
+面板显示在详情面板的页签里（图标是拼图块），用户点页签切换。
 
 ## 权限
 

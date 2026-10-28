@@ -8,7 +8,11 @@ There are two ways to write a feature:
 - **Script tool**: runs a program or script that comes with the plugin (any language) and shows its output.
 - **Web tool**: a local web page (HTML + JS + CSS) that runs in a sandbox and talks to Aster through `window.aster`.
 
-Two examples that you can copy are in [plugin-examples](plugin-examples/): `hello-script` (script) and `hello-web` (web).
+A plugin can also attach a status bar or a panel to the window all the time, for example a Git status bar at the bottom of
+the terminal. See **Attaching UI to the Window**.
+
+Examples that you can copy are in [plugin-examples](plugin-examples/): `hello-script` (script), `hello-web` (web), and
+`hello-bar` (status bar).
 
 ## Get Started in Five Minutes
 
@@ -64,7 +68,8 @@ shows which field is wrong.
 | `ui` | Required for web tools. `main` is the relative path of the entry HTML; `height` is the preferred height, 120–800, default 480. |
 | `permissions` | The permissions that the plugin uses. See **Permissions** below. |
 | `network` | Required when you declare the `network` permission: the host names that the plugin can reach, for example `api.github.com` or `*.example.com`, at most 16. |
-| `features` | 1–32 features. |
+| `features` | 1–32 features. A plugin that only attaches UI to the window can leave it out, but it needs at least one feature or one `contributes` view. |
+| `contributes` | Optional. `views` declares status bars and panels that are attached to the window. See **Attaching UI to the Window**. |
 
 Other rules:
 
@@ -112,8 +117,9 @@ Each feature needs at least one keyword or one match rule.
 ```
 
 - The manifest must declare the `exec` permission.
-- `command` is an argument array and **does not go through a shell**. A relative `command[0]` is relative to the plugin
-  folder and must be executable (`chmod +x bin/upper.sh`).
+- `command` is an argument array and **does not go through a shell**. `command[0]` can be written in three ways (see
+  **Writing Scripts in Python or Node.js** below). A relative path inside the plugin must point to an executable file
+  (`chmod +x bin/upper.sh`).
 - Working directory: the directory of the source terminal, or your home folder.
 - `timeout`: 1–60 seconds, default 10 (3 for `list`). On timeout Aster sends `SIGTERM`, then `SIGKILL` one second later.
 
@@ -158,6 +164,29 @@ cut short; if any `value` is too long or any `title` is empty, the whole output 
 
 Limits: standard output 1 MiB and error output 64 KiB; when a limit is exceeded, Aster stops the script and reports an
 error. When the exit status is not 0, Aster shows the first 4 KiB of error output.
+
+### Writing Scripts in Python or Node.js
+
+A script can be written in any language. `command[0]` can be written in three ways:
+
+| Form | Example | How Aster finds the program |
+| --- | --- | --- |
+| Bare name (no `/`) | `["python3", "bin/main.py"]`, `["node", "bin/main.js"]` | Aster first looks for an executable file with that name in the plugin folder. If there is none, it searches the fixed PATH folder by folder. |
+| Relative path inside the plugin | `["bin/main.py"]` | Relative to the plugin folder. The file must be executable (`chmod +x`) and start with a shebang, for example `#!/usr/bin/env python3`. The resolved path must stay inside the plugin folder. |
+| Absolute path | `["/opt/homebrew/bin/python3", "bin/main.py"]` | Used as it is. |
+
+The fixed PATH is `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`. **Aster does not read your shell
+configuration** (`.zshrc` and so on), so Python or Node installed with nvm, fnm, volta, or pyenv cannot be found.
+
+- Installing with Homebrew (`brew install python node`) is the easiest way: the programs go to `/opt/homebrew/bin`, and
+  the bare name works.
+- Or use a shebang with an absolute path, for example `#!/Users/you/.nvm/versions/node/v22.0.0/bin/node`, and write only
+  `["bin/main.js"]` in `command`.
+- When the program is not found, a status bar view shows a message such as "node is not in PATH". A feature script shows
+  the same error.
+
+Input and output work the same way in every language: stdin, environment variables, and stdout. For a Python example, see
+`plugin-examples/hello-bar/bin/bar.py`.
 
 ## Web Tools
 
@@ -236,6 +265,153 @@ The page can also open without Aster, which helps debugging. Check with `if (win
 You can debug web tools from a development folder with the Safari Web Inspector: in Safari, turn on
 **Settings → Advanced → Show features for web developers**, then find Aster and your plugin page in the **Develop** menu.
 Installed plugins do not allow the inspector.
+
+## Attaching UI to the Window
+
+A plugin can do more than be called from the Tools panel. It can keep a piece of UI on the window all the time, for example
+a Git status bar at the bottom of the terminal. Add `contributes.views` to the manifest. There are two kinds of view:
+
+- **Status bar (`bar`)**: a narrow horizontal bar. Your script prints a JSON list of items, and Aster draws them with
+  native controls (similar to xbar).
+- **Panel (`panel`)**: a web page, written like a web tool, except that its entry is the `main` of the view.
+
+> A plugin that uses `contributes` needs a new version of Aster. Older versions reject the whole plugin when they read
+> this section.
+
+### Where It Goes
+
+| Position (`slot`) | Kind | Description | This version |
+| --- | --- | --- | --- |
+| `tab.top` | Status bar | Above the terminal area | Available |
+| `tab.bottom` | Status bar | Below the terminal area | Available |
+| `pane.bottom` | Status bar | At the bottom of each terminal pane, one bar per pane. The script gets the directory and the pane ID of that pane. | Available |
+| `inspector.panel` | Panel | A tab in the Details panel (Inspector) | Available |
+| `window.top`, `window.bottom`, `sidebar.section`, `pane.header` | — | Top or bottom of the window, sidebar, top of a pane | A later version; you can already write them in the manifest, but they are not shown |
+
+`pane.bottom` is shown only on terminal panes (not on tool or file panes). Only the panes of the current tab run the
+script. When you switch to another tab, they pause, and they run once when you come back. Moving the focus to another
+pane does not run the script again. A `terminal` action on the bar writes to the pane that the bar is in.
+
+Users can turn a view off or move it to another position in **Settings → Tools → Views**. A view can only move to a
+position that accepts its kind and is available in this version.
+
+### Manifest
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "aster.gitbar",
+  "name": "Git 状态条",
+  "version": "1.0.0",
+  "permissions": ["exec", "clipboard.write", "terminal.insert"],
+  "contributes": {
+    "views": [
+      {
+        "id": "branch",
+        "title": "Git 分支",
+        "kind": "bar",
+        "slot": "tab.bottom",
+        "source": { "type": "script", "command": ["bin/gitbar.sh"], "timeout": 5 },
+        "refresh": { "interval": 30, "on": ["cwd", "branch", "activePane"] }
+      }
+    ]
+  }
+}
+```
+
+This is the built-in Git status bar of Aster. It has no `features`, only a view, which is allowed.
+
+| Field | Rule |
+| --- | --- |
+| `views` | 1–16 views. |
+| `id` / `title` | `id` follows the rules of a feature `code` and is unique in the plugin; `title` is 1–64 characters. |
+| `kind` / `slot` | The kind and the position. The position must accept the kind (`inspector.panel` accepts only `panel`; `tab.top` and similar accept only `bar`). |
+| `height` | Height of a status bar, 22–28, default 26. |
+| `source` | Required for a status bar: `{"type": "script", "command": […], "timeout": seconds}`. `command` follows the rules of script tools, and the manifest must declare `exec`. `timeout` is 1–30, default 5. |
+| `refresh` | When a status bar refreshes. `interval` is the timer in seconds: 0 means refresh only on triggers, otherwise 5–3600, default 60. `on` lists the triggers, at most 4: `cwd` (directory changed), `branch` (Git branch changed), `activePane` (another pane became active), `agent` (agent state changed). Default `["cwd"]`. |
+| `main` | Required for a panel: the entry HTML, a relative path ending in `.html`. A panel cannot have `source` or `refresh`. |
+
+### Status Bar Scripts
+
+Aster runs your script at suitable times: when the view first appears in a window, when the timer fires, when a trigger
+in `on` happens, and when the user clicks refresh. The script does not go through a shell; the rules are the same as for
+script tools.
+
+**Input.** stdin is a JSON document:
+
+```json
+{ "view": "branch", "trigger": "cwd",
+  "context": { "workingDirectory": "/Users/me/repo", "isRemote": false, "locale": "zh-Hans",
+               "appearance": "dark", "branch": "main", "tabID": "…", "paneID": "…", "agent": null } }
+```
+
+`trigger` is the reason for this run: `initial`, `interval`, `cwd`, `branch`, `activePane`, `agent`, or `manual`.
+The environment variables are the same as for script tools (`ASTER_CWD`, `ASTER_LOCALE`, `ASTER_PLUGIN_DIR`, and so on),
+plus `ASTER_VIEW`, `ASTER_TRIGGER`, and `ASTER_BRANCH`. A remote (SSH) tab has no local directory: `isRemote` is `true`
+and `ASTER_CWD` is not set.
+
+**Output.** Print one JSON document to stdout, at most 64 KiB:
+
+```json
+{
+  "items": [
+    { "id": "branch", "text": "main", "icon": "arrow.triangle.branch", "tooltip": "Branch main",
+      "onClick": { "type": "copy", "text": "main" } },
+    { "id": "ahead", "text": "↑2",
+      "onClick": { "type": "terminal", "text": "git push", "mode": "insert" } },
+    { "id": "dirty", "text": "●3", "color": "warning", "tooltip": "3 files changed" },
+    { "id": "refresh", "icon": "arrow.clockwise", "onClick": { "type": "refresh" } }
+  ],
+  "ttl": 30
+}
+```
+
+- At most 12 items. Each item needs a `text` (at most 64 characters, one line) or an icon; `tooltip` is at most 256 characters.
+- `icon` is the name of an SF Symbol (lowercase letters, digits, and dots, for example `arrow.triangle.branch`). If the
+  system has no such symbol, only the text is shown. You can also use `iconFile` to point to an icon file in the plugin.
+- `color`: `#RRGGBB`, `#RRGGBBAA`, or `accent`, `success`, `warning`, `error`, `secondary` (these follow the theme and are
+  recommended).
+- `ttl` (5–3600 seconds) is optional. It tells Aster how long to wait before the next run.
+- `{"items": []}` means there is nothing to show now, and the segment is hidden. A non-zero exit status means an error:
+  the bar shows a warning, and a click tries again.
+- An item with a wrong format is dropped. If the whole JSON is invalid, the whole output is rejected.
+
+**Click actions (`onClick`).** Only the following actions exist; others are ignored. Each action needs a permission, and
+it does not run if the manifest does not declare it:
+
+| `type` | Parameters | What it does | Needs |
+| --- | --- | --- | --- |
+| `copy` | `text`, optional `concealed` | Copies to the clipboard | `clipboard.write` |
+| `terminal` | `text`, `mode` is `insert` or `submit` | `insert` prefills the text into the active terminal without pressing Return; `submit` prefills it and runs it | `terminal.insert` |
+| `openURL` | `url` (`http` / `https`) | Opens it in the browser; the user must confirm every time | — |
+| `openPanel` | `view` | Opens a panel view of the same plugin | — |
+| `refresh` | — | Runs the script again now | — |
+| `feature` | `code`, optional `text` | Opens a feature of the same plugin in the Tools panel | — |
+
+`submit` is the most sensitive. The text must not contain control characters, and Aster adds "↩ Run: …" to the tooltip so
+that the user sees the command before clicking. Use `insert` whenever you can, and let the user press Return.
+
+**How often it runs.** Aster is careful with status bar scripts. They do not run while the window cannot be seen (covered
+or minimized), and run once more when it is visible again. After a trigger Aster waits 300 ms; one view runs at most once
+every 5 seconds; after 3 failures in a row the interval gets longer. Keep scripts fast, and do not do slow network
+requests in them.
+
+**The Git status bar script** (`bin/gitbar.sh`) reads `ASTER_CWD` and uses `git status --porcelain=v2 --branch` to get the
+branch, ahead/behind counts, and the number of changed files. When the directory is not a Git repository, `isRemote` is
+`true`, or `git` fails, it prints `{"items":[],"ttl":600}`. The script of the built-in plugin is in
+`Contents/Resources/tools-builtin/aster.gitbar/` inside the Aster app; you can copy and change it. For a complete minimal
+example (in Python), see `plugin-examples/hello-bar`.
+
+### Panels
+
+A `panel` view is a web page. The sandbox and `window.aster` are the same as for web tools, and the entry is the `main` of
+the view. There are two extra things:
+
+- `aster.context.get()` returns the context of the current tab (directory, branch, language, appearance, and so on).
+- `aster.onContextChange(callback)` receives the new context when the user switches tab, directory, or branch. The page
+  is not reloaded.
+
+A panel appears as a tab in the Details panel (with a puzzle-piece icon), and the user clicks the tab to switch to it.
 
 ## Permissions
 

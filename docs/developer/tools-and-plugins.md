@@ -11,6 +11,9 @@ v1 范围：
 - 入口 B：独立的工具面板（全局快捷键呼出，默认不占用；也可从「窗口」菜单与命令面板打开）。
 - 三种运行方式：原生内置工具（Swift）、脚本工具（任意可执行程序）、网页工具（WKWebView 沙箱）。
 - 权限声明 + 安装确认 + 文件摘要校验；设置页「工具」分类管理插件。
+- 界面扩展：插件可以把状态条（bar）和网页面板（panel）常驻挂到窗口上，见「界面扩展」。已实现 `tab.top`、`tab.bottom`、
+  `pane.bottom`、`inspector.panel`；`window.top` / `window.bottom` / `sidebar.section` / `pane.header` 可以声明，
+  但留待后续版本挂载。
 - 工具 Pane：工具可开成工作区分屏。v1 **不持久化**工具 Pane（见「工具 Pane」）。
 
 不在 v1：终端/文件右键「用工具处理」、系统服务菜单、`aster tool` CLI、复制后推荐、Inspector 固定、
@@ -22,10 +25,11 @@ v1 范围：
 | --- | --- | --- |
 | 领域规则 | `Sources/AsterCore/Tools/` | 清单模型与校验、权限、信任状态、文件摘要、匹配排序、脚本协议、桥接协议校验、内置转换纯函数、状态文件模型。不依赖 AppKit。 |
 | 运行时 | `Sources/Aster/Tools/` | `ToolCenter`（协调者）、插件扫描与安装、脚本运行、原生工具视图、工具会话视图、安装确认。 |
+| 界面扩展 | `Sources/Aster/Tools/Extensions/`、`Sources/AsterCore/Tools/ToolView*.swift`、`ToolBarProtocol*.swift` | `contributes.views` 的模型与校验、bar 脚本协议、每窗口的 `WorkspaceExtensionHost`、调度、原生条绘制、点击动作门禁、panel 会话。 |
 | 网页运行时 | `Sources/Aster/Tools/Web/` | `WebToolViewController`、`aster-plugin://` scheme handler、桥接、`Resources/tool-runtime/aster-bridge.js`。 |
 | 入口 | `Sources/Aster/Tools/Launcher/`、Open Quickly、`AppModel+Tools.swift` | 工具面板、全局快捷键、Open Quickly「工具」页、工具 Pane、命令面板与菜单入口。 |
-| 设置 | `SettingsToolsBridge.swift`、`Resources/settings-ui/tools.js` | 设置页「工具」分类。 |
-| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写。 |
+| 设置 | `SettingsToolsBridge.swift`、`Resources/settings-ui/tools.js` | 设置页「工具」分类（含视图的开关与位置）。 |
+| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写；`aster.gitbar` 是只贡献视图的示例。 |
 
 应用层只通过 `Sources/Aster/Tools/ToolContracts.swift` 里的类型交互：入口与设置页不直接读插件目录、
 不直接创建 WebView 或进程。
@@ -74,12 +78,12 @@ v1 范围：
 - `id`：`^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*)+$`，≤ 128 字节；`aster.` 前缀保留给内置插件。
 - `name` 1–64 字符；`version` 匹配 `^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`，≤ 32；`description` ≤ 512；
   `author` ≤ 128；`homepage` 必须是 `https://` URL，≤ 512。文本字段不得含控制字符。
-- 路径字段（`icon`、`ui.main`、`feature.icon`、相对的 `command[0]`）：相对路径、不以 `/` 开头、不含 `..`
+- 路径字段（`icon`、`ui.main`、`feature.icon`、含 `/` 的相对 `command[0]`）：相对路径、不以 `/` 开头、不含 `..`
   段、不含控制字符，≤ 256；`ui.main` 以 `.html` 结尾；图标扩展名限 `svg`/`png`/`jpg`/`jpeg`/`pdf`。
 - `ui.height` 120–800，缺省 480。
 - `permissions` 不重复；`network` 仅在声明 `network` 权限时必填且非空，≤ 16 项，每项是主机名或 `*.主机名`
   （小写，不含协议、端口、路径）。没声明 `network` 权限时 `network` 必须缺省或为空。
-- `features` 1–32 项，`code` 匹配 `^[a-z0-9][a-z0-9_-]{0,31}$` 且不重复；`title` 1–64；`subtitle` ≤ 128。
+- `features` 1–32 项（只贡献视图的插件可以缺省，但功能和视图至少要有一个），`code` 匹配 `^[a-z0-9][a-z0-9_-]{0,31}$` 且不重复；`title` 1–64；`subtitle` ≤ 128。
 - `keywords` ≤ 8 项，每项 1–32 字符；`match` ≤ 8 条；每个功能至少有一个关键词或一条 match 规则。
 - match 规则：
   - `regex`：`pattern` ≤ 512 且能编译（NSRegularExpression 语法），**能匹配空串的正则拒绝**；
@@ -172,6 +176,7 @@ v1 范围：
 | `aster.regex` | 六个标志、高亮、编号与命名分组；匹配在 Web Worker 里跑，1 s 超时 terminate | —（只靠关键词） | `clipboard.write` |
 | `aster.diff` | Myers 行级 diff（线性空间）、折叠相同行、行内高亮、忽略空白/大小写、复制 unified diff；> 5000 行截断 | — | `clipboard.write` |
 | `aster.color` | HEX 3/4/6/8、rgb(a)/hsl(a)（含 CSS4 空格写法）、裸 `r, g, b`、颜色名；WCAG 对比度 | `#` + 3/4/6/8 位、不带 `#` 且含字母的 6 位、`rgb(`/`hsl(` 开头 | `clipboard.write` |
+| `aster.gitbar` | 示例：`tab.bottom` 状态条，显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
 | `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
 - 输入分配：JWT 与颜色的 `enter`/`query` 都填输入框；正则的 `enter` 填测试文本（单行 `/…/flags` 填进正则），
@@ -191,8 +196,15 @@ v1 范围：
 
 ## 脚本工具协议
 
-- 执行：`posix_spawn`，独立进程组，不经过 shell；`command[0]` 为相对路径时相对插件目录解析，
-  解析后（含符号链接）必须仍在插件目录内；绝对路径原样使用。必须可执行。
+- 执行：`posix_spawn`，独立进程组，不经过 shell。`command[0]` 有三种写法（功能脚本与 bar 视图脚本一致）：
+  - **裸名**（不含 `/`，匹配 `^[A-Za-z0-9._+-]{1,64}$`，如 `["python3", "bin/bar.py"]`、`["node", "bin/bar.js"]`）：
+    先看插件目录里有没有同名可执行文件，有就用它；否则按固定 PATH（见下）逐目录找第一个可执行的普通文件。
+    不扩 PATH、不读用户 shell 配置，所以 nvm / fnm / volta / pyenv 装的解释器找不到
+    （`ScriptToolError.executableNotFound`，bar 失败态 tooltip 写明 PATH 里没有它）。
+  - **含 `/` 的相对路径**：相对插件目录解析，解析后（含符号链接）必须仍在插件目录内。
+  - **绝对路径**：原样使用。
+
+  三种写法都要求目标是可执行文件；带 shebang 的脚本（`#!/usr/bin/env python3`）可以直接作为 `command[0]`。
 - 工作目录：来源 Pane 的本地 cwd，否则用户主目录。
 - 环境：`PATH`（`/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`）、`HOME`、`USER`、`LOGNAME`、
   `LANG`、`TMPDIR`、`SHELL`，加上 `ASTER_FEATURE`、`ASTER_QUERY`、`ASTER_CWD`、`ASTER_PLUGIN_ID`、
@@ -404,6 +416,192 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 - 在新标签里运行脚本命令（`output == terminal`）：拼成 `env 'K=V' 'cmd' 'arg'`；含 Unicode `Cc` 控制字符就整条
   拒绝，emoji 里的零宽连接符可以通过。
 
+## 界面扩展
+
+插件除了「被调用的工具」，还可以把界面常驻挂到工作区窗口上：清单里的可选节 `contributes.views[]`。
+一个视图有两种类型：
+
+- `bar`：原生横条。插件脚本把 JSON 项目列表写到 stdout，Aster 原生绘制（类似 xbar）；脚本在定时或上下文变化时重跑。
+- `panel`：网页面板。复用网页工具的 WKWebView 沙箱与桥接，只是入口和宿主不同。
+
+代码分布：模型与校验在 `Sources/AsterCore/Tools/`（`ToolViewContribution.swift`、`ToolViewContributionValidation.swift`、
+`ToolBarProtocol.swift`、`ToolState.swift` 的 `ToolViewState`）；运行时在 `Sources/Aster/Tools/Extensions/`
+（`WorkspaceExtensionHost` 每窗口一份，持有各挂载点的 bar、面板会话与调度器；`ToolBarScheduler` / `ToolBarFeed` 管脚本调度，
+`ToolBranchWatcher` 监听 `.git`，`ToolBarView` 绘制，`ToolBarActionPerformer` 执行点击动作，`ToolPanelSessionHost` 承载面板）。
+
+### 挂载点
+
+| slot | 类型 | 上下文 | 位置 | 本版本 |
+| --- | --- | --- | --- | --- |
+| `tab.top` | bar | 当前标签（cwd = 活动 Pane） | 终端内容区顶部，查找条之后 | 已实现 |
+| `tab.bottom` | bar | 当前标签 | 终端内容区底部，Composer 之后 | 已实现 |
+| `inspector.panel` | panel | 当前标签 | Inspector（详情面板）的一个页签，填满内容区 | 已实现 |
+| `window.top` | bar | 窗口级（取选中标签） | 整个窗口顶部，全宽 | 后续（P2） |
+| `window.bottom` | bar | 窗口级 | 整个窗口底部，全宽 | 后续（P2） |
+| `sidebar.section` | bar（纵向列表）/ panel | 窗口级 | 左侧标签栏列表之后 | 后续（P2） |
+| `pane.bottom` | bar | 单个终端 Pane（cwd、远端、Agent 都取该 Pane 自己的） | 每个终端 Pane 底部，内容与 Prompt Queue 之间 | 已实现 |
+| `pane.header` | bar（只放图标，≤ 3 项） | 单个 Pane | Pane 顶部悬停带 | 后续（P3） |
+
+未实现的位置清单里**可以声明**（向前兼容，不会因此拒绝插件），但视图不挂载、不跑脚本；设置页显示「本版本暂不支持这个位置」，
+用户可以把它改放到已实现的位置。`ToolViewSlot.isImplemented` 是唯一的开关，`ToolViewSlot.slots(accepting:)` 给出某类型可改放的位置。
+
+同一挂载点上有多个视图（可能来自不同插件）时共用一条 `ToolBarView`，按插件显示顺序、清单顺序排成段，段间 1pt 竖分隔；
+全部为空时整条隐藏。bar 高度默认 26，`tab.*` 允许 22–28（清单 `height`，越界按缺省）。bar 由 `WorkspaceExtensionHost`
+长期持有，窗口整树重建（`refresh()`）时只是重新插入，不会重建、也不会重跑脚本。
+
+`pane.bottom` 的规则：
+
+- **每个终端 Pane 一条**，同一 Pane 上的所有 `pane.bottom` 视图共用这一条。工具 Pane、文件 Pane、网页 Pane 不挂。
+  条由 `ToolPaneBars` 按 Pane id 长期持有；`WorkspaceViewController.refresh()` 在 `installAgentHostDock` 旁调
+  `installExtensionPaneBar(for:)`，经 `ActivePaneHostView.setExtensionBar(_:height:)` 装进 Pane 宿主。宿主底部链自上而下是
+  内容 → 插件条 → Prompt Queue → agent 主机终端停靠区；条贴左右边，高度是必需约束（默认 24，允许 20–26），没有项目时归零。
+- **每个 Pane 一份数据源**：feed 键是 `<视图 id>@<Pane id>`，缓存、失败计数、退避互不影响；并发仍按窗口 4、插件 2 共享，多 Pane 时排队。
+- **上下文是该 Pane 自己的**：`workingDirectory` 是它的本地 cwd（远端为 null、`isRemote: true`），`paneID` 是它自己，
+  `branch` 来自每 Pane 一个的 `ToolBranchWatcher`，`agent` 是它自己的 Agent。它的 cwd / 远端变化、Agent 状态变化只重跑它自己的视图。
+  **活动 Pane 切换不重跑 pane 视图**：上下文里的 `paneID` 恒为自身，`activePane` 触发对它没有意义。
+- **只有窗口可见、且属于选中标签的 Pane 跑脚本**。切到别的标签后，原标签的 Pane feed 暂停：定时取消、触发只记 stale；
+  切回来时 stale 或定时已过期的立即补跑一次。Pane 关闭（或不再是终端）时取消它的 feed、释放条与分支监听。
+- 条上 `terminal` 动作写到**条所在的 Pane**，不是活动 Pane；`refresh` 只重跑这个 Pane 的这一份。
+
+### 清单 `contributes.views[]`
+
+```json
+"contributes": { "views": [
+  { "id": "branch", "title": "Git 分支", "kind": "bar", "slot": "tab.bottom", "height": 26,
+    "source": { "type": "script", "command": ["bin/gitbar.sh"], "timeout": 5 },
+    "refresh": { "interval": 30, "on": ["cwd", "branch", "activePane"] } },
+  { "id": "status", "title": "Git 状态", "kind": "panel", "slot": "inspector.panel", "main": "views/status.html" }
+] }
+```
+
+校验（`ToolViewContributionValidation.swift`，错误路径形如 `contributes.views[1].refresh.interval`；同样每一层未知字段整份拒绝）：
+
+- `views` 1–16 项；`id` 规则同功能 `code`，插件内唯一；`title` 1–64 字符无控制字符；`icon` 同清单 `icon` 的路径规则。
+- `slot` 必须是上表里的值，且该挂载点接受这个 `kind`（`inspector.panel` 只接受 panel；`sidebar.section` 两种都接受；其余只接受 bar）。
+- bar：`source` 必填且 `type == "script"`；`command` 规则同功能脚本（见「脚本工具协议」），清单必须声明 `exec` 权限；
+  `timeout` 1–30，缺省 5；不得有 `main`；`height` 必须在该挂载点的 bar 高度范围内。
+- panel：`main` 必填且以 `.html` 结尾；不得有 `source` / `refresh`；`height` 只对 `sidebar.section` 生效（80–400，缺省 240）。
+- `refresh`（只用于 bar）：`interval` 为 0（只按触发与手动刷新）或 5–3600 秒，缺省 60；`on` 最多 4 项、不重复，取值
+  `cwd`、`branch`、`activePane`、`agent`，缺省 `["cwd"]`。
+- 只有视图、没有功能的插件合法：`features` 可以缺省，但**功能和视图至少要有一个**。有 panel 视图的插件 `ui` 可以缺省
+  （「`ui` 动作需要 `ui`」的规则不变）。
+
+### bar 脚本协议
+
+脚本按「脚本工具协议」的方式启动（`posix_spawn`、独立进程组、固定 PATH、不经 shell），`ScriptToolRunner.makeViewInvocation`
+复用同一套超时与输出上限处理。
+
+**stdin**（JSON，可选值写 `null`）：
+
+```json
+{ "view": "branch", "trigger": "initial|interval|cwd|branch|activePane|agent|manual",
+  "context": { "workingDirectory": "/Users/me/repo", "isRemote": false, "locale": "zh-Hans", "appearance": "dark",
+               "branch": "main", "tabID": "…", "paneID": "…", "agent": { "provider": "claude", "state": "running" } } }
+```
+
+**环境变量**：功能脚本那一组（`ASTER_FEATURE` 此处为 `view:<id>`、`ASTER_CWD`、`ASTER_LOCALE`、`ASTER_PLUGIN_*` 等），
+再加 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`。远端标签（`isRemote == true`）没有本地 cwd，`workingDirectory` 为 `null`。
+
+**stdout**（≤ 64 KiB，超出整份作废）：
+
+```json
+{ "items": [
+  { "id": "b", "text": "main", "icon": "arrow.triangle.branch", "color": "accent", "tooltip": "分支 main",
+    "onClick": { "type": "copy", "text": "main" } },
+  { "text": "↑2", "onClick": { "type": "terminal", "text": "git push", "mode": "insert" } },
+  { "text": "●3", "iconFile": "icons/dirty.svg", "onClick": { "type": "openPanel", "view": "status" } },
+  { "icon": "arrow.clockwise", "onClick": { "type": "refresh" } } ],
+  "ttl": 30 }
+```
+
+- `items` ≤ 12（`sidebar.section` ≤ 32）；`text` ≤ 64 字符单行；`text` 与 `icon` / `iconFile` 至少有一个；`tooltip` ≤ 256。
+  单项不合格只丢该项，外层结构不对整份作废（`ToolBarError.invalidOutput`）。
+- `icon` 是 SF Symbol 名 `^[a-z0-9.]{1,64}$`，系统里没有这个符号时丢图保字；`iconFile` 走清单 `icon` 同样的相对路径规则，
+  解析后必须仍在插件目录内。
+- `color`：`#RRGGBB` / `#RRGGBBAA`，或令牌 `accent`、`success`、`warning`、`error`、`secondary`（由宿主映射到主题色，明暗自动跟随）。
+- `ttl` 5–3600，覆盖下一次定时间隔；`{"items":[]}` 表示这一段隐藏；退出码非 0 表示失败态。空 stdout 视为没有项目。
+
+**`onClick` 白名单与门禁**（`ToolBarActionPerformer`；未知 `type` 丢弃该项，输出只当数据，绝不当代码执行）：
+
+| type | 参数 | 门禁 |
+| --- | --- | --- |
+| `copy` | `text`、`concealed?` | 需要 `clipboard.write`；`concealed` 标记为机密剪贴板 |
+| `terminal` + `mode: "insert"` | `text` | 需要 `terminal.insert`；只预填，永远不回车；没有可用终端时提示 |
+| `terminal` + `mode: "submit"` | `text` | 需要 `terminal.insert`；含 Unicode `Cc` 控制字符整条拒绝；tooltip 自动追加「↩ 执行：<前 80 字>」让命令可见；仍受粘贴保护、只读与 Vi 模式门禁 |
+| `openURL` | `url`（仅 http / https） | 每次都弹确认，与桥接 `shell.openURL` 是同一个函数 |
+| `openPanel` | `view` | 必须是同插件已启用的 panel 视图；打开 Inspector 并选中它的页签 |
+| `refresh` | — | 立即重跑本视图（仍受最短 5 s 约束） |
+| `feature` | `code`、`text?` | `code` 必须是同插件的功能；在工具面板打开，可带输入 |
+
+### 调度与可见性
+
+遵守 [能耗与性能](energy-efficiency.md)：
+
+- **触发源**：`cwd` ← 活动 Pane 的工作目录变化与本地 / 远端切换；`activePane` ← 活动 Pane 变化；`branch` ← `ToolBranchWatcher`
+  （按仓库根去重地监听 `.git`）并与 `TabTitleRuleService.currentBranch(in:)` 比对；`agent` ← Agent 任务状态变化（接线先做，
+  使用在后续版本）；切换标签、清单 / 授权 / 开发目录变化也会触发。窗口整树重建后只比较上下文键
+  （`cwd`、`isRemote`、`branch`、`paneID`、agent 状态），键相同不重跑。
+- **节流**：触发去抖 300 ms；同一视图两次运行最短间隔 5 s；运行中再触发记下，完成后补跑一次；
+  并发上限每窗口 4、每插件 2。每个视图缓存最近若干个上下文键的结果（≤ 16 个），切回旧标签命中且未过期就直接显示。
+- **定时**：`interval > 0` 时用单次 `Task.sleep(ttl ?? interval)` 自续；缺省 60 s；脚本输出里的 `ttl` 覆盖下一次间隔。
+- **不可见零开销**：窗口被遮挡或最小化时不跑脚本，只把视图标记为过期；恢复可见时过期的视图立即补跑一次。
+  `pane.bottom` 另按 Pane 判断：只有选中标签里挂着条的 Pane 运行，后台标签的 Pane 同样只记过期、切回来补跑。
+  `inspector.panel` 页签没选中时不挂载也不建数据源。
+- **失败**：该段显示插件图标加警告符号（warning 色），tooltip 为 stderr 摘要，点击重跑；连续 3 次失败退避到
+  `max(interval × 4, 300)` 秒；插件尚未授权时显示「需要授权」，点击走 `ToolCenter.approve`。运行超过 1 s 才显示小转圈。
+- **停用 / 卸载 / 清单变化**：取消正在跑的脚本、移除段；面板会话延后一轮 `teardown()`；窗口关闭时 `extensionHost.teardown()`。
+
+### panel 视图
+
+- 入口是视图的 `main`（不是 `ui.main`）。`ToolSessionViewController` / `WebToolViewController` 增加 `entryPath` 参数，缺省仍是 `ui.main`。
+- 为 panel 合成一个功能 `view:<id>`（`ToolCenter.viewLaunchRequest`），动作按 `ui` 处理，权限、授权提示、停用与热重载与普通网页工具一致。
+  `enter` 事件多带一个 `view: {id, slot}`。
+- **上下文**：新增桥接方法 `context.get`（无需权限）与 `context` 事件。页面里 `aster.context.get()` 返回当前标签上下文，
+  `aster.onContextChange(callback)` 在标签、cwd、分支等变化时收到新值（不会重发 `enter`）。
+- **Inspector 页签**：panel 视图在详情面板的页签条里排在内置项之后，图标 `puzzlepiece.extension`，
+  identifier 为 `details-chip-plugin-<viewID>`；选中态存在 `AppPreferences` 的 `inspectorPluginSection`（与 `inspectorCustomSection` 同机制），
+  所选视图不存在或被关掉时回落到内置项。页签顺序不可持久化（本版本取舍）。
+- 会话只建一次，由 Inspector 借用并 `deliver` 新上下文；同一窗口里切标签不重建网页。
+- panel 只能是 HTML / CSS / JS：沙箱规则不变（无内联脚本，联网只能走 `aster.net.fetch` 并受 `network` 域名限制）。
+
+### 状态存储
+
+用户对视图的决定（启用、改放的位置）存在 `tools-state.json` 的 `plugins[<id>].views[<viewId>]`，形如
+`{"enabled": false, "slot": "tab.top"}`。只有偏离缺省才写：启用且没改位置的记录会被删除，插件记录也只剩缺省值时一并删除；
+改回与清单相同的位置存为「没改过」，清单以后调整缺省位置可以跟上。解码容错：`views` 里坏掉的条目丢弃；不认识的 `slot`
+（例如更新版本写入的挂载点）按没改过处理，用清单缺省。**不进 `AsterConfiguration`**（它解码失败会整份回退默认）。
+
+### 设置页
+
+- 快照：`pluginRow` 多一个 `views`：`[{ "id", "title", "kind", "slot", "defaultSlot", "enabled", "slots": [可改放的位置 id], "inactiveReason": null|"disabled"|"pluginDisabled"|"unsupported" }]`；
+  顶层多一个 `viewSlots`：`[{ "id": "tab.bottom", "title": "标签底部", "kinds": ["bar"], "implemented": true }]`，列出全部挂载点
+  （未实现的也给标题，视图落在那里时要显示出来）。`slots` 只含本版本已实现且接受该类型的位置。
+- 动作：`tools.setViewEnabled {id, view, enabled}`、`tools.setViewSlot {id, view, slot|null}`。`view` 必须是该插件声明的视图；
+  `enabled` 只认 JSON 布尔值；`slot` 必须是已实现且接受该视图类型的位置，`null`（或缺省）恢复清单缺省；
+  失败 toast 并以失败回执，与其它动作一致。
+- 网页：插件卡片在「权限」之后多一栏「视图」（只有声明了视图的插件才有）：标题、类型徽章（状态条 / 面板）、位置下拉
+  （缺省位置带「（默认）」后缀；选回缺省位置发 `null`）、启用开关，不生效时附灰字原因。
+
+### 兼容
+
+- `schemaVersion` 仍为 1，`contributes` 是可选节。旧版 Aster 读到带 `contributes` 的清单会因「未知字段」**整份拒绝该插件**
+  （记一条问题，不崩溃）；不用 `contributes` 的插件不受影响。使用界面扩展的插件文档里应写明需要新版本 Aster。
+- 未实现的 slot 可以声明，将来版本实现后无需改清单。
+
+### 内置示例：`aster.gitbar`
+
+`Resources/tools-builtin/aster.gitbar/`：没有功能、没有网页，只贡献一个 `tab.bottom` 的 bar `branch`（权限 `exec`、
+`clipboard.write`、`terminal.insert`；每 30 s 加 `cwd` / `branch` / `activePane` 触发）。`bin/gitbar.sh` 是 POSIX sh 脚本，
+不依赖 jq / python：
+
+- 无 cwd、cwd 不是 git 仓库、`git` 失败或 stdin 里 `isRemote` 为 true 时输出 `{"items":[],"ttl":600}`（整条隐藏，10 分钟后再看）。
+- 否则 `GIT_OPTIONAL_LOCKS=0 git -C "$ASTER_CWD" status --porcelain=v2 --branch`：分支名（detached 时显示 `HEAD@短SHA`）、
+  ahead / behind、脏文件数（已跟踪的改动加未跟踪文件）。
+- 项目依次是：分支（点击复制分支名）、`↑N`（有 ahead 时，点击预填 `git push`）、`↓N`（有 behind 时，点击预填
+  `git pull --ff-only`）、`●N`（有改动时，warning 色）、刷新按钮。分支名里的 `\` 与 `"` 转义为合法 JSON。
+- 提示文案按 `ASTER_LOCALE` 选中文或英文（脚本输出不经过 Aster 的翻译表）；清单的 `name`、`description`、视图 `title`
+  只写简体中文，运行时由 `localizedForBuiltin` 翻译。
+
 ## 设置页「工具」
 
 分类 id `tools`，排在「Recipes」之后。快照键 `tools`：
@@ -416,7 +614,10 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
   "plugins": [{ "id": "…", "name": "…", "version": "…", "description": "…", "source": "builtin|user|development",
                 "directory": "…", "status": "ready|disabled|needsApproval", "statusReason": "firstRun|filesChanged|permissionsAdded|networkDomainsAdded|null",
                 "enabled": true, "permissions": [{ "id": "exec", "risk": "high", "title": "…", "granted": true }],
-                "networkDomains": ["…"], "featureCount": 2, "removable": true }],
+                "networkDomains": ["…"], "featureCount": 2, "removable": true,
+                "views": [{ "id": "branch", "title": "Git 分支", "kind": "bar|panel", "slot": "tab.bottom", "defaultSlot": "tab.bottom",
+                            "enabled": true, "slots": ["tab.top", "tab.bottom", "pane.bottom"], "inactiveReason": "null|disabled|pluginDisabled|unsupported" }] }],
+  "viewSlots": [{ "id": "tab.bottom", "title": "标签底部", "kinds": ["bar"], "implemented": true }],
   "issues": [{ "path": "…", "message": "…" }],
   "developmentFolders": ["…"]
 }
@@ -424,7 +625,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 动作（`tools.` 前缀）：`setEnabled {id, enabled}`、`approve {id}`、`uninstall {id}`、`reveal {id}`、
 `openPluginsFolder`、`reload`、`installFromFolder`（原生选择文件夹）、`addDevelopmentFolder`、
-`removeDevelopmentFolder {path}`、`openLauncher`。`tools.launcherShortcut` 走普通 `set` 管线。
+`removeDevelopmentFolder {path}`、`openLauncher`、`setViewEnabled {id, view, enabled}`、`setViewSlot {id, view, slot|null}`（见「界面扩展」）。`tools.launcherShortcut` 走普通 `set` 管线。
 
 实现（`SettingsToolsBridge`，注入 `ToolManaging`，测试可替换）：
 
@@ -448,7 +649,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 ```
 <AppSupport>/Plugins/<id>/            用户安装的插件
 <AppSupport>/PluginData/<id>/         插件私有数据（storage.json、加密的 secure-storage.bin）与脚本的 ASTER_PLUGIN_DATA
-<AppSupport>/tools-state.json         启用、授权、摘要、开发目录、使用记录
+<AppSupport>/tools-state.json         启用、授权、摘要、开发目录、使用记录、视图设置（plugins[id].views）
 <App>/Contents/Resources/tools-builtin/   内置网页工具（只读）
 <App>/Contents/Resources/tool-runtime/    aster-bridge.js
 ```
@@ -467,6 +668,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, de, zh-Hant}`），由
 `python3 scripts/check-localizations.py merge` 合并；网页设置页文案写入 `Resources/settings-ui/i18n.js` 五种语言。
+内置插件清单的视图 `title`（`contributes.views[].title`）与 `name`、`description` 一样运行时经 `L()` 翻译，`check-localizations.py` 也核对它们。
 内置网页工具自带六种语言字典（`zh-Hans`、`zh-Hant`、`en`、`ja`、`fr`、`de`），按 `context.locale` 选择。
 
 ## 测试
@@ -474,7 +676,7 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 只跑定向用例：`./scripts/test.sh --filter <name>`。覆盖：清单校验（每条拒绝规则）、匹配与拼音、信任状态机、
 摘要、脚本协议解析与上限、桥接参数与授权、内置转换；scheme handler 路径越界、桥接未授权拒绝、脚本超时与
 输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作；加密存储的密文格式、密钥丢失与预埋条目、
-剪贴板机密标记（`ToolSecureStorageTests`）。
+剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）。
 
 ## 独立工具窗口
 
