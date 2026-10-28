@@ -1135,9 +1135,9 @@ func terminalAutocompleteSingleCandidateKeepsManualPanelOpen() async throws {
   #expect(controller.panelVisible)
 }
 
-@Test("自动单项未选中Tab只清理，明确选择后才替换token")
+@Test("自动单项未选中时Tab一次直接接受唯一候选")
 @MainActor
-func terminalAutocompleteSingleAutomaticTabDismissesUntilSelected() async throws {
+func terminalAutocompleteSingleAutomaticTabAcceptsOnce() async throws {
   let fixture = try makeTerminalAutocompleteFixture()
   defer { try? FileManager.default.removeItem(at: fixture.directory) }
   fixture.controls.value.autocompleteCandidatePanel = .automatic
@@ -1159,15 +1159,8 @@ func terminalAutocompleteSingleAutomaticTabDismissesUntilSelected() async throws
   #expect(!controller.hasUserSelection)
   #expect(controller.handle(.tab))
   #expect(!controller.panelVisible)
-  #expect(!controller.hasUserSelection)
-  #expect(sent.isEmpty, "未选中单项不插入灰字")
-  controller.refreshNow()
-  #expect(controller.handle(.down))
-  #expect(controller.hasUserSelection)
-  #expect(controller.handle(.tab))
   #expect(sent == Array(repeating: UInt8(127), count: 4) + Array("checkout ".utf8))
   #expect(controller.lastSubmittedCommand == nil)
-
 }
 
 @Test("Agent resume 仅作为实际执行过的历史出现，不注入项目命令")

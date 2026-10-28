@@ -521,10 +521,9 @@ final class TerminalAutocompleteController {
           return acceptCandidate(at: selectedIndex)
         }
         if currentResult.candidates.count == 1 {
-          // 原版 show 将索引重置为 -1；单项会进入 accept，但 selectedItem 为 nil。
-          // 该分支仅清理且吞掉按键，不补选首项，也不插入 ghost。
-          dismiss()
-          return true
+          // 唯一候选已经完整显示在面板（通常还有灰字），没有歧义，Tab 一次直接接受。
+          // 原版此处只清理面板、要按第二次 Tab 才插入，交互冗余，有意不再沿用。
+          return acceptCandidate(at: 0)
         }
         let firstIsWholeLine = currentResult.candidates.first.map {
           $0.kind == .learnedCommand || $0.kind == .correction
