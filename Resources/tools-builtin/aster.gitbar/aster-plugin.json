@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.gitbar",
+  "name": "Git 状态条",
+  "version": "1.0.0",
+  "description": "在终端标签底部显示当前仓库的分支、领先 / 落后提交数和未提交改动数，点击可复制分支名或预填 git 命令",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "permissions": ["exec", "clipboard.write", "terminal.insert"],
+  "contributes": {
+    "views": [
+      {
+        "id": "branch",
+        "title": "Git 分支",
+        "kind": "bar",
+        "slot": "tab.bottom",
+        "source": { "type": "script", "command": ["bin/gitbar.sh"], "timeout": 5 },
+        "refresh": { "interval": 30, "on": ["cwd", "branch", "activePane"] }
+      }
+    ]
+  }
+}
