@@ -281,10 +281,18 @@ await aster.openURL("https://example.com"); // 先弹确认，返回用户是否
 | `tab.bottom` | 状态条 | 终端区域下方 | 可用 |
 | `pane.bottom` | 状态条 | 每个终端 Pane 的底部，每个 Pane 一条；脚本拿到的是这个 Pane 自己的目录与 Pane id | 可用 |
 | `inspector.panel` | 面板 | 详情面板（Inspector）里的一个页签 | 可用 |
-| `window.top`、`window.bottom`、`sidebar.section`、`pane.header` | — | 窗口顶部 / 底部、侧栏、Pane 顶部 | 后续版本；现在可以写进清单，但不会显示 |
+| `window.top` | 状态条 | 窗口最上面一整行，和红绿灯同一行；有它时红绿灯那一行归它，路径标题回到内容区 | 可用 |
+| `window.bottom` | 状态条 | 窗口最下面一整行（底部标签栏布局时在标签栏下面） | 可用 |
+| `sidebar.section` | 状态条（竖排列表）/ 面板 | 竖排标签栏里、标签列表下面，每个视图一块，标题是视图的 `title`；只在竖排标签栏可见时显示 | 可用 |
+| `pane.header` | — | Pane 顶部 | 后续版本；现在可以写进清单，但不会显示 |
 
 `pane.bottom` 只挂在终端 Pane 上（工具、文件 Pane 不挂），只有当前标签里的 Pane 会运行脚本；切到别的标签时暂停，
 切回来补跑一次。切换焦点到别的 Pane 不会让它重跑；条上的 `terminal` 动作写到这条所在的 Pane。
+
+`window.top`、`window.bottom` 与 `sidebar.section` 都按当前标签的活动 Pane 取上下文，和 `tab.*` 一样。`window.top` 固定 28pt，
+没有项目时也保留（红绿灯在它左边）；空白处可以拖动窗口、双击缩放。`sidebar.section` 的状态条是竖排列表，每项一行，
+最多 32 项（横条最多 12 项）；面板高度取清单 `height`（80–400，缺省 240），页面也可以用 `aster.setHeight()` 改，同样夹到
+80–400。标签栏不是竖排或被隐藏时，侧栏视图不显示也不运行。
 
 用户可以在「设置 → 工具 → 视图」里关掉视图，或把它改放到别的位置（只能改到同类型、本版本可用的位置）。
 

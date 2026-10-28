@@ -11,9 +11,8 @@ v1 范围：
 - 入口 B：独立的工具面板（全局快捷键呼出，默认不占用；也可从「窗口」菜单与命令面板打开）。
 - 三种运行方式：原生内置工具（Swift）、脚本工具（任意可执行程序）、网页工具（WKWebView 沙箱）。
 - 权限声明 + 安装确认 + 文件摘要校验；设置页「工具」分类管理插件。
-- 界面扩展：插件可以把状态条（bar）和网页面板（panel）常驻挂到窗口上，见「界面扩展」。已实现 `tab.top`、`tab.bottom`、
-  `pane.bottom`、`inspector.panel`；`window.top` / `window.bottom` / `sidebar.section` / `pane.header` 可以声明，
-  但留待后续版本挂载。
+- 界面扩展：插件可以把状态条（bar）和网页面板（panel）常驻挂到窗口上，见「界面扩展」。除 `pane.header` 外的 7 个
+  位置都已实现；`pane.header` 可以声明，但留待后续版本挂载。
 - 工具 Pane：工具可开成工作区分屏。v1 **不持久化**工具 Pane（见「工具 Pane」）。
 
 不在 v1：终端/文件右键「用工具处理」、系统服务菜单、`aster tool` CLI、复制后推荐、Inspector 固定、
@@ -436,18 +435,51 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 | `tab.top` | bar | 当前标签（cwd = 活动 Pane） | 终端内容区顶部，查找条之后 | 已实现 |
 | `tab.bottom` | bar | 当前标签 | 终端内容区底部，Composer 之后 | 已实现 |
 | `inspector.panel` | panel | 当前标签 | Inspector（详情面板）的一个页签，填满内容区 | 已实现 |
-| `window.top` | bar | 窗口级（取选中标签） | 整个窗口顶部，全宽 | 后续（P2） |
-| `window.bottom` | bar | 窗口级 | 整个窗口底部，全宽 | 后续（P2） |
-| `sidebar.section` | bar（纵向列表）/ panel | 窗口级 | 左侧标签栏列表之后 | 后续（P2） |
+| `window.top` | bar | 窗口级（取选中标签） | 整个窗口顶部，全宽，与红绿灯同一行 | 已实现 |
+| `window.bottom` | bar | 窗口级 | 整个窗口最底，全宽（底部标签栏布局时在标签栏下面） | 已实现 |
+| `sidebar.section` | bar（纵向列表）/ panel | 窗口级 | 竖排标签栏里，标签列表之后、留白之前；只在竖排且标签栏可见时挂载 | 已实现 |
 | `pane.bottom` | bar | 单个终端 Pane（cwd、远端、Agent 都取该 Pane 自己的） | 每个终端 Pane 底部，内容与 Prompt Queue 之间 | 已实现 |
 | `pane.header` | bar（只放图标，≤ 3 项） | 单个 Pane | Pane 顶部悬停带 | 后续（P3） |
 
-未实现的位置清单里**可以声明**（向前兼容，不会因此拒绝插件），但视图不挂载、不跑脚本；设置页显示「本版本暂不支持这个位置」，
+未实现的位置（目前只有 `pane.header`）清单里**可以声明**（向前兼容，不会因此拒绝插件），但视图不挂载、不跑脚本；
+设置页显示「本版本暂不支持这个位置」，
 用户可以把它改放到已实现的位置。`ToolViewSlot.isImplemented` 是唯一的开关，`ToolViewSlot.slots(accepting:)` 给出某类型可改放的位置。
 
 同一挂载点上有多个视图（可能来自不同插件）时共用一条 `ToolBarView`，按插件显示顺序、清单顺序排成段，段间 1pt 竖分隔；
-全部为空时整条隐藏。bar 高度默认 26，`tab.*` 允许 22–28（清单 `height`，越界按缺省）。bar 由 `WorkspaceExtensionHost`
+全部为空时整条隐藏（`window.top` 例外，见下）。bar 高度默认 26，`tab.*` 与 `window.bottom` 允许 22–28（清单 `height`，
+越界按缺省）。bar 由 `WorkspaceExtensionHost`
 长期持有，窗口整树重建（`refresh()`）时只是重新插入，不会重建、也不会重跑脚本。
+
+`window.top` / `window.bottom` 的规则：
+
+- **挂载**：`makeWorkspaceLayout()` 建好顶层 split 后，`wrapWithWindowBars` 外包一层纵向栈 `[window.top?, split, window.bottom?]`，
+  成员显式绑定栈宽，两个方向都是必需约束。没有 window 条（或视图被停用）时根视图仍直接是 split，布局与没有扩展时完全一样。
+  只有某个 window 位置从无到有 / 从有到无时整树重建一次；内容变化只 `apply`，跨重建是同一实例。
+- **上下文**：窗口选中标签，规则同 `tab.*`。
+- **背景**：tabbar 材质（`ThemeVisualEffectView`），色调回退 `tabbar.background` → 水平标签栏背景 → 侧栏背景 → panel 背景；
+  靠内容的一边有 1pt `interface.border` 分隔线。
+- **window.bottom**：默认 26pt（22–28），随界面缩放；没有项目时收起。底部标签栏布局下它在标签栏下面，也就是窗口最底。
+- **window.top**：固定 28pt，不随界面缩放，没有项目也不收起（否则红绿灯会压到侧栏）。左内边距 = `zoomButton.frame.maxX + 12`，
+  取不到按钮时用 78，全屏时用 8，每次布局重算（`WindowTopBarMetrics`、`updateWindowTopBarInset`）。条的空白处可拖动窗口，
+  双击按系统偏好缩放或最小化（`ToolBarView.isWindowDragRegion`，与标题带一致）。
+- **window.top 占住红绿灯那一行**：竖排标签栏不再留 30 + 8 的红绿灯行（`makeVerticalTabBar(reservesTitleBarRow: false)`），
+  只留 28pt 放「+ / 折叠」悬停按钮，避免它们压住「主机」行；顶部标签栏不再建 28pt 标题带（`makeHorizontalTabBar` 的
+  `showsTitleBand`），`titleLivesInTabBar` 返回 false，路径胶囊回到内容区的 `makeWorkspaceHeader`；底部标签栏与隐藏标签栏时
+  条在窗口最上面，内容整体下移。Inspector 开关按钮跟着内容区标题行走，不压在条上。
+
+`sidebar.section` 的规则：
+
+- **只在竖排标签栏、且标签栏可见时挂载**（`WorkspaceExtensionHost.setSidebarAvailable`，`refresh()` 在建布局前设置）。顶部 / 底部
+  布局或标签栏被关掉（含只有一个标签时自动隐藏）时不挂载、不建 feed、不建网页会话，已有的侧栏 panel 会话被拆掉。
+- **位置**：`makeVerticalTabBar()` 的标签列表之后、留白之前，每个视图一块（`ToolSidebarSectionsView` / `ToolSidebarSectionBlock`），
+  标题行 38pt 显示视图 `title`，复用侧栏小标题样式；整宽约束。容器由宿主长期持有，视图声明不变时区块原样保留。
+- **bar**：纵向列表 `ToolBarListView`，每项一行 24pt（随界面缩放），最多 32 项（脚本输出按 `listItemLimit` 解析，横条仍是 12）。
+  点击、失败重跑、需要授权与横条共用 `ToolBarView.contents(of:)`。没有项目时整块隐藏。上下文同 `tab.*`。
+  与横条不同，列表不显示「运行超过 1 s 才出现」的转圈。
+- **panel**：高度取清单 `height`（80–400，缺省 240，单位点，不随界面缩放）。页面 `ui.setHeight` 也夹到 80–400（桥接按位置夹取：
+  侧栏 80–400，其它 120–800），只改高度约束、不重载；`ToolPanelSessionHost` 经 `onHeightRequest` 回调宿主，声明不变时沿用该高度。
+  Inspector 页签仍忽略高度请求。会话走 `ToolPanelSessionCache`，整树重建只借用。
+- **重建**：侧栏视图从无到有 / 从有到无时整树重建一次（`mountedSlots` 含 `.sidebarSection`），个数变化只改区块。
 
 `pane.bottom` 的规则：
 
@@ -573,7 +605,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 ### 设置页
 
-- 快照：`pluginRow` 多一个 `views`：`[{ "id", "title", "kind", "slot", "defaultSlot", "enabled", "slots": [可改放的位置 id], "inactiveReason": null|"disabled"|"pluginDisabled"|"unsupported" }]`；
+- 快照：`pluginRow` 多一个 `views`：`[{ "id", "title", "kind", "slot", "defaultSlot", "enabled", "slots": [可改放的位置 id], "inactiveReason": null|"disabled"|"pluginDisabled"|"unsupported"|"layout" }]`（`layout`：侧栏视图在非竖排或隐藏的标签栏下不显示，由 `SettingsToolsBridge` 按当前布局判断，切换布局后自动推快照）；
   顶层多一个 `viewSlots`：`[{ "id": "tab.bottom", "title": "标签底部", "kinds": ["bar"], "implemented": true }]`，列出全部挂载点
   （未实现的也给标题，视图落在那里时要显示出来）。`slots` 只含本版本已实现且接受该类型的位置。
 - 动作：`tools.setViewEnabled {id, view, enabled}`、`tools.setViewSlot {id, view, slot|null}`。`view` 必须是该插件声明的视图；
@@ -616,7 +648,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
                 "enabled": true, "permissions": [{ "id": "exec", "risk": "high", "title": "…", "granted": true }],
                 "networkDomains": ["…"], "featureCount": 2, "removable": true,
                 "views": [{ "id": "branch", "title": "Git 分支", "kind": "bar|panel", "slot": "tab.bottom", "defaultSlot": "tab.bottom",
-                            "enabled": true, "slots": ["tab.top", "tab.bottom", "pane.bottom"], "inactiveReason": "null|disabled|pluginDisabled|unsupported" }] }],
+                            "enabled": true, "slots": ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom"], "inactiveReason": "null|disabled|pluginDisabled|unsupported|layout" }] }],
   "viewSlots": [{ "id": "tab.bottom", "title": "标签底部", "kinds": ["bar"], "implemented": true }],
   "issues": [{ "path": "…", "message": "…" }],
   "developmentFolders": ["…"]

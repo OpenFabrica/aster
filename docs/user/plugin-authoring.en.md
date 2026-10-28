@@ -286,11 +286,21 @@ a Git status bar at the bottom of the terminal. Add `contributes.views` to the m
 | `tab.bottom` | Status bar | Below the terminal area | Available |
 | `pane.bottom` | Status bar | At the bottom of each terminal pane, one bar per pane. The script gets the directory and the pane ID of that pane. | Available |
 | `inspector.panel` | Panel | A tab in the Details panel (Inspector) | Available |
-| `window.top`, `window.bottom`, `sidebar.section`, `pane.header` | — | Top or bottom of the window, sidebar, top of a pane | A later version; you can already write them in the manifest, but they are not shown |
+| `window.top` | Status bar | One full row at the very top of the window, in the same row as the traffic lights. When it is present, it owns that row and the path title moves back into the content area. | Available |
+| `window.bottom` | Status bar | One full row at the very bottom of the window (below the tab bar in the bottom tab-bar layout) | Available |
+| `sidebar.section` | Status bar (vertical list) / Panel | In the vertical tab bar, below the tab list. One block per view, titled with the view `title`. Shown only while the vertical tab bar is visible. | Available |
+| `pane.header` | — | Top of a pane | A later version; you can already write it in the manifest, but it is not shown |
 
 `pane.bottom` is shown only on terminal panes (not on tool or file panes). Only the panes of the current tab run the
 script. When you switch to another tab, they pause, and they run once when you come back. Moving the focus to another
 pane does not run the script again. A `terminal` action on the bar writes to the pane that the bar is in.
+
+`window.top`, `window.bottom`, and `sidebar.section` take their context from the active pane of the current tab, like
+`tab.*`. `window.top` is always 28 pt and stays even when it has no items (the traffic lights are on its left). Drag its
+empty area to move the window; double-click it to zoom. In `sidebar.section`, a status bar is a vertical list with one
+item per row and at most 32 items (a horizontal bar has at most 12). A panel there uses the manifest `height` (80–400,
+default 240). The page can change it with `aster.setHeight()`, which is also limited to 80–400. When the tab bar is not
+vertical, or is hidden, sidebar views are not shown and do not run.
 
 Users can turn a view off or move it to another position in **Settings → Tools → Views**. A view can only move to a
 position that accepts its kind and is available in this version.
