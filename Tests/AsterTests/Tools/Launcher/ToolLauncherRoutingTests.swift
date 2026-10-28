@@ -113,3 +113,19 @@ func toolLauncherPanelFrameStaysInVisibleArea() {
   #expect(narrow.width == 560)
   #expect(narrow.minX == 20)
 }
+
+@MainActor
+@Test("拖过的面板：左边与顶边按拖到的位置，越界时收回可见区域")
+func toolLauncherPanelFrameFollowsDraggedPlacement() {
+  let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+  let moved = ToolLauncherController.frame(contentHeight: 300, top: 600, left: 100, in: screen)
+  #expect(moved.minX == 100)
+  #expect(moved.maxY == 600)
+  // 贴着可见区域上边时不再往下让 20pt。
+  let atTop = ToolLauncherController.frame(contentHeight: 300, top: 900, left: 0, in: screen)
+  #expect(atTop.maxY == 900)
+  #expect(atTop.minX == 0)
+  // 左右越界时收回屏幕里。
+  #expect(ToolLauncherController.frame(contentHeight: 300, top: 600, left: 1_400, in: screen).maxX == 1440)
+  #expect(ToolLauncherController.frame(contentHeight: 300, top: 600, left: -50, in: screen).minX == 0)
+}

@@ -24,6 +24,7 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
   private var searchField: NSTextField { searchBar.searchField }
   private var toolChip: NSTextField { searchBar.toolChip }
   private var filesButton: NSButton { searchBar.filesButton }
+  private var pinButton: NSButton { searchBar.pinButton }
   private let resultsStack = NSStackView()
   private let resultsScroll = NSScrollView()
   private let emptyLabel = makeLabel("", size: 12, color: AsterTheme.secondaryInk)
@@ -45,6 +46,12 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
   private(set) var files: [String] = []
   /// 结果列表下方正展开着工具。
   private(set) var isToolOpen = false
+
+  /// 钉住按钮的显示状态；真值在窗口控制器。
+  var isPinned: Bool {
+    get { searchBar.isPinned }
+    set { searchBar.isPinned = newValue }
+  }
 
   /// 当前选中的结果行。
   var selectedRow: ToolLauncherRow? { rows.indices.contains(selectedIndex) ? rows[selectedIndex] : nil }
@@ -110,6 +117,8 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
     searchField.delegate = self
     filesButton.target = self
     filesButton.action = #selector(clearDroppedFiles)
+    pinButton.target = self
+    pinButton.action = #selector(togglePin)
     return searchBar
   }
 
@@ -179,6 +188,22 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
     footer.hideNotice()
     selectedIndex = 0
     reloadResults()
+  }
+
+  /// 来源 Pane 变了（钉住的面板重新拿到键盘时）：换上新环境，按搜索框里现有的文字重新匹配。
+  func updateContext(_ context: ToolContext) {
+    loadViewIfNeeded()
+    self.context = context
+    guard !isToolOpen else { return }
+    reloadResults()
+  }
+
+  /// 鼠标按在这里时拖动面板：搜索行里搜索框与按钮以外的空白（放大镜、四周留白、工具名），以及整条底栏。
+  /// 结果行、工具界面与输入控件照常接收点击。
+  func isDragHandle(_ hit: NSView) -> Bool {
+    if hit.isDescendant(of: footer) { return true }
+    guard hit.isDescendant(of: searchBar) else { return false }
+    return !hit.isDescendant(of: searchField) && !(hit is NSButton)
   }
 
   /// 面板显示后：把输入交给搜索框，并在面板是 key 的期间拦截面板快捷键。
@@ -410,6 +435,12 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
     selectedIndex = 0
     reloadResults()
     delegate?.launcherContentDidChangeHeight(self, animated: true)
+  }
+
+  /// 点图钉切换钉住，然后把键盘还给搜索框。
+  @objc private func togglePin() {
+    delegate?.launcherContentDidTogglePin(self)
+    focusSearchField()
   }
 
   /// 点文件标记清掉拖入的文件，回到按文字匹配。

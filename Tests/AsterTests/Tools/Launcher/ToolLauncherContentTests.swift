@@ -20,6 +20,7 @@ private final class RecordingContentDelegate: ToolLauncherContentDelegate {
   func launcherContent(_ content: ToolLauncherViewController, toolReceivedFiles files: [String]) {}
   func launcherContentDidRequestExitTool(_ content: ToolLauncherViewController) {}
   func launcherContentDidRequestClose(_ content: ToolLauncherViewController) {}
+  func launcherContentDidTogglePin(_ content: ToolLauncherViewController) {}
   func launcherContentDidChangeHeight(_ content: ToolLauncherViewController, animated: Bool) {
     heightChanges += 1
   }

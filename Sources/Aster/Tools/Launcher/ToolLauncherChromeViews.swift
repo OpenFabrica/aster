@@ -50,13 +50,19 @@ final class ToolLauncherRootView: NSView {
   }
 }
 
-/// 搜索行：放大镜、已打开工具的名字、大号搜索框，以及拖入文件的标记（点它清掉文件）。
-/// 搜索框的 delegate 与文件标记的动作由内容控制器接上。
+/// 搜索行：放大镜、已打开工具的名字、大号搜索框、拖入文件的标记（点它清掉文件），以及钉住按钮。
+/// 搜索框的 delegate、文件标记与钉住按钮的动作由内容控制器接上。
 @MainActor
 final class ToolLauncherSearchBar: NSStackView {
   let searchField = NSTextField()
   let toolChip = makeLabel("", size: 12, weight: .semibold, color: AsterTheme.accent)
   let filesButton = NSButton()
+  let pinButton = NSButton()
+
+  /// 钉住按钮的外观：钉住时实心图钉、强调色。
+  var isPinned = false {
+    didSet { updatePinButton() }
+  }
 
   /// 按固定行高搭建搜索行。
   init(height: CGFloat) {
@@ -78,7 +84,12 @@ final class ToolLauncherSearchBar: NSStackView {
     filesButton.bezelStyle = .inline
     filesButton.isHidden = true
     filesButton.font = NSFont.interface(ofSize: 11)
-    for view in [icon, toolChip, searchField, filesButton] { addArrangedSubview(view) }
+    pinButton.isBordered = false
+    pinButton.imagePosition = .imageOnly
+    pinButton.identifier = NSUserInterfaceItemIdentifier("tool-launcher-pin")
+    pinButton.setContentHuggingPriority(.required, for: .horizontal)
+    updatePinButton()
+    for view in [icon, toolChip, searchField, filesButton, pinButton] { addArrangedSubview(view) }
     orientation = .horizontal
     alignment = .centerY
     spacing = 10
@@ -88,6 +99,16 @@ final class ToolLauncherSearchBar: NSStackView {
 
   /// 不支持从 nib 解码。
   required init?(coder: NSCoder) { nil }
+
+  /// 按钉住状态切换图钉图标、颜色与提示。
+  private func updatePinButton() {
+    let title = isPinned ? L("取消钉住") : L("钉住面板")
+    pinButton.image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: title)
+    pinButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+    pinButton.contentTintColor = isPinned ? AsterTheme.accent : AsterTheme.secondaryInk
+    pinButton.toolTip = isPinned ? title : L("钉住面板：点别处时不自动收起")
+    pinButton.setAccessibilityLabel(title)
+  }
 }
 
 /// 搜索框专用的 field editor。默认的 field editor 会把拖进来的文件当文字，把路径插进搜索框；

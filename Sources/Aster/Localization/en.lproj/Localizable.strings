@@ -2733,3 +2733,6 @@
 "高亮匹配 · 分组 · 标志" = "Highlighted matches · groups · flags";
 "高风险" = "High risk";
 "（没有输出）" = "(No output)";
+"钉住面板" = "Pin Panel";
+"取消钉住" = "Unpin";
+"钉住面板：点别处时不自动收起" = "Pin panel: stays open when you click elsewhere";

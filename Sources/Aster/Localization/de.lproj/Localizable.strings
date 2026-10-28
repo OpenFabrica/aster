@@ -2731,3 +2731,6 @@
 "高亮匹配 · 分组 · 标志" = "Treffer hervorheben · Gruppen · Flags";
 "高风险" = "Hohes Risiko";
 "（没有输出）" = "(Keine Ausgabe)";
+"钉住面板" = "Panel anheften";
+"取消钉住" = "Lösen";
+"钉住面板：点别处时不自动收起" = "Panel anheften: bleibt geöffnet, wenn Sie woanders klicken";

@@ -2731,3 +2731,6 @@
 "高亮匹配 · 分组 · 标志" = "Correspondances surlignées · groupes · drapeaux";
 "高风险" = "Risque élevé";
 "（没有输出）" = "(Aucune sortie)";
+"钉住面板" = "Épingler le panneau";
+"取消钉住" = "Désépingler";
+"钉住面板：点别处时不自动收起" = "Épingler le panneau : reste ouvert quand vous cliquez ailleurs";

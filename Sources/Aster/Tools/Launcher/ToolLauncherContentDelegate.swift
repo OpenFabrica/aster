@@ -21,6 +21,8 @@ protocol ToolLauncherContentDelegate: AnyObject {
   func launcherContentDidRequestExitTool(_ content: ToolLauncherViewController)
   /// 没有工具时的 `Esc`。
   func launcherContentDidRequestClose(_ content: ToolLauncherViewController)
+  /// 点了图钉：切换钉住。
+  func launcherContentDidTogglePin(_ content: ToolLauncherViewController)
   /// 内容高度变了（结果行数、工具展开或收起、工具请求新高度）。
   func launcherContentDidChangeHeight(_ content: ToolLauncherViewController, animated: Bool)
 }

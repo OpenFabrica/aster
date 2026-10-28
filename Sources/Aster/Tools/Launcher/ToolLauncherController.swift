@@ -1,5 +1,6 @@
 // 工具面板（启动器 B）的窗口策略与工具会话宿主。非激活浮动面板（参照 Quick Terminal），出现在鼠标所在
-// 屏幕的上三分之一处，宽 720；失去 key 自动隐藏，并把焦点还给之前的应用。全局快捷键、「窗口 → 工具面板」、
+// 屏幕的上三分之一处，宽 720；失去 key 自动隐藏，并把焦点还给之前的应用。钉住后不再自动收起、在所有桌面
+// 空间显示；拖动搜索行或底栏可移动面板，之后呼出都放在拖到的位置。全局快捷键、「窗口 → 工具面板」、
 // 命令面板与 `asterShowToolLauncher` 通知都从这里呼出。面板内容在 ToolLauncherViewController。
 import AppKit
 import AsterCore
@@ -21,6 +22,15 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
   private var animationGeneration = 0
   /// 面板顶边。呼出时按屏幕算一次，之后内容变高只往下长，搜索框不跳。
   private var anchorTop: CGFloat = 0
+  /// 面板左边。没拖过时为 nil，按屏幕水平居中。
+  private var anchorLeft: CGFloat?
+  /// 用户拖到的位置（左上角，屏幕坐标）。之后每次呼出都放在这里，不再按鼠标所在屏幕居中；只在本次运行内记住。
+  private var placement: NSPoint?
+  /// 钉住：失去 key 不收起、在所有桌面空间显示，把用户带回工作区的动作也不收起面板。收起后再呼出仍保持钉住；
+  /// 只在本次运行内记住。
+  private(set) var isPinned = false
+  /// 控制器自己正在把面板设为 key。这期间的 didBecomeKey 不改来源：来源已经按这次呼出或请求定好。
+  private var isMakingPanelKey = false
   /// 本次呼出的目标工作区与来源 Pane。`⌘↩` 与 `terminal.insert` 只写这个来源。
   private weak var targetModel: AppModel?
   private var origin: ToolTerminalOrigin?
@@ -61,11 +71,32 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
     panel?.appearance = preferences.preferredAppearance
   }
 
-  /// 全局快捷键：开着就收起，否则呼出空面板。应用正处在模态会话（例如工具弹的确认框）时不动，
-  /// 免得把会话拆在模态循环底下。
+  /// 全局快捷键：开着就收起，否则呼出空面板；钉住的面板没拿着键盘时改为把它叫到前面。应用正处在模态会话
+  /// （例如工具弹的确认框）时不动，免得把会话拆在模态循环底下。
   func toggle() {
     guard NSApp.modalWindow == nil else { return }
-    if isPresented { hide() } else { show(request: nil) }
+    if !isPresented {
+      show(request: nil)
+    } else if isPinned, let panel, !panel.isKeyWindow, panel.attachedSheet == nil {
+      bringToFront()
+    } else {
+      hide()
+    }
+  }
+
+  /// 切换钉住。钉住与否只改收起策略与桌面空间行为，面板位置不动。
+  func setPinned(_ pinned: Bool) {
+    isPinned = pinned
+    content?.isPinned = pinned
+    applyCollectionBehavior()
+  }
+
+  /// 钉住的面板跟着用户出现在每个桌面空间；没钉住时跟随呼出时的活动空间。
+  private func applyCollectionBehavior() {
+    panel?.collectionBehavior =
+      isPinned
+      ? [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+      : [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle]
   }
 
   // MARK: - 呼出与收起
@@ -74,17 +105,47 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
   func show(request: ToolLaunchRequest?) {
     if !isPresented {
       present(origin: request?.origin)
-    } else if let request {
-      // 面板开着时又来了请求（例如从工作区窗口发出）：来源以新请求为准。
-      targetModel = workspaceModelProvider(request.origin)
-      origin = request.origin
+    } else {
+      if let request {
+        // 面板开着时又来了请求（例如从工作区窗口发出）：来源以新请求为准。
+        targetModel = workspaceModelProvider(request.origin)
+        origin = request.origin
+      }
+      // 钉住的面板可能正停在背后没拿着键盘。
+      bringToFront()
     }
     guard let request else { return }
     openTool(entry: request.entry, input: request.input, queryText: request.input.text ?? "")
   }
 
-  /// 在鼠标所在屏幕呼出空面板：记下之前的应用与来源 Pane，重置内容后淡入。
+  /// 呼出空面板（拖过就放在拖到的位置，否则在鼠标所在屏幕居中）：记下之前的应用与来源 Pane，重置内容后淡入。
   private func present(origin requestedOrigin: ToolTerminalOrigin?) {
+    rememberPreviousApplication()
+    let context = resolveTarget(requestedOrigin)
+    let (panel, content) = ensurePanel()
+    let visible = presentationVisibleFrame()
+    content.maximumContentHeight = visible.height - 40
+    content.reset(context: context)
+    anchorTop = placement?.y ?? Self.anchorTop(in: visible)
+    anchorLeft = placement?.x
+    panel.appearance = preferences.preferredAppearance
+    panel.setFrame(
+      Self.frame(contentHeight: content.preferredContentHeight, top: anchorTop, left: anchorLeft, in: visible),
+      display: false)
+    isPresented = true
+    animationGeneration += 1
+    panel.alphaValue = 0
+    makeKey(panel)
+    panel.invalidateShadow()
+    content.didPresent()
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = animationDuration
+      panel.animator().alphaValue = 1
+    }
+  }
+
+  /// 记下 Aster 之外的前台应用，Esc 收起面板时把焦点还给它。非激活面板拿到键盘时前台应用不变。
+  private func rememberPreviousApplication() {
     if let app = NSWorkspace.shared.frontmostApplication,
       app.processIdentifier != ProcessInfo.processInfo.processIdentifier
     {
@@ -92,30 +153,52 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
     } else {
       previousApplication = nil
     }
+  }
+
+  /// 定下目标工作区与来源 Pane（没给来源时取目标工作区的活动 Pane），返回来源的工具环境。
+  private func resolveTarget(_ requestedOrigin: ToolTerminalOrigin?) -> ToolContext {
     let model = workspaceModelProvider(requestedOrigin)
     targetModel = model
     origin = requestedOrigin ?? model?.toolTerminalOrigin()
-    let (panel, content) = ensurePanel()
-    let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-    let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-    content.maximumContentHeight = visible.height - 40
-    content.reset(
-      context: model?.toolContext(for: origin)
-        ?? ToolCenter.shared.makeContext(workingDirectory: nil, isRemote: false))
-    anchorTop = Self.anchorTop(in: visible)
-    panel.appearance = preferences.preferredAppearance
-    panel.setFrame(
-      Self.frame(contentHeight: content.preferredContentHeight, top: anchorTop, in: visible), display: false)
-    isPresented = true
-    animationGeneration += 1
-    panel.alphaValue = 0
-    panel.makeKeyAndOrderFront(nil)
-    panel.invalidateShadow()
-    content.didPresent()
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = animationDuration
-      panel.animator().alphaValue = 1
+    return model?.toolContext(for: origin)
+      ?? ToolCenter.shared.makeContext(workingDirectory: nil, isRemote: false)
+  }
+
+  /// 呼出时所在屏幕的可见区域：拖到的位置还落在某块屏幕上就用那块屏幕（显示器拔掉后忘掉这个位置），
+  /// 否则取鼠标所在的屏幕。
+  private func presentationVisibleFrame() -> NSRect {
+    if let placement {
+      // 左上角可能正好贴在可见区域的上边或左边，`contains` 不含上边，放宽 1pt。
+      if let screen = NSScreen.screens.first(where: { $0.visibleFrame.insetBy(dx: -1, dy: -1).contains(placement) }) {
+        return screen.visibleFrame
+      }
+      self.placement = nil
     }
+    let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+    return screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+  }
+
+  /// 把开着却没拿着键盘的面板叫到前面，键盘交给搜索框。
+  private func bringToFront() {
+    guard isPresented, let panel, !panel.isKeyWindow, panel.attachedSheet == nil else { return }
+    makeKey(panel)
+    content?.focusSearchField()
+  }
+
+  /// 由控制器把面板设为 key 并提到前面；见 `isMakingPanelKey`。
+  private func makeKey(_ panel: NSPanel) {
+    isMakingPanelKey = true
+    defer { isMakingPanelKey = false }
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  /// 用户拖完面板：记下新位置，之后内容变高从这里往下长，下次呼出也放在这里。
+  private func panelDidDrag() {
+    guard let panel else { return }
+    anchorTop = panel.frame.maxY
+    anchorLeft = panel.frame.minX
+    placement = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+    if let visible = panel.screen?.visibleFrame { content?.maximumContentHeight = visible.height - 40 }
   }
 
   /// 收起面板并结束正在使用的工具。`restoreFocus` 为 true 时把焦点还给呼出前的应用；
@@ -173,18 +256,21 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
     panel.hidesOnDeactivate = false
     panel.isReleasedWhenClosed = false
     panel.isExcludedFromWindowsMenu = true
-    panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle]
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.hasShadow = true
     panel.isMovableByWindowBackground = false
     panel.delegate = self
     panel.onCancel = { [weak self] in self?.handleCancel() }
+    panel.onDidDrag = { [weak self] in self?.panelDidDrag() }
     let content = ToolLauncherViewController()
     content.delegate = self
+    content.isPinned = isPinned
     panel.contentView = content.view
+    panel.isDragHandle = { [weak content] view in content?.isDragHandle(view) == true }
     self.panel = panel
     self.content = content
+    applyCollectionBehavior()
     return (panel, content)
   }
 
@@ -193,21 +279,23 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
     visible.maxY - visible.height / 6
   }
 
-  /// 按内容高度算面板位置：宽 720 水平居中，顶边贴 `top` 往下长；下面放不下时整体上移，
-  /// 仍放不下就压缩到可见区域内（上下各留 20pt）。
-  static func frame(contentHeight: CGFloat, top: CGFloat, in visible: NSRect) -> NSRect {
+  /// 按内容高度算面板位置：宽 720，顶边贴 `top` 往下长；下面放不下时整体上移，仍放不下就压缩到可见区域内
+  /// （上下各留 20pt）。`left` 是拖动后的左边，没给就水平居中；给了也收进可见区域，面板不会跑出屏幕。
+  static func frame(contentHeight: CGFloat, top: CGFloat, left: CGFloat? = nil, in visible: NSRect) -> NSRect {
     let width = min(panelWidth, max(visible.width - 40, 320))
     let height = min(max(contentHeight, 1), max(visible.height - 40, 1))
-    let resolvedTop = min(top, visible.maxY - 20)
+    let resolvedTop = min(top, visible.maxY)
     let originY = max(resolvedTop - height, visible.minY + 20)
-    return NSRect(x: visible.midX - width / 2, y: originY, width: width, height: height)
+    let originX = left.map { min(max($0, visible.minX), visible.maxX - width) } ?? visible.midX - width / 2
+    return NSRect(x: originX, y: originY, width: width, height: height)
   }
 
   /// 内容高度变化后调整面板，顶边不动。
   private func applyContentHeight(animated: Bool) {
     guard isPresented, let panel, let content else { return }
     let visible = (panel.screen ?? NSScreen.main)?.visibleFrame ?? panel.frame
-    let target = Self.frame(contentHeight: content.preferredContentHeight, top: anchorTop, in: visible)
+    let target = Self.frame(
+      contentHeight: content.preferredContentHeight, top: anchorTop, left: anchorLeft, in: visible)
     guard target != panel.frame else { return }
     guard animated, animationDuration > 0 else {
       panel.setFrame(target, display: true)
@@ -263,14 +351,19 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
       return
     }
     let model = targetModel
-    hide(restoreFocus: false)
+    stepAsideForWorkspace()
     revealWorkspace(model, paneID: origin.paneID)
     DispatchQueue.main.async { [weak model] in
       if let failure = origin.insert(text) { model?.notice = failure }
     }
   }
 
-  /// 把工具开成目标工作区的 Pane，然后收起面板、带用户回到工作区。
+  /// 要把用户带去工作区：没钉住就收起面板（不抢回焦点）；钉住的面板留在原处。
+  private func stepAsideForWorkspace() {
+    if !isPinned { hide(restoreFocus: false) }
+  }
+
+  /// 把工具开成目标工作区的 Pane，然后收起面板（钉住时只退出工具，免得同一个工具开两份）、带用户回到工作区。
   private func openAsPane(entry: ToolCatalogEntry, input: ToolInput) {
     guard let model = targetModel else {
       content?.showNotice(L("没有打开的工作区窗口"), isError: true)
@@ -280,7 +373,11 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
       content?.showNotice(model.notice ?? L("无法开成 Pane"), isError: true)
       return
     }
-    hide(restoreFocus: false)
+    if isPinned {
+      if session != nil { exitTool() }
+    } else {
+      hide(restoreFocus: false)
+    }
     revealWorkspace(model, paneID: nil)
   }
 
@@ -296,22 +393,31 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
 
   // MARK: - NSWindowDelegate
 
-  /// 失去 key 自动隐藏（不抢回焦点：用户已经点去了别处）。网页工具与运行时的确认框、文件选择框
-  /// 以 sheet 挂在面板上，弹出时面板也会失去 key，这些时候不能收起；判断放到下一轮，模态会话与
+  /// 失去 key 自动隐藏（不抢回焦点：用户已经点去了别处）；钉住时不收起。网页工具与运行时的确认框、
+  /// 文件选择框以 sheet 挂在面板上，弹出时面板也会失去 key，这些时候不能收起；判断放到下一轮，模态会话与
   /// sheet 那时已经建立。
   func windowDidResignKey(_ notification: Notification) {
     DispatchQueue.main.async { [weak self] in
-      guard let self, self.isPresented, let panel = self.panel, !panel.isKeyWindow,
+      guard let self, self.isPresented, !self.isPinned, let panel = self.panel, !panel.isKeyWindow,
         panel.attachedSheet == nil, NSApp.keyWindow?.sheetParent !== panel, NSApp.modalWindow == nil
       else { return }
       self.hide(restoreFocus: false)
     }
   }
 
+  /// 钉住的面板在背后停了一阵又拿到键盘：前台应用与活动 Pane 可能都换了。重新记下前台应用（Esc 收起后
+  /// 焦点还给它）；没开工具时来源换成当前活动 Pane，预填与匹配环境都跟着它。开着工具时来源跟工具会话走，不动。
+  func windowDidBecomeKey(_ notification: Notification) {
+    guard isPresented, isPinned, !isMakingPanelKey else { return }
+    rememberPreviousApplication()
+    guard session == nil else { return }
+    content?.updateContext(resolveTarget(nil))
+  }
+
   /// 挂在面板上的 sheet 关掉后把键盘还给面板，用户可以接着输入。
   func windowDidEndSheet(_ notification: Notification) {
     guard isPresented, let panel, panel.attachedSheet == nil else { return }
-    panel.makeKeyAndOrderFront(nil)
+    makeKey(panel)
   }
 
   /// 搜索框用专用的 field editor（拖到搜索框上的文件按文件输入处理）；其它控件用系统默认的。
@@ -375,6 +481,9 @@ extension ToolLauncherController: ToolLauncherContentDelegate {
   /// 没有工具时的 Esc：收起面板并把焦点还给之前的应用。
   func launcherContentDidRequestClose(_ content: ToolLauncherViewController) { hide() }
 
+  /// 点了图钉：切换钉住。
+  func launcherContentDidTogglePin(_ content: ToolLauncherViewController) { setPinned(!isPinned) }
+
   /// 内容高度变了，调整面板，顶边不动。
   func launcherContentDidChangeHeight(_ content: ToolLauncherViewController, animated: Bool) {
     applyContentHeight(animated: animated)
@@ -434,20 +543,9 @@ extension ToolLauncherController: ToolSessionHost {
       return
     }
     model.runToolCommandInNewTab(command, workingDirectory: workingDirectory, environment: environment)
-    hide(restoreFocus: false)
+    stepAsideForWorkspace()
     revealWorkspace(model, paneID: nil)
   }
 
   var toolSessionWindow: NSWindow? { panel }
-}
-
-/// 无边框面板默认不能成为 key；这里放开，搜索框才能接收输入。不成为 main，不抢工作区窗口的主窗口身份。
-@MainActor
-final class ToolLauncherPanel: NSPanel {
-  /// `cancelOperation`（Esc）兜底。
-  var onCancel: (() -> Void)?
-  override var canBecomeKey: Bool { true }
-  override var canBecomeMain: Bool { false }
-  /// Esc 兜底，交给控制器处理。
-  override func cancelOperation(_ sender: Any?) { onCancel?() }
 }

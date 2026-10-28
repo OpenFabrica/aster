@@ -1,6 +1,6 @@
 // 工具面板这个浮动窗口的行为：「窗口 → 工具面板」能呼出；面板拿着键盘时 ⌘W 只收起面板、分屏类菜单置灰；
 // sheet 挂在面板上时不自动收起、关掉后键盘回到面板、收起面板时剩下的 sheet 按取消结束；
-// 拖到搜索框上的文件按文件输入处理，而不是把路径插成文字。
+// 拖到搜索框上的文件按文件输入处理，而不是把路径插成文字；钉住后点去别处不收起，只有搜索行空白与底栏能拖动面板。
 import AppKit
 import AsterCore
 import Foundation
@@ -35,7 +35,7 @@ private func makeSheet() -> NSWindow {
   return sheet
 }
 
-/// 这两个用例都要让面板成为 key window，并行跑会互相抢走 key、触发自动收起，所以串行。
+/// 这几个用例都要让面板成为 key window，并行跑会互相抢走 key、触发自动收起，所以串行。
 @MainActor
 @Suite(.serialized)
 struct ToolLauncherPanelWindowTests {
@@ -111,6 +111,76 @@ struct ToolLauncherPanelWindowTests {
     #expect(response == .cancel)
     #expect(!controller.isPresented)
   }
+
+  @Test("点图钉钉住后点去别的窗口面板不收起，快捷键先叫回再收起；取消钉住后恢复失焦自动收起")
+  func pinnedToolLauncherStaysWhenFocusMovesAway() async throws {
+    let suite = "ToolLauncherPinTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = AppModel(defaults: defaults)
+    model.ensureInitialTab()
+    let controller = ToolLauncherController(preferences: AppPreferences(defaults: defaults)) { _ in model }
+    defer { controller.shutdown() }
+    // 测试宿主不是前台应用，普通窗口拿不到键盘；用非激活面板扮演「别的窗口」。
+    let other = NSPanel(
+      contentRect: NSRect(x: 0, y: 0, width: 240, height: 120), styleMask: [.titled, .nonactivatingPanel],
+      backing: .buffered, defer: false)
+    other.isReleasedWhenClosed = false
+    defer { other.orderOut(nil) }
+
+    controller.show(request: nil)
+    let panel = try #require(NSApp.keyWindow)
+    let contentView = try #require(panel.contentView)
+    let pin = try #require(
+      descendants(of: contentView).compactMap { $0 as? NSButton }
+        .first { $0.identifier?.rawValue == "tool-launcher-pin" })
+    pin.performClick(nil)
+    #expect(controller.isPinned)
+    #expect(pin.toolTip == L("取消钉住"))
+    #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
+
+    other.makeKeyAndOrderFront(nil)
+    #expect(try await waitUntil { other.isKeyWindow })
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(controller.isPresented)
+    #expect(panel.isVisible)
+
+    // 钉住的面板在背后时，快捷键把它叫回前面；拿着键盘时再按才收起。
+    controller.toggle()
+    #expect(try await waitUntil { panel.isKeyWindow })
+    #expect(controller.isPresented)
+    controller.toggle()
+    #expect(try await waitUntil { !panel.isVisible })
+    #expect(controller.isPinned)
+
+    controller.setPinned(false)
+    #expect(panel.collectionBehavior.contains(.moveToActiveSpace))
+    controller.show(request: nil)
+    #expect(try await waitUntil { panel.isKeyWindow })
+    other.makeKeyAndOrderFront(nil)
+    #expect(try await waitUntil { !controller.isPresented })
+  }
+}
+
+@MainActor
+@Test("拖动把手：搜索行空白与底栏能拖动面板，搜索框、图钉与结果行照常接收点击")
+func toolLauncherDragHandlesAreChromeOnly() throws {
+  _ = NSApplication.shared
+  let content = ToolLauncherViewController()
+  content.reset(context: ToolContext())
+  let views = descendants(of: content.view)
+  let searchBar = try #require(views.first { $0 is ToolLauncherSearchBar })
+  let footer = try #require(views.first { $0 is ToolLauncherFooterView })
+  let searchField = try #require(views.first { $0.identifier?.rawValue == "tool-launcher-search" })
+  let pin = try #require(views.first { $0.identifier?.rawValue == "tool-launcher-pin" })
+
+  #expect(content.isDragHandle(searchBar))
+  #expect(content.isDragHandle(footer))
+  #expect(footer.subviews.allSatisfy { content.isDragHandle($0) })
+  #expect(!content.isDragHandle(searchField))
+  #expect(!content.isDragHandle(pin))
+  #expect(!content.isDragHandle(content.view))
+  for row in views where row is OpenQuicklyRowView { #expect(!content.isDragHandle(row)) }
 }
 
 @MainActor
