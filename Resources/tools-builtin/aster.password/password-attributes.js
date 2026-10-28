@@ -33,6 +33,11 @@
     return attribute.builtin ? Kit.t('attr.' + attribute.id) : attribute.name;
   }
 
+  // 当前所有属性的 id 与显示名，供历史页的编辑表单使用。
+  function definitions() {
+    return all().map((attribute) => ({ id: attribute.id, name: label(attribute) }));
+  }
+
   // 历史条目里属性应显示的名字：默认属性按当前语言，用户属性用现在的名字，已删除的用当时的快照。
   function entryName(id, snapshot) {
     const found = all().find((item) => item.id === id);
@@ -143,5 +148,5 @@
     render();
   }
 
-  window.PasswordAttributes = Object.freeze({ init, render, setUserAttributes, collect, entryName, closeForm });
+  window.PasswordAttributes = Object.freeze({ init, render, setUserAttributes, collect, entryName, definitions, closeForm });
 })();

@@ -1,4 +1,4 @@
-// 密码生成工具的历史页：遮罩显示、按属性与规则名搜索、复制（不再新增记录）、删除与清空（页面内二次确认）。
+// 密码生成工具的历史页：遮罩显示、按属性与规则名搜索、复制（不再新增记录）、修改密码与属性、删除与清空（页面内二次确认）。
 // 也导出生成页共用的小工具：建元素、画图标、按钮二次确认。
 (function () {
   'use strict';
@@ -12,6 +12,7 @@
     eye: 'M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z M10 8a2 2 0 1 1-4 0a2 2 0 1 1 4 0z',
     eyeOff: 'M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z M10 8a2 2 0 1 1-4 0a2 2 0 1 1 4 0z M2.5 2.5l11 11',
     copy: 'M6 5.5h6a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5z M3.5 10.5V3a.5.5 0 0 1 .5-.5h6',
+    edit: 'M10.5 2.5l3 3-8 8H2.5v-3z M9 4l3 3',
     trash: 'M3 4.5h10 M6.5 4.5V3h3v1.5 M4.5 4.5l.6 8.5a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.5',
     lock: 'M4.5 7.5h7a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z M5.5 7.5V5.5a2.5 2.5 0 0 1 5 0v2',
     close: 'M4.5 4.5l7 7 M11.5 4.5l-7 7',
@@ -34,9 +35,15 @@
     lock: document.querySelector('.secure-note .lock'),
   };
   // 由生成页注入：条目当前应显示的规则名与属性名。
-  let ctx = { ruleName: (entry) => (entry.rule && entry.rule.name) || '', attributeName: (id, snapshot) => snapshot || id };
+  let ctx = {
+    ruleName: (entry) => (entry.rule && entry.rule.name) || '',
+    attributeName: (id, snapshot) => snapshot || id,
+    attributes: () => [],
+  };
   // 本次会话里点开了眼睛的条目 id；切换页或关闭后都恢复遮罩。
   const revealed = new Set();
+  // 正在编辑的条目与草稿 {id, password, values}；只在内存里，重绘时保留，切走或关闭即丢弃。
+  let editing = null;
   let loadError = null;
   let disarmClear = () => {};
 
@@ -110,10 +117,11 @@
     return Kit.callBridge((aster) => aster.clipboard.writeText(password, { concealed: true }), 'copied');
   }
 
-  // 修改历史并重绘；失败时就地提示，原内容不变。
-  async function mutate(mutator, okKey) {
+  // 修改历史并重绘；失败时就地提示，原内容不变。onSuccess 在写入成功后、重绘前调用。
+  async function mutate(mutator, okKey, onSuccess) {
     try {
       await Store.updateHistory(mutator);
+      if (onSuccess) onSuccess();
       if (okKey) Kit.showStatus(Kit.t(okKey));
     } catch (error) {
       Kit.showStatus(errorText(error, 'historyWriteFailed'), 'error');
@@ -127,8 +135,103 @@
     return Kit.t(key, { detail: Kit.errorMessage(error) });
   }
 
-  // 渲染一条历史：密码行（遮罩 / 显示、时间、复制、删除）与属性行。
+  // 编辑表单里要列出的属性：当前所有属性在前，条目里已删除属性的旧值在后（按当时的名字），都可以改或清空。
+  function editableAttributes(entry) {
+    const list = ctx.attributes();
+    const known = new Set(list.map((item) => item.id));
+    for (const id of Object.keys(entry.attributes || {})) {
+      if (!known.has(id)) list.push({ id, name: ctx.attributeName(id, (entry.attributeNames || {})[id]) });
+    }
+    return list;
+  }
+
+  // 打开一条历史的编辑表单：草稿从条目复制，焦点放到密码框。
+  function startEdit(entry) {
+    editing = { id: entry.id, password: entry.password, values: Object.assign({}, entry.attributes) };
+    render();
+    const input = ui.list.querySelector('.entry-edit-password');
+    if (input) input.focus();
+  }
+
+  // 收起编辑表单，丢弃草稿。
+  function cancelEdit() {
+    editing = null;
+    render();
+  }
+
+  // 保存编辑：先在当前历史上校验，不合法就地提示且保留草稿；写入成功后才收起表单。
+  function saveEdit(entry, names, errorNode, passwordInput) {
+    const changes = { password: editing.password, attributes: editing.values, attributeNames: names };
+    try {
+      Core.editEntry(Store.history, entry.id, changes);
+    } catch (error) {
+      errorNode.textContent = Kit.t('editError.' + error.code);
+      errorNode.hidden = false;
+      passwordInput.focus();
+      return;
+    }
+    mutate((list) => Core.editEntry(list, entry.id, changes), 'entrySaved', () => { editing = null; });
+  }
+
+  // 渲染编辑中的条目：明文密码框、各属性输入框、保存与取消；↩ 保存，Esc 取消。
+  function renderEditor(entry) {
+    const form = el('form', 'entry editing');
+    const password = el('input', 'field mono entry-edit-password');
+    password.type = 'text';
+    password.autocomplete = 'off';
+    password.spellcheck = false;
+    password.maxLength = Core.VALUE_LIMIT;
+    password.value = editing.password;
+    password.setAttribute('aria-label', Kit.t('editPassword'));
+    password.addEventListener('input', () => { editing.password = password.value; });
+
+    const names = {};
+    const grid = el('div', 'attribute-grid');
+    for (const attribute of editableAttributes(entry)) {
+      names[attribute.id] = attribute.name;
+      const field = el('label', 'attr-field');
+      const caption = el('span', 'attr-label', attribute.name);
+      caption.title = attribute.name;
+      const input = el('input', 'field');
+      input.type = 'text';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.maxLength = Core.VALUE_LIMIT;
+      input.value = editing.values[attribute.id] || '';
+      input.addEventListener('input', () => { editing.values[attribute.id] = input.value; });
+      field.append(caption, input);
+      grid.appendChild(field);
+    }
+
+    const error = el('div', 'message error inline-error');
+    error.setAttribute('role', 'alert');
+    error.hidden = true;
+    const cancel = el('button', 'btn small', Kit.t('cancel'));
+    cancel.type = 'button';
+    cancel.addEventListener('click', cancelEdit);
+    const save = el('button', 'btn small primary', Kit.t('save'));
+    save.type = 'submit';
+    save.setAttribute('data-requires-bridge', '');
+    Kit.setEnabled(save, true);
+    const actions = el('div', 'row entry-actions');
+    actions.append(el('span', 'spacer'), cancel, save);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      saveEdit(entry, names, error, password);
+    });
+    form.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.isComposing) return;
+      event.preventDefault();
+      cancelEdit();
+    });
+    form.append(password, error, grid, actions);
+    return form;
+  }
+
+  // 渲染一条历史：密码行（遮罩 / 显示、时间、复制、编辑、删除）与属性行；编辑中的条目换成表单。
   function renderEntry(entry) {
+    if (editing && editing.id === entry.id) return renderEditor(entry);
     const item = el('div', 'entry');
     const main = el('div', 'entry-main');
     const shown = revealed.has(entry.id);
@@ -145,6 +248,10 @@
     copy.setAttribute('data-requires-bridge', '');
     Kit.setEnabled(copy, true);
     copy.addEventListener('click', () => copyConcealed(entry.password));
+    const edit = iconButton('edit', Kit.t('editEntry'));
+    edit.setAttribute('data-requires-bridge', '');
+    Kit.setEnabled(edit, true);
+    edit.addEventListener('click', () => startEdit(entry));
     const remove = iconButton('trash', Kit.t('deleteEntry'));
     remove.setAttribute('data-requires-bridge', '');
     Kit.setEnabled(remove, true);
@@ -156,7 +263,7 @@
         mutate((list) => list.filter((other) => other.id !== entry.id), 'entryDeleted');
       },
     });
-    main.append(password, eye, el('span', 'spacer'), time, copy, remove);
+    main.append(password, eye, el('span', 'spacer'), time, copy, edit, remove);
 
     const meta = el('div', 'entry-meta');
     const rule = entry.rule || {};
@@ -175,6 +282,7 @@
   // 按搜索词重绘列表、空状态与标签页上的条数。
   function render() {
     const all = Store.history;
+    if (editing && !all.some((entry) => entry.id === editing.id)) editing = null;
     ui.count.textContent = all.length ? String(all.length) : '';
     ui.error.hidden = !loadError;
     if (loadError) ui.error.textContent = loadError;
@@ -223,9 +331,10 @@
     render();
   }
 
-  // 离开历史页时重新遮罩所有密码并复原未完成的确认。
+  // 离开历史页时重新遮罩所有密码、丢弃未保存的编辑并复原未完成的确认。
   function hideAll() {
     revealed.clear();
+    editing = null;
     disarmClear();
     render();
   }

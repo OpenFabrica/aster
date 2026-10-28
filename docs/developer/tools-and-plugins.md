@@ -180,6 +180,10 @@ v1 范围：
 - 每个内置网页工具目录各放一份相同的 `kit.js` 与 `base.css`（插件只能读自己目录里的文件），改动时所有副本一起改。
 - 密码生成（`aster.password`）：规则与属性定义是普通数据，存 `storage`（`rules`、`attributes` 等）；历史存
   `secureStorage` 的 `history`（新的在前，上限 500 条，同一密码重复复制只更新该条）。复制一律带 `concealed`。
+  生成页记住本次打开后最近一次复制写入的条目 id；再次复制时，若该条仍在且用途属性（整理后的非空值）
+  与这次完全相同，就把它换成新密码并移到最前，不新增条目（`PasswordCore.recordCopy` 的 `replaceId`）。
+  空用途同样适用，但只在同一次打开内，重新打开工具后第一次复制总是新增。历史页可修改条目的密码与属性
+  （`PasswordCore.editEntry`）：属性整份替换、清空即删除，时间、规则与位置不变，密码不能为空。
   历史条目保存属性名快照，属性定义删掉后旧条目照样能显示。
 - 清单里的 `name`、`description`、`title`、`subtitle`、match `label` 只写简体中文原文。运行时只对内置来源用
   `L(String.LocalizationValue(原文))` 查 `Localizable.strings`（与原生内置工具同一张表），译文由

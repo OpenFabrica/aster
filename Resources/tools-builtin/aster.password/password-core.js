@@ -273,19 +273,30 @@
     return result;
   }
 
+  // 两组属性值整理后是否完全相同（只比非空的值，不看名字）。
+  function sameAttributes(a, b) {
+    const left = compactAttributes(a);
+    const right = compactAttributes(b);
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every((id) => left[id] === right[id]);
+  }
+
   // 记录一次复制：新条目放最前；同一个密码已存在时合并属性（新值覆盖、空值不清掉旧值）并更新时间，移到最前。
-  // 返回新数组，不改动传入的历史；超过 500 条时丢掉最旧的。
-  function recordCopy(history, entry, now) {
+  // replaceId 是生成页上一次记录的条目：它还在、且用途属性和这次完全相同时，直接换成新密码，不新增条目，
+  // 这样同一用途反复重新生成、复制只留一条。返回新数组，不改动传入的历史；超过 500 条时丢掉最旧的。
+  function recordCopy(history, entry, now, replaceId) {
     const time = (now || new Date()).toISOString();
     const list = Array.isArray(history) ? history.slice() : [];
-    const index = list.findIndex((item) => item.password === entry.password);
     const attributes = compactAttributes(entry.attributes);
+    let index = replaceId ? list.findIndex((item) => item.id === replaceId && sameAttributes(item.attributes, attributes)) : -1;
+    if (index < 0) index = list.findIndex((item) => item.password === entry.password);
     const names = {};
     for (const id of Object.keys(attributes)) names[id] = (entry.attributeNames || {})[id] || id;
     let next;
     if (index >= 0) {
       const old = list.splice(index, 1)[0];
       next = Object.assign({}, old, {
+        password: entry.password,
         createdAt: time,
         rule: entry.rule || old.rule,
         attributes: Object.assign({}, old.attributes, attributes),
@@ -296,6 +307,23 @@
     }
     list.unshift(next);
     return list.slice(0, HISTORY_LIMIT);
+  }
+
+  // 修改一条历史的密码与用途属性：属性按传入的整份替换（清空即删除），时间、规则与位置不变。
+  // 密码去掉控制字符后不能为空（PasswordError passwordEmpty）；找不到条目时抛 entryMissing。返回新数组。
+  function editEntry(history, id, changes) {
+    const password = cleanText(changes.password, VALUE_LIMIT);
+    if (!password.trim()) throw new PasswordError('passwordEmpty');
+    const list = Array.isArray(history) ? history.slice() : [];
+    const index = list.findIndex((item) => item.id === id);
+    if (index < 0) throw new PasswordError('entryMissing');
+    const attributes = compactAttributes(changes.attributes);
+    const names = {};
+    for (const key of Object.keys(attributes)) {
+      names[key] = (changes.attributeNames || {})[key] || (list[index].attributeNames || {})[key] || key;
+    }
+    list[index] = Object.assign({}, list[index], { password, attributes, attributeNames: names });
+    return list;
   }
 
   // 按搜索词过滤历史：空白分隔的每个词都要出现在属性值或规则名里（不区分大小写，不搜密码本身）。
@@ -325,6 +353,7 @@
     MAX_LENGTH,
     HISTORY_LIMIT,
     NAME_LIMIT,
+    VALUE_LIMIT,
     DEFAULT_SYMBOLS,
     AMBIGUOUS,
     CLASS_IDS,
@@ -346,8 +375,10 @@
     sanitizeRules,
     sanitizeAttributes,
     compactAttributes,
+    sameAttributes,
     sanitizeHistory,
     recordCopy,
+    editEntry,
     filterHistory,
     parseLength,
   };

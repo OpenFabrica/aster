@@ -49,6 +49,8 @@
     // 设置读完之前启动器给的长度先记在这里，读完再套用，免得被上次的选择覆盖。
     settingsReady: false,
     pendingLength: null,
+    // 本次打开后最近一次复制记下的历史条目；用途属性没变时再复制就更新它，不新增。
+    lastEntryId: null,
   };
 
   // MARK: - 名字
@@ -279,7 +281,8 @@
 
   // MARK: - 复制与历史
 
-  // 复制当前密码（concealed），成功后记入加密历史；同一密码再次复制只更新属性与时间。
+  // 复制当前密码（concealed），成功后记入加密历史；同一密码再次复制只更新属性与时间，
+  // 用途属性和上次复制时一样则把上次那条换成新密码。
   async function copyPassword() {
     const password = state.password;
     if (!password) return;
@@ -293,7 +296,8 @@
       params: Core.normalizeParams(state.params),
     };
     try {
-      await Store.updateHistory((list) => Core.recordCopy(list, { password, rule, attributes, attributeNames }));
+      const list = await Store.updateHistory((current) => Core.recordCopy(current, { password, rule, attributes, attributeNames }, null, state.lastEntryId));
+      state.lastEntryId = list[0].id;
       Kit.showStatus(Kit.t('copiedRecorded'));
     } catch (error) {
       const reason = error instanceof Store.SecureUnavailableError ? Kit.t('secureUnavailable') : Kit.errorMessage(error);
@@ -399,7 +403,7 @@
     Kit.onLocaleChange(rerender);
 
     Attributes.init({ persist });
-    History.init({ ruleName: entryRuleName, attributeName: Attributes.entryName });
+    History.init({ ruleName: entryRuleName, attributeName: Attributes.entryName, attributes: Attributes.definitions });
     Kit.start({
       onInput(text) {
         setTab('generate');
