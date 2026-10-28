@@ -1632,6 +1632,9 @@ final class AppModel: ObservableObject {
   /// 活动徽章的窗口级局部事件。视图只更新对应 Tab 的附件，Dock 只重新聚合状态；
   /// 该事件不承担布局、持久化或终端内容刷新。
   let tabActivityChanged = PassthroughSubject<UUID, Never>()
+  /// Agent 任务状态变化的窗口级局部事件（界面扩展 bar 的 `agent` 触发源订阅）。与
+  /// `tabActivityChanged` 一样不进 `objectWillChange`：Agent 状态随每次输入翻转，整树重建会打断 TUI。
+  let agentTaskStateChanged = PassthroughSubject<(tabID: UUID, paneID: UUID, state: AgentTaskState), Never>()
   @Published var isPalettePresented = false
   /// Open Quickly 是工作区上的临时浮层，显隐不应触发 `ObservableObject` 的整窗口
   /// 重绘。独立事件让 AppKit 控制器只挂载或移除浮层，并保留终端与侧栏实例。
@@ -4813,8 +4816,9 @@ final class AppModel: ObservableObject {
     tab.projectCommandSuggestionProvider = { [weak self] directory in
       self?.projectAgentResumeSuggestion(for: directory)
     }
-    tab.onAgentTaskStateChanged = { [weak self] paneID, state in
+    tab.onAgentTaskStateChanged = { [weak self, weak tab] paneID, state in
       self?.advancePromptQueue(paneID: paneID, reportedState: state)
+      if let tab { self?.agentTaskStateChanged.send((tabID: tab.id, paneID: paneID, state: state)) }
       // 状态翻转的时刻正是 transcript 落盘/追加的时刻：借此解析会话标题，
       // 未命中时按节流重扫历史。
       self?.refreshAgentSessionTitles(reloadIfUnmatched: true)

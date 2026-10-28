@@ -242,6 +242,16 @@ final class AppPreferences: ObservableObject {
     }
   }
 
+  /// 详情面板选中的插件 panel 页签（`ToolViewEntry.id`，`<pluginID>/view:<viewID>`）；nil 表示没选插件页签。
+  /// 与 `inspectorCustomSection` 互斥：选中插件页签时详情面板清掉另一个。
+  var inspectorPluginSection: String? {
+    get { defaults.string(forKey: Keys.inspectorPluginSection) }
+    set {
+      if let newValue { defaults.set(newValue, forKey: Keys.inspectorPluginSection) }
+      else { defaults.removeObject(forKey: Keys.inspectorPluginSection) }
+    }
+  }
+
   // MARK: - Session Memory（记录与提炼）
 
   /// 记录总开关（PRD §69）。默认关闭：记录会持久化命令与输出摘录，必须用户主动开启。
@@ -1130,6 +1140,7 @@ final class AppPreferences: ObservableObject {
     static let inspectorPresented = "aster.inspector.presented.v1"
     static let inspectorSection = "aster.inspector.section.v1"
     static let inspectorCustomSection = "aster.inspector.custom-section.v1"
+    static let inspectorPluginSection = "aster.inspector.plugin-section.v1"
     static let inspectorGitEditor = "aster.inspector.git-editor.v1"
     static let memoryRecordingMode = "aster.memory.recording-mode.v1"
     static let memoryExcludedPaths = "aster.memory.excluded-paths.v1"

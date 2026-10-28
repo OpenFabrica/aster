@@ -51,6 +51,16 @@ final class FakeToolCenter: ToolManaging {
     removedFolders.append(path)
     subject.send()
   }
+  var viewEnabledCalls: [(id: String, view: String, enabled: Bool)] = []
+  var viewSlotCalls: [(id: String, view: String, slot: ToolViewSlot?)] = []
+  func setViewEnabled(_ enabled: Bool, pluginID: String, viewID: String) {
+    viewEnabledCalls.append((pluginID, viewID, enabled))
+    subject.send()
+  }
+  func setViewSlot(_ slot: ToolViewSlot?, pluginID: String, viewID: String) {
+    viewSlotCalls.append((pluginID, viewID, slot))
+    subject.send()
+  }
   func uninstall(pluginID: String) async throws {
     uninstalled.append(pluginID)
     if let uninstallError { throw uninstallError }
@@ -115,12 +125,28 @@ func toolSummary(
   permissions: [ToolPermission] = [],
   granted: [ToolPermission] = [],
   domains: [String] = [],
-  description: String? = "说明"
+  description: String? = "说明",
+  views: [ToolViewSummary] = []
 ) -> ToolPluginSummary {
   ToolPluginSummary(
     id: id, name: name, version: "1.0.0", description: description, source: source,
     directory: directory, status: status, permissions: permissions, grantedPermissions: granted,
-    networkDomains: domains, featureCount: 2)
+    networkDomains: domains, featureCount: 2, views: views)
+}
+
+/// 构造视图一览；未给的字段取常见值（bar、缺省位置 tab.bottom、正在生效）。
+func toolViewSummary(
+  _ id: String,
+  title: String = "Git 分支",
+  kind: ToolViewKind = .bar,
+  slot: ToolViewSlot = .tabBottom,
+  defaultSlot: ToolViewSlot = .tabBottom,
+  enabled: Bool = true,
+  inactiveReason: ToolViewSummary.InactiveReason? = nil
+) -> ToolViewSummary {
+  ToolViewSummary(
+    id: id, title: title, kind: kind, slot: slot, defaultSlot: defaultSlot, isEnabled: enabled,
+    inactiveReason: inactiveReason)
 }
 
 /// 发一个动作并等它回执。

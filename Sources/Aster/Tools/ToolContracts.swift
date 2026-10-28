@@ -27,13 +27,32 @@ struct ToolLaunchRequest {
   let entry: ToolCatalogEntry
   var input: ToolInput
   /// 发起时的终端 Pane。往终端预填文字、读选区都只认它；nil 表示没有可用的终端。
-  let origin: ToolTerminalOrigin?
+  /// panel 视图常驻窗口，随活动 Pane 变化由 `ToolSessionViewController.updateContext` 改写。
+  var origin: ToolTerminalOrigin?
+  /// 作为界面扩展的 panel 视图打开时的视图与位置；普通工具为 nil。
+  var view: ToolViewPlacement?
+  /// panel 视图额外交给页面的上下文（`branch`、`tabID`、`paneID`、`agent`），并入 `context`。
+  var extendedContext: [String: JSONValue]
 
-  init(entry: ToolCatalogEntry, input: ToolInput, origin: ToolTerminalOrigin?) {
+  init(
+    entry: ToolCatalogEntry,
+    input: ToolInput,
+    origin: ToolTerminalOrigin?,
+    view: ToolViewPlacement? = nil,
+    extendedContext: [String: JSONValue] = [:]
+  ) {
     self.entry = entry
     self.input = input
     self.origin = origin
+    self.view = view
+    self.extendedContext = extendedContext
   }
+}
+
+/// panel 视图的身份：哪个视图、挂在哪个位置。
+struct ToolViewPlacement: Equatable {
+  let contribution: ToolViewContribution
+  let slot: ToolViewSlot
 }
 
 /// 发起工具的终端 Pane。弱引用会话：Pane 关闭后自然失效，迟到的写入因此不会落到别的 Pane。
@@ -137,9 +156,35 @@ struct ToolPluginSummary: Equatable {
   let grantedPermissions: [ToolPermission]
   let networkDomains: [String]
   let featureCount: Int
+  /// 清单声明的视图与用户设置。
+  var views: [ToolViewSummary] = []
   /// 内置插件不可卸载。
   var isRemovable: Bool { source != .builtin }
   var isEnabled: Bool { status != .disabled }
+}
+
+/// 设置页看到的一个视图。
+struct ToolViewSummary: Equatable {
+  /// 不生效的原因。
+  enum InactiveReason: String, Equatable {
+    /// 用户关掉了这个视图。
+    case disabled
+    /// 插件被停用。
+    case pluginDisabled
+    /// 本版本还不能挂到这个位置（`ToolViewSlot.isImplemented == false`）。
+    case unsupported
+  }
+
+  let id: String
+  let title: String
+  let kind: ToolViewKind
+  /// 生效的位置（用户改过就是用户选的）。
+  let slot: ToolViewSlot
+  /// 清单给的缺省位置。
+  let defaultSlot: ToolViewSlot
+  let isEnabled: Bool
+  /// nil 表示正在生效。
+  let inactiveReason: InactiveReason?
 }
 
 /// 扫描时发现的问题（清单无效、id 冲突、摘要失败等）。
@@ -169,6 +214,10 @@ protocol ToolManaging: AnyObject {
   func removeDevelopmentFolder(_ path: String)
   /// 卸载：插件目录移到废纸篓，删除插件数据与 WebKit 存储；内置插件抛错。
   func uninstall(pluginID: String) async throws
+  /// 开关某个视图。
+  func setViewEnabled(_ enabled: Bool, pluginID: String, viewID: String)
+  /// 把视图改放到 `slot`；nil 恢复清单缺省。调用方保证 `slot` 接受该视图类型。
+  func setViewSlot(_ slot: ToolViewSlot?, pluginID: String, viewID: String)
 }
 
 /// 工具中心对外抛出的错误。

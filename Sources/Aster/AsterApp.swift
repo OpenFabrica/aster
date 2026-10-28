@@ -792,8 +792,10 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     }
     // 附加窗口是真的没了：它自己那条事件订阅必须跟着结束，不能留孤儿 ssh，
     // 也不能让在途的事件刷新回调再去动这个已经拆掉的窗口。
-    (record.controller.window?.contentViewController as? WorkspaceViewController)?
-      .loadedRemoteWorkspaces?.stopAllEventSubscriptions()
+    let closingWorkspace = record.controller.window?.contentViewController as? WorkspaceViewController
+    closingWorkspace?.loadedRemoteWorkspaces?.stopAllEventSubscriptions()
+    // 插件 bar 的脚本、定时与面板会话随窗口结束；主窗口关闭只是隐藏，靠可见性暂停。
+    closingWorkspace?.extensionHost.teardown()
     // 停在这个窗口 Pane 里的 agent 主机终端转成浮窗：模型随窗口释放，控制桥不会为它的 Pane 发
     // pane.closed。要在 commitTermination 之前做，那之后模型的 Pane 就查不到了。
     if !isTerminating { AgentHostRuntime.shared?.workspaceWillClose(model: record.model) }

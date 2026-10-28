@@ -1,0 +1,442 @@
+// 每个工作区窗口一份的界面扩展宿主：从工具中心的视图目录挑出本窗口能挂的视图，持有长期存活的 bar、
+// 调度器、动作执行器、panel 会话缓存与分支监听；算当前上下文、跟踪窗口可见性。工作区整树重建只借用
+// 这里的视图，不重建、不重跑脚本。规则见 docs/developer/tools-and-plugins.md「界面扩展」。
+import AppKit
+import AsterCore
+import Combine
+
+/// 宿主用到的工具中心能力；生产是 `ToolCenter.shared`，测试注入假目录。
+@MainActor
+protocol ToolViewCatalog: AnyObject {
+  /// 视图目录（含用户关掉的，挂载方按 `isMountable` 过滤）。
+  var viewEntries: [ToolViewEntry] { get }
+  /// 目录、状态或授权变化。
+  var changes: AnyPublisher<Void, Never> { get }
+  /// 按功能 id（`<pluginID>/<code>`）查可用功能。
+  func entry(id: String) -> ToolCatalogEntry?
+  /// 弹授权确认；返回是否同意。
+  func approve(pluginID: String, window: NSWindow?) async -> Bool
+}
+
+extension ToolCenter: ToolViewCatalog {}
+
+/// 界面扩展宿主。只在主线程使用。
+@MainActor
+final class WorkspaceExtensionHost: ToolPanelProviding {
+  /// 本版本由宿主挂 bar 的标签范围位置（`pane.bottom` 每 Pane 一条，见 `paneBar(for:)`；
+  /// `inspector.panel` 由详情面板经 `ToolPanelProviding` 取用）。
+  static let mountedBarSlots: [ToolViewSlot] = [.tabTop, .tabBottom]
+
+  /// 挂了 bar 的位置集合变了（从无到有或从有到无）：工作区需要整树重建一次把条插进去或撤掉。
+  var onMountedSlotsChanged: (() -> Void)?
+  /// `openPanel` 动作：打开 Inspector 并选中该插件面板（参数是 `ToolViewEntry.id`）。
+  var onRevealPanel: ((String) -> Void)?
+  /// 所在窗口；弹确认框与判断可见性用。
+  var windowProvider: () -> NSWindow? = { nil }
+
+  let scheduler: ToolBarScheduler
+  let panelCache: ToolPanelSessionCache
+  let branchWatcher = ToolBranchWatcher()
+  private(set) var context: ToolBarContext
+  private(set) var mountedSlots: Set<ToolViewSlot> = []
+  private(set) var inspectorPanelEntries: [ToolViewEntry] = []
+  /// 调度中的 bar 视图（可挂载、位置在 `mountedBarSlots`），按目录顺序。
+  private(set) var barEntries: [ToolViewEntry] = []
+  /// 可挂载的 `pane.bottom` 视图；每个建过条的终端 Pane 各一份 feed。
+  private(set) var paneEntries: [ToolViewEntry] = []
+  /// pane feed 键 → Pane。
+  private var paneFeedPanes: [String: UUID] = [:]
+  private lazy var paneBars: ToolPaneBars = {
+    let bars = ToolPaneBars { [weak self] paneID in
+      self?.makeBar(slot: .paneBottom, height: self?.paneBarHeight ?? 24) ?? ToolBarView(slot: .paneBottom, height: 24)
+    }
+    bars.onBranchChange = { [weak self] paneID in self?.updatePaneContext(paneID) }
+    return bars
+  }()
+
+  private weak var model: AppModel?
+  private weak var preferences: AppPreferences?
+  private let catalog: ToolViewCatalog
+  private let services: ToolBridgeServices
+  private var bars: [ToolViewSlot: ToolBarView] = [:]
+  private let panelEntriesSubject = PassthroughSubject<Void, Never>()
+  private var cancellables: Set<AnyCancellable> = []
+  private var tabSubscriptions: Set<AnyCancellable> = []
+  private weak var observedTab: TerminalTabItem?
+  private var isTornDown = false
+  private lazy var performer = makePerformer()
+
+  /// `runner` 为 nil 时用生产运行器（工具中心核对插件后在后台跑脚本）。
+  init(
+    model: AppModel,
+    preferences: AppPreferences,
+    catalog: ToolViewCatalog = ToolCenter.shared,
+    runner: ToolBarRunner? = nil,
+    clock: ToolBarSchedulerClock = .live,
+    services: ToolBridgeServices = SystemToolBridgeServices()
+  ) {
+    self.model = model
+    self.preferences = preferences
+    self.catalog = catalog
+    self.services = services
+    context = ToolBarContext()
+    scheduler = ToolBarScheduler(runner: runner ?? ToolBarFeed.liveRunner(), clock: clock)
+    panelCache = ToolPanelSessionCache(model: model)
+    scheduler.onFeedChange = { [weak self] id in self?.feedDidChange(id) }
+    branchWatcher.onBranchChange = { [weak self] in self?.updateContext() }
+    catalog.changes
+      .sink { [weak self] in self?.reloadEntries() }
+      .store(in: &cancellables)
+    model.agentTaskStateChanged
+      .sink { [weak self] event in
+        self?.updatePaneContext(event.paneID)
+        guard let tab = self?.model?.selectedTab, event.tabID == tab.id, event.paneID == tab.activePaneID else { return }
+        self?.updateContext()
+      }
+      .store(in: &cancellables)
+    observeWindowVisibility()
+    NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+      .sink { [weak self] _ in MainActor.assumeIsolated { self?.teardown() } }
+      .store(in: &cancellables)
+    reloadEntries()
+  }
+
+  var panelEntriesChanged: AnyPublisher<Void, Never> { panelEntriesSubject.eraseToAnyPublisher() }
+
+  // MARK: - 挂载
+
+  /// 某个位置的 bar：没有可挂载视图时为 nil。同一实例跨整树重建复用，交出前先从旧父视图摘下。
+  func bar(for slot: ToolViewSlot) -> NSView? {
+    guard !isTornDown, mountedSlots.contains(slot), let bar = bars[slot] else { return nil }
+    bar.removeFromSuperview()
+    return bar
+  }
+
+  /// 已建好的 bar（测试用）。
+  func existingBar(for slot: ToolViewSlot) -> ToolBarView? { bars[slot] }
+
+  /// 某个 Pane 已建好的 pane.bottom 条（测试用）。
+  func existingPaneBar(for paneID: UUID) -> ToolBarView? { paneBars.existingBar(for: paneID) }
+
+  /// 某个 Pane 当前的 pane 上下文（测试用）。
+  func paneContext(for paneID: UUID) -> ToolBarContext? { paneBars.contexts[paneID] }
+
+  /// pane.bottom 的条高（点，未缩放）：取第一个视图的声明。
+  private var paneBarHeight: Int {
+    paneEntries.first?.contribution.barHeight(in: .paneBottom) ?? ToolViewSlot.paneBottom.defaultBarHeight ?? 24
+  }
+
+  /// 某个 Pane 的 pane.bottom 条：没有可挂载视图、Pane 不在选中标签或不是终端 Pane（工具、文件 Pane）时为 nil。
+  /// 同一 Pane 跨整树重建复用同一实例，交出前先从旧父视图摘下；第一次挂载时建该 Pane 的 feed。
+  func paneBar(for paneID: UUID) -> NSView? {
+    guard !isTornDown, !paneEntries.isEmpty, let model,
+      model.selectedTab?.layout.descriptor(forPane: paneID) != nil,
+      ToolPaneBars.terminalTab(of: paneID, model: model) != nil
+    else { return nil }
+    let (bar, isNew) = paneBars.bar(for: paneID)
+    if isNew {
+      _ = paneBars.updateContext(for: paneID, model: model)
+      syncFeeds()
+      renderPane(paneID)
+    }
+    bar.removeFromSuperview()
+    return bar
+  }
+
+  /// 工作区整树重建之后：重新订阅当前标签的局部事件、重算上下文（没变不动）、刷新配色与可见性。
+  func workspaceDidRefresh() {
+    guard !isTornDown else { return }
+    observeSelectedTab()
+    updateContext()
+    refreshPanes()
+    bars.values.forEach { $0.refreshAppearance() }
+    paneBars.refreshAppearance()
+    updateVisibility()
+  }
+
+  /// 整树重建后的 pane 收尾：释放已关闭（或不再是终端）的 Pane，重算选中标签各 Pane 的上下文，
+  /// 再按「条挂在窗口里」决定哪些 pane feed 能跑——后台标签的 Pane 不在其中，暂停并记 stale，切回来补跑。
+  private func refreshPanes() {
+    guard let model else { return }
+    let alive = Set(model.tabs.flatMap { tab in tab.layout.allPanes.map(\.id) })
+      .filter { ToolPaneBars.terminalTab(of: $0, model: model) != nil }
+    if !paneBars.prune(keeping: alive).isEmpty { syncFeeds() }
+    let selected = Set(model.selectedTab?.layout.allPanes.map(\.id) ?? [])
+    for paneID in paneBars.paneIDs where selected.contains(paneID) { updatePaneContext(paneID) }
+    let mounted = windowProvider().map(paneBars.mountedPaneIDs(in:)) ?? []
+    scheduler.setVisiblePanes(mounted.intersection(selected))
+  }
+
+  /// 重算一个 Pane 的上下文；变了交给调度器（只影响这个 Pane 的 feed）。
+  private func updatePaneContext(_ paneID: UUID) {
+    guard !isTornDown, let model, let context = paneBars.updateContext(for: paneID, model: model) else { return }
+    scheduler.updatePaneContext(context, paneID: paneID)
+  }
+
+  /// 把标签范围与 pane 范围的 feed 一起交给调度器（没列出的 feed 被取消）。
+  private func syncFeeds() {
+    var specs = barEntries.map { ToolBarFeedSpec(key: $0.id, entry: $0, paneID: nil, context: nil) }
+    var index: [String: UUID] = [:]
+    for paneID in paneBars.paneIDs {
+      for entry in paneEntries {
+        let key = ToolBarScheduler.paneFeedKey(entryID: entry.id, paneID: paneID)
+        index[key] = paneID
+        specs.append(ToolBarFeedSpec(key: key, entry: entry, paneID: paneID, context: paneBars.contexts[paneID]))
+      }
+    }
+    paneFeedPanes = index
+    scheduler.update(specs: specs)
+  }
+
+  /// 打开插件面板（`openPanel` 动作）。
+  func revealPanel(entryID: String) {
+    onRevealPanel?(entryID)
+  }
+
+  /// 借出 panel 会话（`ToolPanelProviding`）。
+  func panelSession(for entryID: String) -> ToolSessionViewController? {
+    guard !isTornDown, let entry = inspectorPanelEntries.first(where: { $0.id == entryID }) else { return nil }
+    return panelCache.session(for: entry, context: context)
+  }
+
+  /// 窗口关闭：停掉全部脚本（含正在运行的进程组）、网页会话与分支监听。之后不再挂载任何视图。
+  func teardown() {
+    guard !isTornDown else { return }
+    isTornDown = true
+    scheduler.teardown()
+    panelCache.teardown()
+    branchWatcher.stop()
+    cancellables.removeAll()
+    tabSubscriptions.removeAll()
+    bars.values.forEach { $0.apply(segments: []) }
+    paneBars.removeAll()
+    mountedSlots = []
+  }
+
+  // MARK: - 目录
+
+  /// 工具中心变化：挑出本窗口要调度的 bar 与 Inspector 面板；bar 位置的有无变了才请求整树重建。
+  private func reloadEntries() {
+    guard !isTornDown else { return }
+    let all = catalog.viewEntries
+    barEntries = all.filter {
+      $0.isMountable && $0.contribution.kind == .bar && Self.mountedBarSlots.contains($0.slot)
+    }
+    paneEntries = all.filter { $0.isMountable && $0.contribution.kind == .bar && $0.slot == .paneBottom }
+    // 没有 pane 视图了：条全部释放，下次整树重建时 `paneBar(for:)` 返回 nil，Pane 宿主随之撤下。
+    if paneEntries.isEmpty { paneBars.removeAll() }
+    syncFeeds()
+    var slots = Set(barEntries.map(\.slot))
+    if !paneEntries.isEmpty { slots.insert(.paneBottom) }
+    for slot in slots where slot != .paneBottom {
+      let height = barEntries.first { $0.slot == slot }?.contribution.barHeight(in: slot) ?? 26
+      if let bar = bars[slot] { bar.setHeight(height) } else { bars[slot] = makeBar(slot: slot, height: height) }
+    }
+    Self.mountedBarSlots.forEach(render)
+    paneBars.paneIDs.forEach(renderPane)
+    if slots != mountedSlots {
+      mountedSlots = slots
+      onMountedSlotsChanged?()
+    }
+    let panels = all.filter { $0.isMountable && $0.contribution.kind == .panel && $0.slot == .inspectorPanel }
+    panelCache.reconcile(entries: all)
+    if panels != inspectorPanelEntries {
+      inspectorPanelEntries = panels
+      panelEntriesSubject.send()
+    }
+    updateVisibility()
+  }
+
+  /// 建一条 bar 并接上点击回调。
+  private func makeBar(slot: ToolViewSlot, height: Int) -> ToolBarView {
+    let bar = ToolBarView(slot: slot, height: height)
+    bar.themeProvider = { [weak preferences] in preferences?.activeTheme }
+    bar.onItem = { [weak self] id, item in self?.perform(item, entryID: id) }
+    bar.onRetry = { [weak self] id in self?.scheduler.refresh(entryID: id) }
+    bar.onApprove = { [weak self] id in self?.approve(entryID: id) }
+    return bar
+  }
+
+  /// 某个视图的内容变了：只重画它所在的那条。
+  private func feedDidChange(_ id: String) {
+    if let paneID = paneFeedPanes[id] {
+      renderPane(paneID)
+    } else if let slot = barEntries.first(where: { $0.id == id })?.slot {
+      render(slot)
+    }
+  }
+
+  /// 重画一个 Pane 的条：该 Pane 的每个 pane 视图一段，段 id 是 feed 键。
+  private func renderPane(_ paneID: UUID) {
+    guard let bar = paneBars.existingBar(for: paneID) else { return }
+    bar.setHeight(paneBarHeight)
+    bar.apply(
+      segments: paneEntries.compactMap {
+        segment(for: $0, key: ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID))
+      })
+  }
+
+  /// 一个 feed 的当前段。
+  private func segment(for entry: ToolViewEntry, key: String) -> ToolBarSegment? {
+    guard let feed = scheduler.feed(id: key) else { return nil }
+    let content: ToolBarSegment.Content
+    switch feed.state {
+    case .idle: content = .items([])
+    case .ready(let items, _): content = .items(items)
+    case .failed(let message, _): content = .failed(message)
+    case .needsApproval: content = .needsApproval
+    }
+    return ToolBarSegment(
+      id: key, pluginName: entry.pluginName, iconPath: entry.iconPath, content: content,
+      runningSince: feed.runningSince)
+  }
+
+  /// feed 键对应的视图与 Pane（标签范围的 Pane 为 nil）。
+  private func lookup(_ key: String) -> (entry: ToolViewEntry, paneID: UUID?)? {
+    if let paneID = paneFeedPanes[key] {
+      return paneEntries.first { ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID) == key }
+        .map { ($0, paneID) }
+    }
+    return barEntries.first { $0.id == key }.map { ($0, nil) }
+  }
+
+  /// 按 feed 状态生成段并交给条。没有可挂载视图的位置清空（条随之隐藏）。
+  private func render(_ slot: ToolViewSlot) {
+    guard let bar = bars[slot] else { return }
+    bar.apply(segments: barEntries.filter { $0.slot == slot }.compactMap { segment(for: $0, key: $0.id) })
+  }
+
+  // MARK: - 点击
+
+  /// 项目点击：交给执行器（`openURL` 要等确认框，所以异步）。pane 条的 `terminal` 写到条所在的 Pane。
+  private func perform(_ item: ToolBarItem, entryID key: String) {
+    guard let action = item.action, let (entry, paneID) = lookup(key) else { return }
+    let terminal = paneID.flatMap { paneID in model.flatMap { ToolPaneBars.terminal(of: paneID, model: $0) } }
+    Task { [weak self] in await self?.performer.perform(action, from: entry, feedKey: key, terminal: terminal) }
+  }
+
+  /// 「需要授权」：弹工具中心的授权确认；同意后目录变化会让视图按 `manual` 重跑。
+  private func approve(entryID key: String) {
+    guard let entry = lookup(key)?.entry else { return }
+    let window = windowProvider()
+    Task { [weak self] in _ = await self?.catalog.approve(pluginID: entry.pluginID, window: window) }
+  }
+
+  /// 生产执行器：剪贴板与确认框走系统服务，终端写到当前活动 Pane，功能经工具面板打开，提示走窗口 toast。
+  private func makePerformer() -> ToolBarActionPerformer {
+    ToolBarActionPerformer(
+      services: services,
+      terminal: { [weak self] in self?.model?.toolTerminalOrigin() },
+      viewEntries: { [weak self] in self?.catalog.viewEntries ?? [] },
+      featureEntry: { [weak self] id in self?.catalog.entry(id: id) },
+      launchFeature: { [weak self] feature, text in self?.launchFeature(feature, text: text) },
+      revealPanel: { [weak self] id in self?.revealPanel(entryID: id) },
+      refresh: { [weak self] id in self?.scheduler.refresh(entryID: id) },
+      notify: { [weak self] message in self?.model?.notice = message },
+      window: { [weak self] in self?.windowProvider() })
+  }
+
+  /// `feature` 动作：在工具面板里打开同插件的功能，输入文本可选，来源终端是当前活动 Pane。
+  private func launchFeature(_ feature: ToolCatalogEntry, text: String?) {
+    guard let model else { return }
+    let origin = model.toolTerminalOrigin()
+    let input = ToolInput(text: text, source: text == nil ? .none : .typed, context: model.toolContext(for: origin))
+    NotificationCenter.default.post(
+      name: .asterShowToolLauncher,
+      object: ToolLauncherRequestBox(request: ToolLaunchRequest(entry: feature, input: input, origin: origin)))
+  }
+
+  // MARK: - 上下文
+
+  /// 订阅当前标签的局部事件（不进 `objectWillChange`）：活动 Pane、活动 Pane 的目录与远端状态。
+  private func observeSelectedTab() {
+    guard let tab = model?.selectedTab else {
+      observedTab = nil
+      tabSubscriptions.removeAll()
+      return
+    }
+    guard tab !== observedTab else { return }
+    observedTab = tab
+    tabSubscriptions.removeAll()
+    // 活动 Pane 切换只影响标签范围视图；pane 视图的上下文是它自己的 Pane，切换焦点不重跑。
+    tab.activePaneChanged
+      .sink { [weak self] _ in self?.updateContext() }
+      .store(in: &tabSubscriptions)
+    // 目录与远端变化：活动 Pane 的驱动标签范围视图，任何挂着 pane 条的 Pane 驱动它自己的 pane 视图。
+    tab.workingDirectoryChanged
+      .sink { [weak self, weak tab] change in
+        if change.paneID == tab?.activePaneID { self?.updateContext() }
+        self?.updatePaneContext(change.paneID)
+      }
+      .store(in: &tabSubscriptions)
+    tab.remoteContextChanged
+      .sink { [weak self, weak tab] paneID in
+        if paneID == tab?.activePaneID { self?.updateContext() }
+        self?.updatePaneContext(paneID)
+      }
+      .store(in: &tabSubscriptions)
+  }
+
+  /// 重算上下文；变了才交给调度器与 panel 会话。分支来自分支监听（后台读、按仓库去重）。
+  private func updateContext() {
+    guard !isTornDown, let model else { return }
+    var next = Self.makeContext(model: model)
+    branchWatcher.watch(directory: next.workingDirectory)
+    next.branch = branchWatcher.branch(for: next.workingDirectory)
+    guard next != context else { return }
+    context = next
+    scheduler.updateContext(next)
+    panelCache.updateContext(next)
+  }
+
+  /// 当前标签活动 Pane 的上下文：本机终端才有工作目录（远端为 nil 并标 `isRemote`），locale / appearance
+  /// 与工具一致；Agent 只在活动 Pane 跑着 Agent 时有。分支由调用方补。
+  static func makeContext(model: AppModel) -> ToolBarContext {
+    let origin = model.toolTerminalOrigin()
+    let tool = model.toolContext(for: origin)
+    guard let tab = model.selectedTab else {
+      return ToolBarContext(isRemote: tool.isRemote, locale: tool.locale, appearance: tool.appearance)
+    }
+    var agent: ToolBarAgentContext?
+    if let session = tab.activeSession, let provider = session.activeAgentProvider {
+      agent = ToolBarAgentContext(provider: provider.rawValue, state: session.agentTaskState.rawValue)
+    }
+    return ToolBarContext(
+      workingDirectory: tool.workingDirectory, isRemote: tool.isRemote, locale: tool.locale,
+      appearance: tool.appearance, tabID: tab.id.uuidString, paneID: tab.activePaneID.uuidString, agent: agent)
+  }
+
+  // MARK: - 可见性
+
+  /// 窗口遮挡、最小化与关闭都会改变可见性；只认自己的窗口。
+  private func observeWindowVisibility() {
+    let names: [Notification.Name] = [
+      NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+      NSWindow.didDeminiaturizeNotification, NSWindow.willCloseNotification,
+    ]
+    for name in names {
+      NotificationCenter.default.publisher(for: name)
+        .sink { [weak self] notification in
+          MainActor.assumeIsolated {
+            guard let self, let window = notification.object as? NSWindow, window === self.windowProvider() else {
+              return
+            }
+            self.updateVisibility(closing: name == NSWindow.willCloseNotification)
+          }
+        }
+        .store(in: &cancellables)
+    }
+  }
+
+  /// 可见 = 窗口在屏幕上、没被完全遮挡、没最小化，且条确实挂在这个窗口里（主机页等占据内容区时不挂）。
+  private func updateVisibility(closing: Bool = false) {
+    guard !isTornDown else { return }
+    guard !closing, let window = windowProvider() else {
+      scheduler.isVisible = false
+      return
+    }
+    let onScreen = window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
+    scheduler.isVisible =
+      onScreen && (bars.values.contains { $0.window === window } || !paneBars.mountedPaneIDs(in: window).isEmpty)
+  }
+}

@@ -86,6 +86,19 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   private var customChips: [UUID: PanelTabChip] = [:]
   private var customControllers: [UUID: DetailsPanelCustomViewController] = [:]
   private var customSelection: UUID?
+  /// 窗口提供的插件 panel 视图；由 WorkspaceViewController 创建本控制器时注入。注入在 init 之后，
+  /// 所以注入时重新订阅并刷新页签。
+  weak var pluginPanels: ToolPanelProviding? {
+    didSet { pluginPanelsDidChange() }
+  }
+  /// 选中的插件 panel 页签（`ToolViewEntry.id`）；非空时内置页与自定义视图全部隐藏。
+  private var pluginSelection: String?
+  private var pluginChips: [String: PanelTabChip] = [:]
+  /// 最近一次渲染 header 时的插件页签；目录变化后据此判断是否重建。
+  private var renderedPluginEntries: [ToolViewEntry] = []
+  /// 当前挂在内容区的插件会话。会话归窗口的缓存所有，这里只弱引用、只摘下不 teardown。
+  private weak var mountedPluginSession: ToolSessionViewController?
+  private var pluginEntriesSubscription: AnyCancellable?
   /// 最近一次渲染 header 时的页签顺序与自定义视图定义；配置变化后据此判断是否重建。
   private var renderedEntries: [DetailsPanelEntry] = []
   private var renderedCustomViews: [DetailsPanelCustomView] = []
@@ -345,6 +358,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     for view in row.arrangedSubviews { view.removeFromSuperview() }
     chips.removeAll()
     customChips.removeAll()
+    pluginChips.removeAll()
     let configuration = preferences.configuration.resolvedView
     renderedEntries = configuration.resolvedDetailsPanelEntries
     renderedCustomViews = configuration.resolvedCustomViews
@@ -356,7 +370,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
           self?.selectSection(section)
         }
         chip.identifier = NSUserInterfaceItemIdentifier(section.chipIdentifier)
-        chip.setSelected(customSelection == nil && section == selection, animated: false)
+        chip.setSelected(isBuiltinSelectionActive && section == selection, animated: false)
         chips[section] = chip
         row.addArrangedSubview(chip)
       case .custom(let id):
@@ -373,13 +387,30 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
         row.addArrangedSubview(chip)
       }
     }
+    // 插件页签排在配置项之后；顺序跟随插件显示顺序，不进「视图」设置（P1 取舍）。
+    renderedPluginEntries = currentPluginEntries
+    for entry in renderedPluginEntries {
+      let id = entry.id
+      let chip = PanelTabChip(title: entry.contribution.title, symbol: "puzzlepiece.extension") { [weak self] in
+        self?.selectPluginPanel(entryID: id)
+      }
+      chip.identifier = NSUserInterfaceItemIdentifier("details-chip-plugin-\(id)")
+      chip.setSelected(pluginSelection == id, animated: false)
+      pluginChips[id] = chip
+      row.addArrangedSubview(chip)
+    }
     let spacer = NSView()
     spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
     row.addArrangedSubview(spacer)
   }
 
-  /// 选中项不在可见页签里时回落：优先第一个可见内置页，否则第一个自定义视图。
+  /// 选中项不在可见页签里时回落：插件页签仍在就保留；否则优先第一个可见内置页，再否则第一个自定义视图。
   private func reconcileSelection() {
+    if let pluginSelection, currentPluginEntries.contains(where: { $0.id == pluginSelection }) {
+      customSelection = nil
+      return
+    }
+    pluginSelection = nil
     let entries = preferences.configuration.resolvedView.resolvedDetailsPanelEntries
     if let customSelection, entries.contains(.custom(customSelection)) { return }
     if customSelection == nil, entries.contains(.builtin(selection.settingsID)) { return }
@@ -405,7 +436,9 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     let configuration = preferences.configuration.resolvedView
     let entries = configuration.resolvedDetailsPanelEntries
     let customViews = configuration.resolvedCustomViews
-    guard entries != renderedEntries || customViews != renderedCustomViews else { return }
+    let pluginEntries = currentPluginEntries
+    guard entries != renderedEntries || customViews != renderedCustomViews || pluginEntries != renderedPluginEntries
+    else { return }
     for (id, controller) in customControllers {
       let stillSame = customViews.first { $0.id == id } == controller.definition
       if !stillSame {
@@ -417,12 +450,17 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     }
     let previousSelection = selection
     let previousCustom = customSelection
+    let previousPlugin = pluginSelection
+    let wasBuiltinActive = isBuiltinSelectionActive
     reconcileSelection()
+    restorePluginSelectionIfNeeded()
     populateHeader(headerRow)
-    if previousSelection != selection || previousCustom != customSelection {
-      if previousCustom == nil { cancelInspection(for: previousSelection) }
+    if previousSelection != selection || previousCustom != customSelection || previousPlugin != pluginSelection {
+      if wasBuiltinActive { cancelInspection(for: previousSelection) }
       preferences.inspectorSection = selection.rawValue
       preferences.inspectorCustomSection = customSelection
+      // 插件页签回落时不清 `inspectorPluginSection`：插件目录在启动后异步扫描，刚启动时页签还不在，
+      // 清掉就会丢掉用户的选择；目录就绪后 `restorePluginSelectionIfNeeded` 据此选回。
     }
     showSelectedContent()
     prepareSelectedSection()
@@ -431,7 +469,8 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   /// 切到自定义视图：内置页停止工作并隐藏，自定义控制器懒创建。
   private func selectCustomView(_ id: UUID) {
     guard customSelection != id else { return }
-    if customSelection == nil { cancelInspection(for: selection) }
+    if isBuiltinSelectionActive { cancelInspection(for: selection) }
+    clearPluginSelection()
     customSelection = id
     preferences.inspectorCustomSection = id
     for (key, chip) in chips { chip.setSelected(false, animated: true) ; _ = key }
@@ -467,8 +506,9 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   /// chip 切换只更新面板本地内容并持久化选中页；不经过 preferences 广播，避免
   /// 整棵工作区视图树跟着重建。
   private func selectSection(_ section: Section) {
-    guard section != selection || customSelection != nil else { return }
-    if customSelection == nil { cancelInspection(for: selection) }
+    guard section != selection || !isBuiltinSelectionActive else { return }
+    if isBuiltinSelectionActive { cancelInspection(for: selection) }
+    clearPluginSelection()
     customSelection = nil
     preferences.inspectorCustomSection = nil
     selection = section
@@ -498,7 +538,8 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   }
 
   private func updatePaneRefreshOverlay() {
-    let refreshing = isPresentationActive && customSelection == nil && sectionsAwaitingPaneRefresh.contains(selection)
+    let refreshing =
+      isPresentationActive && isBuiltinSelectionActive && sectionsAwaitingPaneRefresh.contains(selection)
     cachedContent[selection]?.setAccessibilityHidden(refreshing)
     paneRefreshOverlay.setAccessibilityHidden(!refreshing)
     paneRefreshOverlay.setRefreshing(refreshing, sectionTitle: selection.title)
@@ -587,7 +628,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
 
   /// 按当前模式与选中页切换远端子视图的显隐。隐藏的子控制器同时挂起，避免隐藏页轮询。
   private func updateRemoteContent() {
-    let isRemote = inspectorRemoteContext != nil && customSelection == nil
+    let isRemote = inspectorRemoteContext != nil && isBuiltinSelectionActive
     let showFiles = isRemote && selection == .files
     let showMonitor = isRemote && selection == .info
     // 隐藏的子控制器必须同时挂起：退出 ssh 后只把视图藏起来，监控仍会每 3 秒打一次远端。
@@ -907,6 +948,8 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
 
   private func prepareSelectedSection() {
     guard isPresentationActive, let directory = model.selectedTab?.workingDirectory else { return }
+    // 插件页面自己跟随窗口推送的上下文，这里没有要准备的。
+    if pluginSelection != nil { return }
     if let customSelection {
       customControllers[customSelection]?.refreshContext()
       return
@@ -969,7 +1012,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       content.pinEdges(to: contentHost)
     }
     for (section, content) in cachedContent {
-      content.isHidden = customSelection != nil || section != selection || remoteOverrides(section)
+      content.isHidden = !isBuiltinSelectionActive || section != selection || remoteOverrides(section)
       // 兜底：即便曾经横向滚出，显示时也把 clip 的横向偏移归零。
       if let scroll = content as? NSScrollView, scroll.contentView.bounds.origin.x != 0 {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.origin.y))
@@ -980,6 +1023,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     for (id, controller) in customControllers where controller.isViewLoaded {
       controller.view.isHidden = id != customSelection
     }
+    updatePluginContent()
     updateRemoteContent()
     updatePaneRefreshOverlay()
   }
@@ -3957,4 +4001,92 @@ private final class DetailsFileRowView: HoverHighlightRowView {
   }
 
   @objc private func openItem() { onOpen?() }
+}
+
+// MARK: - 插件面板
+
+extension DetailsPanelViewController {
+  /// 内置页正在显示：没有选中自定义视图，也没有选中插件页签。
+  private var isBuiltinSelectionActive: Bool { customSelection == nil && pluginSelection == nil }
+
+  /// 窗口当前提供的插件页签；还没注入时为空。
+  private var currentPluginEntries: [ToolViewEntry] { pluginPanels?.inspectorPanelEntries ?? [] }
+
+  /// 选中某个插件 panel 页签（chip 点击、bar 项目的 `openPanel` 动作）。页签不存在时什么都不做。
+  /// 与内置页、自定义视图互斥：选中后清掉它们的选中态。
+  func selectPluginPanel(entryID: String) {
+    guard pluginSelection != entryID, currentPluginEntries.contains(where: { $0.id == entryID }) else { return }
+    if isBuiltinSelectionActive { cancelInspection(for: selection) }
+    pluginSelection = entryID
+    customSelection = nil
+    preferences.inspectorCustomSection = nil
+    preferences.inspectorPluginSection = entryID
+    guard isViewLoaded else { return }
+    for chip in chips.values { chip.setSelected(false, animated: true) }
+    for chip in customChips.values { chip.setSelected(false, animated: true) }
+    for (key, chip) in pluginChips { chip.setSelected(key == entryID, animated: true) }
+    showSelectedContent()
+  }
+
+  /// 用户选了内置页或自定义视图：清掉插件选中态与持久化的选择，并摘下插件页面。
+  private func clearPluginSelection() {
+    preferences.inspectorPluginSection = nil
+    guard pluginSelection != nil else { return }
+    pluginSelection = nil
+    for chip in pluginChips.values { chip.setSelected(false, animated: true) }
+    unmountPluginSession()
+  }
+
+  /// 上次选中的插件页签此刻可用、且用户之后没有改选别的页签时选回它。
+  private func restorePluginSelectionIfNeeded() {
+    guard pluginSelection == nil, let saved = preferences.inspectorPluginSection,
+      currentPluginEntries.contains(where: { $0.id == saved })
+    else { return }
+    pluginSelection = saved
+    customSelection = nil
+  }
+
+  /// 注入（或换掉）插件提供方：订阅页签变化，并按当前目录同步一次页签与选中态。
+  private func pluginPanelsDidChange() {
+    pluginEntriesSubscription = pluginPanels?.panelEntriesChanged
+      .sink { [weak self] in self?.pluginEntriesDidChange() }
+    pluginEntriesDidChange()
+  }
+
+  /// 插件页签变化：视图已加载时走 `synchronizeSectionsIfNeeded` 重建 header；还没加载时只校正选中态，
+  /// 等 `loadView` 按最终状态建 header。
+  private func pluginEntriesDidChange() {
+    guard isViewLoaded else {
+      reconcileSelection()
+      restorePluginSelectionIfNeeded()
+      return
+    }
+    synchronizeSectionsIfNeeded()
+  }
+
+  /// 按插件选中态挂上或摘下会话视图。会话向窗口借，第一次借时才创建；切走时只从视图树摘下，
+  /// 不 teardown，再切回来时页面状态还在。详情面板按标签重建，同一会话会从旧控制器移到这里。
+  private func updatePluginContent() {
+    guard let pluginSelection, let session = pluginPanels?.panelSession(for: pluginSelection) else {
+      unmountPluginSession()
+      return
+    }
+    if let mounted = mountedPluginSession, mounted !== session { unmountPluginSession() }
+    if session.parent !== self { addChild(session) }
+    if session.view.superview !== contentHost {
+      session.view.removeFromSuperview()
+      contentHost.addSubview(session.view, positioned: .below, relativeTo: paneRefreshOverlay)
+      session.view.pinEdges(to: contentHost)
+    }
+    session.view.isHidden = false
+    mountedPluginSession = session
+  }
+
+  /// 摘下当前插件会话；会话已经被别的详情面板借走时不动它。
+  private func unmountPluginSession() {
+    guard let session = mountedPluginSession else { return }
+    mountedPluginSession = nil
+    if session.parent === self { session.removeFromParent() }
+    if session.viewIfLoaded?.superview === contentHost { session.view.removeFromSuperview() }
+  }
 }

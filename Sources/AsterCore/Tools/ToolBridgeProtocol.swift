@@ -27,6 +27,8 @@ public enum ToolBridgeProtocol {
 /// 桥接方法。原始值就是 JS 侧的 `method` 字符串。
 public enum ToolBridgeMethod: String, CaseIterable, Sendable {
   case toolInput = "tool.input"
+  /// 当前上下文（panel 视图随标签、Pane 变化；普通工具就是打开时的上下文）。
+  case contextGet = "context.get"
   case setHeight = "ui.setHeight"
   case close = "ui.close"
   case storageGet = "storage.get"
@@ -50,7 +52,7 @@ public enum ToolBridgeMethod: String, CaseIterable, Sendable {
   /// 调用这个方法需要的权限；nil 表示不需要声明。
   public var requiredPermission: ToolPermission? {
     switch self {
-    case .toolInput, .setHeight, .close, .storageGet, .storageSet, .storageRemove, .storageKeys, .secureStorageGet,
+    case .toolInput, .contextGet, .setHeight, .close, .storageGet, .storageSet, .storageRemove, .storageKeys, .secureStorageGet,
       .secureStorageSet, .secureStorageRemove, .secureStorageKeys, .openURL:
       nil
     case .clipboardReadText: .clipboardRead

@@ -99,15 +99,51 @@ enum ScriptToolRunner {
   ) throws -> (command: [String], workingDirectory: String, environment: [String: String]) {
     let (executable, arguments) = try ScriptToolProtocol.resolveExecutable(
       action.command, pluginDirectory: plugin.directory, fileManager: fileManager)
+    try createDataDirectory(for: plugin, fileManager: fileManager)
+    let environment = ScriptToolProtocol.environment(
+      pluginID: plugin.manifest.id, code: code, query: query, input: input,
+      pluginDirectory: plugin.directory.path, dataDirectory: plugin.dataDirectory.path)
+    return ([executable.path] + arguments, workingDirectory(for: input, fileManager: fileManager), environment)
+  }
+
+  /// 组装一次 bar 视图脚本运行（界面扩展）。可执行文件解析与功能脚本相同；环境在功能脚本的 `ASTER_*`
+  /// 之上（`ASTER_FEATURE = view:<id>`）追加 `ToolBarProtocol.environment`；stdout 上限按 bar 协议的 64 KiB，
+  /// 超出整份作废。会读写磁盘，只能在后台调用；失败抛 `ScriptToolError`。
+  static func makeViewInvocation(
+    source: ToolViewScriptSource,
+    viewID: String,
+    trigger: ToolBarTrigger,
+    context: ToolBarContext,
+    plugin: ToolPluginRuntimeInfo,
+    fileManager: FileManager = .default
+  ) throws -> ScriptToolInvocation {
+    let (executable, arguments) = try ScriptToolProtocol.resolveExecutable(
+      source.command, pluginDirectory: plugin.directory, fileManager: fileManager)
+    try createDataDirectory(for: plugin, fileManager: fileManager)
+    // bar 上下文里的工作目录已按「远端为 nil」处理；借 ToolInput 复用功能脚本的 cwd 与环境规则。
+    let input = ToolInput(
+      context: ToolContext(
+        workingDirectory: context.workingDirectory, isRemote: context.isRemote, locale: context.locale,
+        appearance: context.appearance))
+    let environment = ScriptToolProtocol.environment(
+      pluginID: plugin.manifest.id, code: "view:\(viewID)", query: nil, input: input,
+      pluginDirectory: plugin.directory.path, dataDirectory: plugin.dataDirectory.path
+    ).merging(ToolBarProtocol.environment(viewID: viewID, trigger: trigger, context: context)) { _, bar in bar }
+    return ScriptToolInvocation(
+      executable: executable, arguments: arguments,
+      workingDirectory: workingDirectory(for: input, fileManager: fileManager),
+      environment: baseEnvironment().merging(environment) { _, injected in injected },
+      stdin: ToolBarProtocol.stdinData(viewID: viewID, trigger: trigger, context: context),
+      timeout: source.resolvedTimeout, stdoutLimit: ToolBarProtocol.stdoutLimit)
+  }
+
+  /// 建插件数据目录（`ASTER_PLUGIN_DATA`）；失败抛 `.launchFailed`。
+  private static func createDataDirectory(for plugin: ToolPluginRuntimeInfo, fileManager: FileManager) throws {
     do {
       try fileManager.createDirectory(at: plugin.dataDirectory, withIntermediateDirectories: true)
     } catch {
       throw ScriptToolError.launchFailed(L("无法创建插件数据目录：\(error.localizedDescription)"))
     }
-    let environment = ScriptToolProtocol.environment(
-      pluginID: plugin.manifest.id, code: code, query: query, input: input,
-      pluginDirectory: plugin.directory.path, dataDirectory: plugin.dataDirectory.path)
-    return ([executable.path] + arguments, workingDirectory(for: input, fileManager: fileManager), environment)
   }
 
   /// 工作目录：来源 Pane 的本地 cwd（仍存在时），否则用户主目录。远端 Pane 的路径在本机没有意义。

@@ -18,6 +18,8 @@ final class WebToolViewController: NSViewController {
 
   let plugin: ToolPluginRuntimeInfo
   private(set) var request: ToolLaunchRequest
+  /// 页面入口（相对插件目录）：panel 视图用视图声明的 `main`，普通网页工具用清单的 `ui.main`。
+  let entryPath: String?
   weak var host: ToolWebHost?
 
   /// 页面希望的内容高度（点）；初值取清单的 `ui.height`，之后跟随 `ui.setHeight`。
@@ -46,6 +48,7 @@ final class WebToolViewController: NSViewController {
     self.plugin = plugin
     self.request = request
     self.host = host
+    entryPath = request.view?.contribution.main ?? plugin.manifest.ui?.main
     preferredHeight = CGFloat(plugin.manifest.resolvedUIHeight)
     appearanceName = Self.normalizedAppearance(request.input.context.appearance)
     super.init(nibName: nil, bundle: nil)
@@ -64,7 +67,7 @@ final class WebToolViewController: NSViewController {
     configureErrorLabel(in: root)
     view = root
     guard !isTornDown else { return }
-    guard let mainPath = plugin.manifest.ui?.main,
+    guard let mainPath = entryPath,
       let entryURL = WebToolNavigationPolicy.entryURL(pluginID: plugin.manifest.id, mainPath: mainPath)
     else {
       showError(L("这个插件没有网页界面"))
@@ -88,6 +91,21 @@ final class WebToolViewController: NSViewController {
   func deliver(input: ToolInput) {
     request.input = input
     sendEnter()
+  }
+
+  /// panel 视图的上下文变了（切标签、切 Pane、cd）：更新请求并发送 `context` 事件，不重发 `enter`，
+  /// 页面状态因此不会被重置。页面还没加载完时只更新请求，加载完成后的 `enter` 会带上最新上下文。
+  func updateContext(_ input: ToolInput, extended: [String: JSONValue]) {
+    request.input = input
+    request.extendedContext = extended
+    let context: JSONValue
+    do {
+      context = try ToolBridge.contextPayload(for: request)
+    } catch {
+      host?.webTool(self, showNotice: L("无法把输入交给网页工具"), isError: true)
+      return
+    }
+    send(.object(["type": "context", "context": context]))
   }
 
   /// 启动器搜索框文字变化：发送 `query` 事件。
@@ -201,7 +219,7 @@ final class WebToolViewController: NSViewController {
   /// `theme` 事件与 `enter.theme` 的内容。
   private var themeValue: JSONValue { .object(["appearance": .string(appearanceName)]) }
 
-  /// 发送 `enter`：`{type, code, input, context, theme}`。
+  /// 发送 `enter`：`{type, code, input, context, theme}`；panel 视图另带 `view: {id, slot}`。
   private func sendEnter() {
     let payload: JSONValue
     do {

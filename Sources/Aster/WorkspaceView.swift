@@ -164,6 +164,8 @@ final class WorkspaceViewController: NSViewController {
   let hostsDirectory: SSHHostDirectory
   /// agent 主机终端停靠区。生产是共享注册表；测试注入独立实例。
   let agentHostDocks: AgentHostPaneDocks
+  /// 插件界面扩展（bar 与 Inspector 面板）。跨整树重建长期存活，挂载胶水见 WorkspaceViewController+ToolViews.swift。
+  let extensionHost: WorkspaceExtensionHost
 
   init(
     model: AppModel,
@@ -172,7 +174,8 @@ final class WorkspaceViewController: NSViewController {
     fileRenderer: any FileRendering = FileRenderPipeline(),
     secureInputCoordinator: SecureInputCoordinator = .shared,
     hostsDirectory: SSHHostDirectory = .shared,
-    agentHostDocks: AgentHostPaneDocks = .shared
+    agentHostDocks: AgentHostPaneDocks = .shared,
+    toolViewCatalog: (any ToolViewCatalog)? = nil
   ) {
     self.model = model
     self.preferences = preferences
@@ -181,6 +184,8 @@ final class WorkspaceViewController: NSViewController {
     self.secureInputCoordinator = secureInputCoordinator
     self.hostsDirectory = hostsDirectory
     self.agentHostDocks = agentHostDocks
+    extensionHost = WorkspaceExtensionHost(
+      model: model, preferences: preferences, catalog: toolViewCatalog ?? ToolCenter.shared)
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -191,7 +196,8 @@ final class WorkspaceViewController: NSViewController {
     preferences: AppPreferences,
     secureInputCoordinator: SecureInputCoordinator = .shared,
     hostsDirectory: SSHHostDirectory = .shared,
-    agentHostDocks: AgentHostPaneDocks = .shared
+    agentHostDocks: AgentHostPaneDocks = .shared,
+    toolViewCatalog: (any ToolViewCatalog)? = nil
   ) {
     let suite = "Aster.WorkspacePanelPreview.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -205,7 +211,8 @@ final class WorkspaceViewController: NSViewController {
       ),
       secureInputCoordinator: secureInputCoordinator,
       hostsDirectory: hostsDirectory,
-      agentHostDocks: agentHostDocks
+      agentHostDocks: agentHostDocks,
+      toolViewCatalog: toolViewCatalog
     )
   }
 
@@ -264,6 +271,7 @@ final class WorkspaceViewController: NSViewController {
     installPaneClickMonitor()
     installWorkspaceOverlayKeyMonitor()
     observeWindowActivation()
+    installToolViewHost()
     refresh()
   }
 
@@ -332,12 +340,14 @@ final class WorkspaceViewController: NSViewController {
     return tabRuleOutcome(for: tab).renderedTitle
   }
 
-  private func detailsControllerForSelectedTab() -> DetailsPanelViewController {
+  /// 当前标签的详情控制器：同一标签复用，换标签新建。插件面板经 `pluginPanels` 向窗口的扩展宿主借用。
+  func detailsControllerForSelectedTab() -> DetailsPanelViewController {
     let selectedTabID = model.selectedTabID
     if let cached = detailsPanelController, detailsPanelTabID == selectedTabID {
       return cached
     }
     let details = DetailsPanelViewController(model: model, preferences: preferences)
+    details.pluginPanels = extensionHost
     detailsPanelController = details
     detailsPanelTabID = selectedTabID
     return details
@@ -1002,7 +1012,11 @@ final class WorkspaceViewController: NSViewController {
     if let paneID = model.presentedPromptQueuePaneID {
       setPromptQueuePresented(for: paneID)
     }
-    for paneID in paneHosts.keys { installAgentHostDock(for: paneID, refocusIfLost: false) }
+    for paneID in paneHosts.keys {
+      installAgentHostDock(for: paneID, refocusIfLost: false)
+      installExtensionPaneBar(for: paneID)
+    }
+    extensionHost.workspaceDidRefresh()
 
     if let tab = model.selectedTab, model.isComposerPresented,
       model.composerState(for: tab.activePaneID).presentation == .floating
@@ -2240,6 +2254,8 @@ final class WorkspaceViewController: NSViewController {
     // 放到外层 stack 会把整个右边栏额外向下推一行。
     if !titleLivesInTabBar { center.addArrangedSubview(makeWorkspaceHeader(tab)) }
     if model.isFindPresented { center.addArrangedSubview(makeFindBar(tab)) }
+    // 插件 tab.top 条贴在查找条下面，自然成为 contentHeader，paneHost 的顶边约束不用改。
+    if let bar = extensionHost.bar(for: .tabTop) { center.addArrangedSubview(bar) }
     let contentHeader = center.arrangedSubviews.last
 
     let paneHost = NSView()
@@ -2251,6 +2267,8 @@ final class WorkspaceViewController: NSViewController {
       && model.composerState(for: tab.activePaneID).presentation == .docked
       ? makeAgentComposer(tab) : nil
     if let composer { center.addArrangedSubview(composer) }
+    let bottomBar = extensionHost.bar(for: .tabBottom)
+    if let bottomBar { center.addArrangedSubview(bottomBar) }
 
     var bodyPanels = [WorkspacePanel(role: .content, contentView: center)]
     if model.isInspectorPresented {
@@ -2298,11 +2316,20 @@ final class WorkspaceViewController: NSViewController {
       paneHost.widthAnchor.constraint(equalTo: center.widthAnchor),
       paneHost.topAnchor.constraint(equalTo: contentHeader?.bottomAnchor ?? center.topAnchor),
     ]
+    // 纵向链 paneHost → composer? → tab.bottom 条? → center 底边，每一环都是必需约束（同上）。
+    let bottomEdge = bottomBar?.topAnchor ?? center.bottomAnchor
     if let composer {
       constraints.append(paneHost.bottomAnchor.constraint(equalTo: composer.topAnchor))
-      constraints.append(composer.bottomAnchor.constraint(equalTo: center.bottomAnchor))
+      constraints.append(composer.bottomAnchor.constraint(equalTo: bottomEdge))
     } else {
-      constraints.append(paneHost.bottomAnchor.constraint(equalTo: center.bottomAnchor))
+      constraints.append(paneHost.bottomAnchor.constraint(equalTo: bottomEdge))
+    }
+    if let topBar = contentHeader as? ToolBarView {
+      constraints.append(topBar.widthAnchor.constraint(equalTo: center.widthAnchor))
+    }
+    if let bottomBar {
+      constraints.append(bottomBar.widthAnchor.constraint(equalTo: center.widthAnchor))
+      constraints.append(bottomBar.bottomAnchor.constraint(equalTo: center.bottomAnchor))
     }
     NSLayoutConstraint.activate(constraints)
     return stack
@@ -2770,6 +2797,12 @@ final class WorkspaceViewController: NSViewController {
       let tab = model.selectedTab
     else { return }
     focusActivePane(in: tab)
+  }
+
+  /// 插件 pane.bottom 条：扩展宿主按 Pane 长期持有同一实例，只给终端 Pane；没有时撤下旧条。
+  /// 条自带必需的高度约束（没有项目时归零），这里不另给高度。
+  private func installExtensionPaneBar(for paneID: UUID) {
+    paneHosts[paneID]?.setExtensionBar(extensionHost.paneBar(for: paneID))
   }
 
   /// 局部挂载 Prompt Queue。队列条作为 Pane 的底部附件占据布局空间（不是覆盖层），

@@ -491,8 +491,10 @@ final class ActivePaneHostView: NSView {
   private var contentTopConstraint: NSLayoutConstraint?
   /// 非终端 Pane 聚焦时真正接收键盘的视图（如文件浏览器的列表）；nil 时焦点落在容器本身。
   weak var preferredKeyView: NSView?
-  /// 底部槽：`bottomAccessory`（Prompt Queue，带内边距），其下是 `agentHostDock`
-  /// （agent 主机终端停靠区，贴边）。内容底边跟随它们，整条约束链每次整体重建。
+  /// 底部槽，自上而下：`extensionBar`（插件 pane.bottom 条，贴边）、`bottomAccessory`（Prompt Queue，
+  /// 带内边距）、`agentHostDock`（agent 主机终端停靠区，贴边）。内容底边跟随它们，整条约束链每次整体重建。
+  private var extensionBar: NSView?
+  private var extensionBarHeight: CGFloat?
   private var bottomAccessory: NSView?
   private var bottomAccessoryInset: CGFloat = 8
   private var agentHostDock: NSView?
@@ -591,7 +593,26 @@ final class ActivePaneHostView: NSView {
     rebuildBottomChain()
   }
 
-  /// 自上而下 content → [accessory] → [停靠区] → host 底边。每次整链重建，不残留半条约束。
+  /// 安装、更新或移除插件 pane.bottom 条：贴左右边，在内容与 Prompt Queue 之间，占布局空间。
+  /// 语义同 `setAgentHostDock`：条由扩展宿主按 Pane 长期持有，工作区重建后会被新的 host 接走，
+  /// 只在它确实挂在本 host 下时才移除或建约束。`height` 为 nil 表示条自己带必需的高度约束
+  /// （`ToolBarView` 没有项目时把高度归零）；给值时这里加一条必需的高度约束。
+  func setExtensionBar(_ bar: NSView?, height: CGFloat? = nil) {
+    if bar == nil, extensionBar == nil { return }
+    if let old = extensionBar, old !== bar, old.superview === self { old.removeFromSuperview() }
+    extensionBar = bar
+    extensionBarHeight = height
+    if let bar {
+      if bar.superview !== self { addSubview(bar) }
+      bar.translatesAutoresizingMaskIntoConstraints = false
+    }
+    rebuildBottomChain()
+  }
+
+  /// 当前挂着的插件 pane.bottom 条（测试用）。
+  var installedExtensionBar: NSView? { extensionBar?.superview === self ? extensionBar : nil }
+
+  /// 自上而下 content → [插件条] → [accessory] → [停靠区] → host 底边。每次整链重建，不残留半条约束。
   private func rebuildBottomChain() {
     NSLayoutConstraint.deactivate(bottomChain)
     bottomChain.removeAll()
@@ -629,6 +650,17 @@ final class ActivePaneHostView: NSView {
       ]
       floorAnchor = accessory.topAnchor
       floorInset = bottomAccessoryInset
+    }
+    if let bar = extensionBar, bar.superview === self {
+      // 条高是必需约束（不像停靠区那样可让）：条很矮，Pane 再矮也该先压终端行数。
+      chain += [
+        bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+        bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+        bar.bottomAnchor.constraint(equalTo: floorAnchor, constant: -floorInset),
+      ]
+      if let height = extensionBarHeight { chain.append(bar.heightAnchor.constraint(equalToConstant: height)) }
+      floorAnchor = bar.topAnchor
+      floorInset = 0
     }
     chain.append(contentView.bottomAnchor.constraint(equalTo: floorAnchor, constant: -floorInset))
     NSLayoutConstraint.activate(chain)

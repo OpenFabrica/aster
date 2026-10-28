@@ -31,6 +31,7 @@ struct ToolBridgeValidatorTests {
   /// 最小请求只要 `v` 与方法；params 缺省或 null 时是空对象；其它顶层字段忽略。
   @Test func parseAcceptsMinimalRequestAndIgnoresExtraFields() throws {
     #expect(try parse(["v": 1, "method": "tool.input"]) == ToolBridgeRequest(method: .toolInput))
+    #expect(try parse(["v": 1, "method": "context.get"]) == ToolBridgeRequest(method: .contextGet))
     #expect(try parse(["v": 1, "method": "ui.close", "params": NSNull()]) == ToolBridgeRequest(method: .close))
     #expect(try parse(["v": 1, "method": "ui.close", "id": 5, "x": [1, 2]]) == ToolBridgeRequest(method: .close))
   }
@@ -142,7 +143,7 @@ struct ToolBridgeValidatorTests {
   /// 方法原始值与所需权限同开发文档的方法表一致；`exec` 不对应任何桥接方法。
   @Test func methodTableMatchesDocumentedPermissions() throws {
     let table: [(String, ToolPermission?)] = [
-      ("tool.input", nil), ("ui.setHeight", nil), ("ui.close", nil), ("storage.get", nil), ("storage.set", nil),
+      ("tool.input", nil), ("context.get", nil), ("ui.setHeight", nil), ("ui.close", nil), ("storage.get", nil), ("storage.set", nil),
       ("storage.remove", nil), ("storage.keys", nil), ("secureStorage.get", nil), ("secureStorage.set", nil),
       ("secureStorage.remove", nil), ("secureStorage.keys", nil), ("shell.openURL", nil),
       ("clipboard.readText", .clipboardRead), ("clipboard.writeText", .clipboardWrite),

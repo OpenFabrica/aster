@@ -130,8 +130,10 @@
 
   // MARK: 事件
 
-  const listeners = { enter: [], query: [], theme: [] };
+  const listeners = { enter: [], query: [], theme: [], context: [] };
   let lastEnter = null;
+  // 最近一次上下文：enter 带来的或 panel 视图收到的 context 事件；onContextChange 注册晚了也能立即拿到。
+  let lastContext = null;
 
   // 单个回调出错只记到控制台，不影响其它回调。
   const invoke = (callback, value) => {
@@ -157,16 +159,27 @@
     };
   };
 
-  // 原生事件入口：enter 缓存最近一次并同步外观，query 只给文本，theme 同步外观后通知。
+  // 原生事件入口：enter 缓存最近一次并同步外观，query 只给文本，theme 同步外观后通知，
+  // context（panel 视图换标签、Pane、目录）只更新上下文，不重新进入。
   const receive = (event) => {
     if (!event || typeof event !== "object") return;
     switch (event.type) {
       case "enter": {
         if (event.theme) setAppearance(event.theme);
-        lastEnter = Object.freeze({ code: event.code, input: event.input, context: event.context, theme: event.theme });
+        const entered = { code: event.code, input: event.input, context: event.context, theme: event.theme };
+        if (event.view) entered.view = Object.freeze({ id: event.view.id, slot: event.view.slot });
+        lastEnter = Object.freeze(entered);
+        lastContext = event.context == null ? null : Object.freeze(event.context);
         emit("enter", lastEnter);
+        // 只关心上下文的页面也能在进入（含重载后的再次进入）时收到一次。
+        if (lastContext) emit("context", lastContext);
         break;
       }
+      case "context":
+        if (event.context == null) break;
+        lastContext = Object.freeze(event.context);
+        emit("context", lastContext);
+        break;
       case "query":
         emit("query", typeof event.text === "string" ? event.text : "");
         break;
@@ -187,9 +200,14 @@
     onEnter: (callback) => subscribe("enter", callback, lastEnter),
     onQuery: (callback) => subscribe("query", callback),
     onThemeChange: (callback) => subscribe("theme", callback),
+    // 上下文变化（panel 视图跟随当前标签与 Pane）；已有上下文时立即回调一次。返回取消注册的函数。
+    onContextChange: (callback) => subscribe("context", callback, lastContext),
     getInput: () => call("tool.input"),
     setHeight: (px) => call("ui.setHeight", { height: Number(px) }),
     close: () => call("ui.close"),
+    context: Object.freeze({
+      get: () => call("context.get"),
+    }),
     storage: Object.freeze({
       get: (key) => call("storage.get", { key: asText(key) }),
       set: (key, value) => guarded(() => call("storage.set", { key: asText(key), value: toJSONValue(value) })),

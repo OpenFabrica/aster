@@ -129,16 +129,34 @@ final class ToolBridge {
   }
 
   /// `tool.input` 与 `enter` 事件共用的 `{code, input, context}`；`input` 与 Swift 的 `ToolInput` 编码一致。
+  /// panel 视图另带 `view: {id, slot}`，`context` 并入扩展上下文（见 `contextPayload(for:)`）。
   static func toolInputPayload(for request: ToolLaunchRequest) throws -> JSONValue {
     let input: JSONValue
-    let context: JSONValue
     do {
       input = try JSONValue(encoding: request.input)
-      context = try JSONValue(encoding: request.input.context)
     } catch {
       throw ToolBridgeError.failed(L("无法编码工具输入"))
     }
-    return .object(["code": .string(request.entry.feature.code), "input": input, "context": context])
+    var payload: [String: JSONValue] = [
+      "code": .string(request.entry.feature.code), "input": input, "context": try contextPayload(for: request),
+    ]
+    if let view = request.view {
+      payload["view"] = .object(["id": .string(view.contribution.id), "slot": .string(view.slot.rawValue)])
+    }
+    return .object(payload)
+  }
+
+  /// `context.get`、`context` 事件与 `enter.context` 共用的上下文：`ToolContext` 的编码并入扩展上下文。
+  /// 基础字段（`workingDirectory`、`isRemote`、`locale`、`appearance`）优先，扩展上下文不能改写它们。
+  static func contextPayload(for request: ToolLaunchRequest) throws -> JSONValue {
+    let base: JSONValue
+    do {
+      base = try JSONValue(encoding: request.input.context)
+    } catch {
+      throw ToolBridgeError.failed(L("无法编码工具输入"))
+    }
+    guard case .object(let fields) = base else { return base }
+    return .object(request.extendedContext.merging(fields) { _, base in base })
   }
 
   /// 任意错误统一成桥接错误；未知错误只带系统描述，不带插件数据。
@@ -157,6 +175,9 @@ final class ToolBridge {
     case .toolInput:
       guard let launch = delegate?.bridgeLaunchRequest else { throw ToolBridgeError.unavailable(L("工具已关闭")) }
       return try Self.toolInputPayload(for: launch)
+    case .contextGet:
+      guard let launch = delegate?.bridgeLaunchRequest else { throw ToolBridgeError.unavailable(L("工具已关闭")) }
+      return try Self.contextPayload(for: launch)
     case .setHeight:
       return try setHeight(params)
     case .close:

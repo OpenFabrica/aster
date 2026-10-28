@@ -32,6 +32,8 @@ final class ToolCenter: ToolManaging {
 
   /// 已启用且可运行（或待确认）的全部功能。
   private(set) var catalog: [ToolCatalogEntry] = []
+  /// 界面扩展目录：所有没停用插件声明的视图（含用户关掉的，`isEnabled` 区分）。
+  private(set) var viewEntries: [ToolViewEntry] = []
 
   /// App 使用的共享实例：真实目录与原生确认框。
   convenience init() {
@@ -191,7 +193,7 @@ final class ToolCenter: ToolManaging {
         description: manifest.description, source: record.source,
         directory: record.registeredPath ?? record.directory?.path ?? "", status: status(of: record),
         permissions: declared, grantedPermissions: granted, networkDomains: manifest.network,
-        featureCount: manifest.features.count)
+        featureCount: manifest.features.count, views: viewSummaries(record: record, manifest: manifest))
     }
   }
 
@@ -233,9 +235,8 @@ final class ToolCenter: ToolManaging {
         guard var existing = state.plugins[pluginID] else { return }
         existing.enabled = true
         // 只是被停用过、从没授权：删掉记录，状态回到「第一次运行」而不是「权限变多」。
-        let pristine = existing.grantedPermissions.isEmpty && existing.grantedNetworkDomains.isEmpty
-          && existing.approvedDigest == nil && existing.approvedVersion == nil
-        state.plugins[pluginID] = pristine ? nil : existing
+        // 视图设置也算用户决定，有就保留记录。
+        state.plugins[pluginID] = existing.isPristine ? nil : existing
       } else {
         var existing = state.plugins[pluginID] ?? ToolPluginState(enabled: false)
         existing.enabled = false
@@ -401,6 +402,7 @@ final class ToolCenter: ToolManaging {
   /// 状态或插件列表变化后的统一收尾。
   private func refreshDerivedState() {
     rebuildCatalog()
+    rebuildViewEntries()
     activeSessions().forEach { $0.pluginStateDidChange() }
     changeSubject.send()
   }
@@ -426,6 +428,97 @@ final class ToolCenter: ToolManaging {
     Task.detached(priority: .utility) {
       _ = ToolMatcher.search("a", entries: entries, usage: ToolUsageStats(), now: Date(), limit: 1)
     }
+  }
+
+  // MARK: - 界面扩展
+
+  /// 重建视图目录：停用的插件不列；用户关掉的视图保留（`isEnabled == false`），由挂载方过滤。
+  private func rebuildViewEntries() {
+    var entries: [ToolViewEntry] = []
+    for record in records {
+      let status = status(of: record)
+      guard status != .disabled else { continue }
+      let manifest = displayManifest(of: record)
+      let state = stateStore.state.plugins[record.id]
+      let permissions = ToolPluginTrust.effectivePermissions(
+        manifest: record.manifest, source: record.source, state: state)
+      for view in manifest.views {
+        let viewState = state?.views[view.id]
+        entries.append(
+          ToolViewEntry(
+            pluginID: record.id, pluginName: manifest.name, source: record.source, contribution: view,
+            slot: Self.effectiveSlot(view, state: viewState), isEnabled: viewState?.enabled ?? true,
+            status: status, iconPath: record.viewIconPaths[view.id] ?? record.iconPath,
+            pluginDirectory: record.directory, permissions: permissions))
+      }
+    }
+    viewEntries = entries
+  }
+
+  /// 生效位置：用户选的位置仍接受该视图类型时用它，否则回到清单缺省。
+  static func effectiveSlot(_ view: ToolViewContribution, state: ToolViewState?) -> ToolViewSlot {
+    guard let chosen = state?.slot, chosen.kinds.contains(view.kind) else { return view.slot }
+    return chosen
+  }
+
+  /// 设置页的视图一览。
+  private func viewSummaries(record: ToolPluginRecord, manifest: ToolManifest) -> [ToolViewSummary] {
+    let state = stateStore.state.plugins[record.id]
+    let pluginDisabled = status(of: record) == .disabled
+    return manifest.views.map { view in
+      let viewState = state?.views[view.id]
+      let slot = Self.effectiveSlot(view, state: viewState)
+      let enabled = viewState?.enabled ?? true
+      let reason: ToolViewSummary.InactiveReason? =
+        if pluginDisabled { .pluginDisabled } else if !enabled { .disabled } else if !slot.isImplemented {
+          .unsupported
+        } else { nil }
+      return ToolViewSummary(
+        id: view.id, title: view.title, kind: view.kind, slot: slot, defaultSlot: view.slot, isEnabled: enabled,
+        inactiveReason: reason)
+    }
+  }
+
+  func setViewEnabled(_ enabled: Bool, pluginID: String, viewID: String) {
+    updateViewState(pluginID: pluginID, viewID: viewID) { $0.enabled = enabled }
+  }
+
+  func setViewSlot(_ slot: ToolViewSlot?, pluginID: String, viewID: String) {
+    guard let view = record(id: pluginID)?.manifest.view(id: viewID) else { return }
+    // 与缺省相同就不存，清单以后改了缺省位置也能跟上。
+    let chosen = slot.flatMap { $0 == view.slot || !$0.kinds.contains(view.kind) ? nil : $0 }
+    updateViewState(pluginID: pluginID, viewID: viewID) { $0.slot = chosen }
+  }
+
+  /// 改一个视图的设置；回到缺省时删掉记录，插件记录也只剩缺省值时一并删掉。
+  private func updateViewState(pluginID: String, viewID: String, _ change: (inout ToolViewState) -> Void) {
+    guard record(id: pluginID)?.manifest.view(id: viewID) != nil else { return }
+    stateStore.update { state in
+      var plugin = state.plugins[pluginID] ?? ToolPluginState()
+      var view = plugin.views[viewID] ?? ToolViewState()
+      change(&view)
+      plugin.views[viewID] = view.isDefault ? nil : view
+      state.plugins[pluginID] = plugin.isPristine && plugin.enabled ? nil : plugin
+    }
+    refreshDerivedState()
+  }
+
+  /// 为 panel 视图组装打开请求：用合成的 `view:<id>` 功能承载，`action` 为 `ui`，入口由 `request.view` 决定。
+  func viewLaunchRequest(
+    for entry: ToolViewEntry,
+    input: ToolInput,
+    origin: ToolTerminalOrigin?,
+    extendedContext: [String: JSONValue]
+  ) -> ToolLaunchRequest {
+    let feature = ToolFeature(
+      code: "view:\(entry.contribution.id)", title: entry.contribution.title, keywords: [], match: [], action: .ui)
+    let catalogEntry = ToolCatalogEntry(
+      pluginID: entry.pluginID, pluginName: entry.pluginName,
+      pluginVersion: record(id: entry.pluginID)?.manifest.version ?? "", source: entry.source, feature: feature,
+      iconPath: entry.iconPath, hasUI: true)
+    return ToolLaunchRequest(
+      entry: catalogEntry, input: input, origin: origin,
+      view: ToolViewPlacement(contribution: entry.contribution, slot: entry.slot), extendedContext: extendedContext)
   }
 
   /// 文件系统变化：重新扫描；开发目录的文件变了，让正在打开的网页工具重新加载。

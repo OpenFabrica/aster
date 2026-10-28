@@ -71,6 +71,51 @@ struct AgentHostPaneDockLayoutTests {
     #expect(content.frame == host.bounds)
   }
 
+  @Test("插件 pane.bottom 条贴左右边，排在内容与 Prompt Queue 之间；条没有项目时高度归零；撤掉后内容回到原位")
+  func hostStacksExtensionBarAboveAccessory() {
+    let (window, host, content) = makeWindowedHost(height: 1_000)
+    defer { window.close() }
+    let accessory = NSView()
+    accessory.translatesAutoresizingMaskIntoConstraints = false
+    accessory.heightAnchor.constraint(equalToConstant: 44).isActive = true
+    host.setBottomAccessory(accessory)
+    let dock = NSView()
+    host.setAgentHostDock(dock, height: Self.expanded)
+    let bar = NSView()
+    host.setExtensionBar(bar, height: 24)
+    host.layoutSubtreeIfNeeded()
+    #expect(dock.frame == NSRect(x: 0, y: 0, width: 400, height: 400))
+    #expect(abs(accessory.frame.minY - (dock.frame.maxY + 8)) < 0.5)
+    #expect(bar.frame == NSRect(x: 0, y: accessory.frame.maxY + 8, width: 400, height: 24))
+    #expect(abs(content.frame.minY - bar.frame.maxY) < 0.5)
+    #expect(host.installedExtensionBar === bar)
+
+    // ToolBarView 自带高度约束：没有项目时隐藏并归零，内容直接接到 Prompt Queue 上方。
+    let toolBar = ToolBarView(slot: .paneBottom, height: 24)
+    host.setExtensionBar(toolBar)
+    host.layoutSubtreeIfNeeded()
+    #expect(bar.superview == nil)
+    #expect(toolBar.isHidden)
+    #expect(abs(content.frame.minY - (accessory.frame.maxY + 8)) < 0.5)
+    toolBar.apply(segments: [
+      ToolBarSegment(id: "p/view:bar", pluginName: "P", iconPath: nil, content: .items([ToolBarItem(text: "x")]),
+        runningSince: nil)
+    ])
+    host.layoutSubtreeIfNeeded()
+    #expect(abs(toolBar.frame.height - InterfaceScale.length(24)) < 0.5)
+    #expect(abs(content.frame.minY - toolBar.frame.maxY) < 0.5)
+
+    // 条被新的 host 接走后，旧 host 撤槽不碰它。
+    let (other, _) = makeHost(height: 600)
+    other.setExtensionBar(toolBar)
+    host.setExtensionBar(nil)
+    #expect(toolBar.superview === other)
+    host.setAgentHostDock(nil, height: nil)
+    host.setBottomAccessory(nil)
+    host.layoutSubtreeIfNeeded()
+    #expect(content.frame == host.bounds)
+  }
+
   @Test("停靠区被新的 Pane 宿主接走后，旧宿主重建约束或撤槽都不再碰它")
   func staleHostLeavesDockAlone() {
     let (old, _) = makeHost(height: 600)

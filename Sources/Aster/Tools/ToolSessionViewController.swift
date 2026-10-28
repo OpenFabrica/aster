@@ -87,17 +87,26 @@ final class ToolSessionViewController: NSViewController, ToolWebHost {
     }
   }
 
-  /// 换一份新输入重新进入（同一工具再次被打开时复用控制器）。
+  /// 换一份新输入重新进入（同一工具再次被打开时复用控制器）。panel 视图不重新进入，只推送新上下文。
   func deliver(input: ToolInput) {
     request.input = input
     switch content {
     case .builtin(let tool): tool.update(input: input)
     case .script(let script): script.rerun(with: input)
+    case .web(let web) where request.view != nil: web.updateContext(input, extended: request.extendedContext)
     case .web(let web): web.deliver(input: input)
     case .approval: break  // 授权后用最新输入运行
     case .message: start()
     case .empty: if isViewLoaded { start() }  // 视图还没加载时由 viewDidLoad 用最新输入启动
     }
+  }
+
+  /// panel 视图换上下文（切标签、切 Pane、cd）：更新输入、来源终端与扩展上下文。
+  /// 网页已经在运行时页面收到 `context` 事件、不重新进入；其余状态（授权提示、提示）照 `deliver` 处理。
+  func updateContext(input: ToolInput, origin: ToolTerminalOrigin?, extendedContext: [String: JSONValue]) {
+    request.origin = origin
+    request.extendedContext = extendedContext
+    deliver(input: input)
   }
 
   /// 释放资源：取消脚本、关闭 WebView。容器移除视图前必须调用。
@@ -187,6 +196,10 @@ final class ToolSessionViewController: NSViewController, ToolWebHost {
   /// 按功能动作创建内容。功能以工具中心里当前的清单为准，避免用过期的条目运行。
   private func launch() {
     let entry = request.entry
+    if let view = request.view {
+      launchPanel(view)
+      return
+    }
     guard let feature = center.manifest(pluginID: entry.pluginID)?.feature(code: entry.feature.code) else {
       showMessage(L("插件里已经没有「\(entry.feature.title)」这个功能了"), style: .error, status: .ready)
       return
@@ -205,6 +218,23 @@ final class ToolSessionViewController: NSViewController, ToolWebHost {
     case .script(let action): showScript(action, feature: feature, info: info)
     case .builtin: break
     }
+  }
+
+  /// panel 视图：入口是视图声明的 `main`，不要求清单有 `ui`。合成的 `view:<id>` 功能不在清单里，
+  /// 改为核对当前清单里仍有这个 panel 视图。
+  private func launchPanel(_ view: ToolViewPlacement) {
+    let pluginID = request.entry.pluginID
+    guard let current = center.manifest(pluginID: pluginID)?.view(id: view.contribution.id), current.kind == .panel,
+      current.main != nil
+    else {
+      showMessage(L("插件里已经没有「\(view.contribution.title)」这个视图了"), style: .error, status: .ready)
+      return
+    }
+    guard let info = center.runtimeInfo(pluginID: pluginID) else {
+      start()
+      return
+    }
+    showWeb(info)
   }
 
   /// 授权提示；点按钮后弹安装确认，同意后重新判断（这时状态已是可运行）。
