@@ -396,6 +396,8 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     // 等不依赖面板控制器的入口。
     ToolCenter.shared.start()
     toolLauncher.refresh()
+    // 上次开着的便笺放回桌面，不抢工作区的焦点。
+    StickyNoteCenter.shared.restoreOpenNotes()
     NotificationCenter.default.publisher(for: .asterShowToolLauncher)
       .sink { [weak self] notification in
         guard let self else { return }
@@ -456,6 +458,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     SSHBrokerSupervisor.shared.shutdown()
     quickTerminalController.shutdown()
     toolLauncherController?.shutdown()
+    StickyNoteCenter.shared.flush()
     AgentHostRuntime.shared?.shutdown()
     tearDownUsageMonitor()
     themeSwitcherPanelController?.dismiss(commit: false)

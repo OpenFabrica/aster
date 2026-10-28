@@ -161,6 +161,7 @@ v1 范围：
 | `uuid` | UUID v4 / v7、随机串 | — |
 | `ports` | 本机监听端口、结束进程（先确认） | `^:?\d{2,5}$` |
 | `json` | 格式化 / 压缩 / 树视图 | `^\s*[\[{]` |
+| `stickies` | 便笺列表：新建、全部显示 / 收起、删除；便笺本身是桌面窗口（见「便笺」） | — |
 
 `BuiltinTextTools.inlineResult` 给出可立即计算的结果（启动器行内显示，`↩` 复制）。内置网页工具
 （JWT、正则、Diff、颜色）放在 `Resources/tools-builtin/<id>/`，id 以 `aster.` 开头，来源为内置：
@@ -484,3 +485,19 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 - 宿主语义：`⌘↩`（窗口拦截 `performKeyEquivalent`）把 `primaryResultText` 预填到终端并把用户带到那个 Pane；
   预填目标有来源只认来源（来源已关闭则失败，不改写别处），没有来源时取目标工作区当前的活动终端。开成 Pane 成功后
   关掉窗口；`terminal` 脚本在目标工作区的新标签里运行。提示显示在窗口底栏。
+
+## 便笺
+
+- 内置原生工具 `stickies`（`StickiesToolContent`）只是目录：列表按修改时间倒序，启动器继续输入的文字筛选列表
+  （忽略大小写、变音与全半角），也是「新建便笺」的初始内容；`⌘↩` 预填选中便笺的全文。
+- `StickyNoteCenter`（主线程单例）持有全部便笺与窗口。启动时 `restoreOpenNotes()` 重新打开 `isOpen` 的便笺
+  （不抢焦点），退出时 `flush()`。关窗口只是收起（`isOpen = false`），删除才移除；新便笺沿用最近改过的那张的颜色，
+  位置从最近一张开着的便笺错开，没有时放在鼠标所在屏幕右上角。改字更新 `modifiedAt`，移动、换开关不算修改。
+- 窗口（`StickyNoteWindowController`）：`.titled + .fullSizeContentView`，隐藏标题文字与缩放 / 最小化按钮，
+  顶部 24pt 略深的色带可拖动。纸面取 macOS「便笺」六色，固定 `.aqua` 外观。右键菜单在系统编辑菜单前加：新建、
+  颜色、浮在最前面（`.floating` 层级）、删除（有内容先确认）；窗口里 `⌘N` 新建便笺。纯文本，`allowsUndo`。
+- 存储：`<AppSupport>/sticky-notes.json`（`StickyNoteStore`），`{version: 1, notes: [...]}`，时间写 Unix 秒。
+  读取上限 32 MiB；坏文件改名 `.bad` 留底后从空开始。解码容错（AsterCore `StickyNote`）：`id` 无效的记录丢弃、
+  重复 `id` 留第一条、坏字段用默认值、无效位置按没有位置处理；单张便笺正文上限 200,000 个 UTF-16 单元（不切开
+  字素簇）。写盘去抖 600 ms，在串行队列上原子写入。存储位置经 `AsterAppIdentity` 推导，开发版与测试宿主隔离。
+- 显示前核对存下来的位置仍落在某块屏幕上，显示器拔掉后改为居中。

@@ -223,6 +223,7 @@ final class ToolIconTileView: NSView {
     case .uuid: hex = 0x30D158
     case .ports: hex = 0xFF6961
     case .json: hex = 0xFFD60A
+    case .stickies: hex = 0xFF8AD8
     }
     return NSColor(
       srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,

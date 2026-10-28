@@ -2747,3 +2747,29 @@
 
 /* 独立工具窗口 */
 "⇧↩ 新窗口" = "⇧↩ New Window";
+
+/* 便笺 */
+"%@ · 已收起" = "%@ · Hidden";
+"「%@」删除后无法恢复。" = "“%@” can’t be recovered after it’s deleted.";
+"便笺" = "Stickies";
+"粉色" = "Pink";
+"浮在最前面" = "Float on Top";
+"复制内容" = "Copy Text";
+"还没有便笺。点「新建便笺」开始写。" = "No notes yet. Click “New Note” to start writing.";
+"黄色" = "Yellow";
+"灰色" = "Gray";
+"空白便笺" = "Empty Note";
+"蓝色" = "Blue";
+"绿色" = "Green";
+"没有包含这些文字的便笺" = "No notes contain this text";
+"全部收起" = "Hide All";
+"全部显示" = "Show All";
+"删除便笺…" = "Delete Note…";
+"删除后无法恢复。只想让它从桌面上消失，点左上角的关闭按钮即可。" = "A deleted note can’t be recovered. To just take it off your desktop, click the close button in its top-left corner.";
+"删除这张便笺？" = "Delete This Note?";
+"收起便笺（内容会保留）" = "Hide Note (Text Is Kept)";
+"显示便笺" = "Show Note";
+"新建便笺" = "New Note";
+"颜色" = "Color";
+"桌面便笺 · 自动保存" = "Desktop notes · Saved automatically";
+"紫色" = "Purple";

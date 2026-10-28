@@ -2745,3 +2745,29 @@
 
 /* 独立工具窗口 */
 "⇧↩ 新窗口" = "⇧↩ Nouvelle fenêtre";
+
+/* 便笺 */
+"%@ · 已收起" = "%@ · Masquée";
+"「%@」删除后无法恢复。" = "« %@ » ne pourra pas être récupérée après sa suppression.";
+"便笺" = "Stickies";
+"粉色" = "Rose";
+"浮在最前面" = "Toujours au premier plan";
+"复制内容" = "Copier le texte";
+"还没有便笺。点「新建便笺」开始写。" = "Aucune note pour l’instant. Cliquez sur « Nouvelle note » pour commencer.";
+"黄色" = "Jaune";
+"灰色" = "Gris";
+"空白便笺" = "Note vide";
+"蓝色" = "Bleu";
+"绿色" = "Vert";
+"没有包含这些文字的便笺" = "Aucune note ne contient ce texte";
+"全部收起" = "Tout masquer";
+"全部显示" = "Tout afficher";
+"删除便笺…" = "Supprimer la note…";
+"删除后无法恢复。只想让它从桌面上消失，点左上角的关闭按钮即可。" = "Une note supprimée ne peut pas être récupérée. Pour simplement la retirer du bureau, cliquez sur le bouton de fermeture en haut à gauche.";
+"删除这张便笺？" = "Supprimer cette note ?";
+"收起便笺（内容会保留）" = "Masquer la note (le texte est conservé)";
+"显示便笺" = "Afficher la note";
+"新建便笺" = "Nouvelle note";
+"颜色" = "Couleur";
+"桌面便笺 · 自动保存" = "Notes de bureau · Enregistrement automatique";
+"紫色" = "Violet";

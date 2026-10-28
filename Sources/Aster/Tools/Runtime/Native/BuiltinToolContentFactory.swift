@@ -15,6 +15,7 @@ enum BuiltinToolContentFactory {
     case .uuid: UUIDToolContent(input: input, actions: actions)
     case .ports: PortsToolContent(input: input, actions: actions)
     case .json: JSONToolContent(input: input, actions: actions)
+    case .stickies: StickiesToolContent(input: input, actions: actions)
     }
   }
 }

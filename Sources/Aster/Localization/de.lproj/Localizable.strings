@@ -2745,3 +2745,29 @@
 
 /* 独立工具窗口 */
 "⇧↩ 新窗口" = "⇧↩ Neues Fenster";
+
+/* 便笺 */
+"%@ · 已收起" = "%@ · Ausgeblendet";
+"「%@」删除后无法恢复。" = "„%@“ kann nach dem Löschen nicht wiederhergestellt werden.";
+"便笺" = "Notizzettel";
+"粉色" = "Rosa";
+"浮在最前面" = "Immer im Vordergrund";
+"复制内容" = "Text kopieren";
+"还没有便笺。点「新建便笺」开始写。" = "Noch keine Notizen. Klicke auf „Neue Notiz“, um loszulegen.";
+"黄色" = "Gelb";
+"灰色" = "Grau";
+"空白便笺" = "Leere Notiz";
+"蓝色" = "Blau";
+"绿色" = "Grün";
+"没有包含这些文字的便笺" = "Keine Notiz enthält diesen Text";
+"全部收起" = "Alle ausblenden";
+"全部显示" = "Alle einblenden";
+"删除便笺…" = "Notiz löschen …";
+"删除后无法恢复。只想让它从桌面上消失，点左上角的关闭按钮即可。" = "Gelöschte Notizen können nicht wiederhergestellt werden. Um sie nur vom Schreibtisch zu entfernen, klicke oben links auf die Schließen-Taste.";
+"删除这张便笺？" = "Diese Notiz löschen?";
+"收起便笺（内容会保留）" = "Notiz ausblenden (Text bleibt erhalten)";
+"显示便笺" = "Notiz anzeigen";
+"新建便笺" = "Neue Notiz";
+"颜色" = "Farbe";
+"桌面便笺 · 自动保存" = "Notizzettel auf dem Schreibtisch · Automatisch gesichert";
+"紫色" = "Lila";

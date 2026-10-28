@@ -32,7 +32,7 @@ public enum BuiltinTextTools {
       return decoded
     case .hash:
       return hex(SHA256.hash(data: Data(input.utf8)))
-    case .json, .ports, .uuid:
+    case .json, .ports, .uuid, .stickies:
       return nil
     }
   }
@@ -52,7 +52,7 @@ public enum BuiltinTextTools {
       return decoded != trimmed
     case .ports:
       return port(trimmed) != nil
-    case .hash, .json, .uuid:
+    case .hash, .json, .uuid, .stickies:
       return true
     }
   }

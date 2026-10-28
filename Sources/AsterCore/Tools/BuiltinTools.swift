@@ -10,6 +10,8 @@ public enum ToolBuiltinHandler: String, CaseIterable, Codable, Sendable {
   case uuid
   case ports
   case json
+  /// 便笺：桌面上的彩色小窗口，自动保存；工具界面是便笺列表。
+  case stickies
 }
 
 /// 内置原生工具的插件清单（id `aster.builtin`）。标题随界面语言变化，所以每次现算。
@@ -70,6 +72,9 @@ public enum BuiltinToolCatalog {
           .json, title: L("JSON 格式化"), subtitle: L("格式化 · 压缩 · 树视图"),
           keywords: ["json", "format", "pretty", "minify", "格式化", "压缩", "美化"],
           match: [.regex(ToolRegexRule(label: L("格式化 JSON"), pattern: jsonPattern, maxLength: 1_048_576))]),
+        feature(
+          .stickies, title: L("便笺"), subtitle: L("桌面便笺 · 自动保存"),
+          keywords: ["note", "notes", "sticky", "memo", "便笺", "便签", "笔记", "备忘"]),
       ])
   }
 

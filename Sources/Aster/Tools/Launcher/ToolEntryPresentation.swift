@@ -37,6 +37,7 @@ enum ToolEntryPresentation {
       case .uuid: return "dice"
       case .ports: return "network"
       case .json: return "curlybraces"
+      case .stickies: return "note.text"
       }
     }
     switch entry.feature.action {
