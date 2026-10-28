@@ -196,7 +196,14 @@ await aster.storage.get("history");
 await aster.storage.remove("history");
 await aster.storage.keys();
 
+// 加密存储：用法和 storage 一样，内容用钥匙串里的密钥加密后存到本机，适合口令、令牌这类机密
+await aster.secureStorage.set("tokens", ["…"]);
+await aster.secureStorage.get("tokens");
+await aster.secureStorage.remove("tokens");
+await aster.secureStorage.keys();
+
 await aster.clipboard.writeText("…");      // 需要 clipboard.write
+await aster.clipboard.writeText(pw, { concealed: true }); // 标成机密内容，剪贴板管理器不记录
 await aster.clipboard.readText();          // 需要 clipboard.read
 await aster.terminal.insert("ls -la");     // 需要 terminal.insert：预填到来源终端，不回车
 await aster.terminal.selection();          // 需要 terminal.read

@@ -414,6 +414,7 @@
 "名称 A–Z" = "Name A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "The name must not be empty, longer than 64 bytes, or contain line breaks";
 "在 Aster 中生成" = "Generated in Aster";
+"密码生成" = "Password Generator";
 "打开主机页" = "Open Hosts Page";
 "复制 SSH 命令" = "Copy SSH Command";
 "复制公钥" = "Copy Public Key";
@@ -438,6 +439,7 @@
 "当前页面" = "Current page";
 "指纹" = "Fingerprint";
 "按标签筛选" = "Filter by Tag";
+"按自定义规则生成随机密码，复制时连同用途一起记入本机加密历史" = "Generate random passwords with custom rules; copying saves the password and its purpose to an encrypted local history";
 "排序" = "Sort";
 "改用保险库密钥" = "Switch to Vault Key";
 "改用保险库密钥（%@ 台主机）…" = "Switch to Vault Key (%@ hosts)…";
@@ -446,9 +448,12 @@
 "新建主机" = "New Host";
 "新建主机…" = "New Host…";
 "新建本机终端标签" = "New Local Terminal Tab";
+"无法写入加密存储" = "Could not write encrypted storage";
 "无法导入私钥：%@" = "Could not import the private key: %@";
 "无法生成密钥：%@" = "Could not generate the key: %@";
+"无法访问钥匙串" = "Could not access the keychain";
 "无法读取主机列表：%@" = "Couldn’t read the host list: %@";
+"无法读取加密存储" = "Could not read encrypted storage";
 "更多新建选项" = "More New Options";
 "最近使用" = "Recently Used";
 "查找主机或 ssh user@hostname…" = "Find a host or ssh user@hostname…";
@@ -466,11 +471,13 @@
 "生成一把 Ed25519 密钥，私钥只保存在钥匙串里。把公钥加到服务器的 authorized_keys 后即可使用。" = "Generate an Ed25519 key. The private key is stored only in the Keychain. Add the public key to the server’s authorized_keys to start using it.";
 "生成新密钥" = "Generate New Key";
 "生成新密钥…" = "Generate New Key…";
+"生成随机密码" = "Generate Random Password";
 "私钥会从钥匙串删除，不能撤销。使用它的主机会去掉这把密钥。" = "The private key will be deleted from the Keychain. This cannot be undone. Hosts that use it will no longer reference this key.";
 "私钥只保存在钥匙串里，不能导出。" = "Private keys are stored only in the Keychain and cannot be exported.";
 "私钥已加密，需要 passphrase" = "The private key is encrypted and needs a passphrase";
 "私钥已安全存进钥匙串并核对过指纹。文件会被直接删除，不进废纸篓；同名 .pub 公钥文件保留。" = "The private key is safely stored in the keychain and its fingerprint was verified. The file is deleted immediately, not moved to the Trash; the matching .pub public key file is kept.";
 "类型" = "Type";
+"自定义规则 · 用途 · 加密历史" = "Custom rules · Purpose · Encrypted history";
 "读写 ssh-keys.json 失败：%@" = "Could not read or write ssh-keys.json: %@";
 "还没有主机使用这把密钥。在主机设置的“保险库密钥”里勾选它。" = "No host uses this key yet. Select it under “Vault Keys” in the host settings.";
 "还没有保存的主机。点「新建主机」添加，或从 ~/.ssh/config 导入；也可以直接在上方输入 user@host 连接。" = "No saved hosts yet. Click “New Host” to add one or import from ~/.ssh/config, or type user@host above to connect directly.";

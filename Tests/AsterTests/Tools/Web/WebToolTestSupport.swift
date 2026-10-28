@@ -59,6 +59,8 @@ func makeWebToolRequest(
 @MainActor
 final class FakeToolBridgeServices: ToolBridgeServices {
   var clipboard: String?
+  /// 最近一次写剪贴板是否标了机密。
+  private(set) var clipboardConcealed = false
   var pickResult: [URL] = []
   var confirmResult = false
   private(set) var pickRequests: [(extensions: [String], multiple: Bool)] = []
@@ -68,7 +70,10 @@ final class FakeToolBridgeServices: ToolBridgeServices {
   private(set) var dismissCount = 0
 
   func readClipboardText() -> String? { clipboard }
-  func writeClipboardText(_ text: String) { clipboard = text }
+  func writeClipboardText(_ text: String, concealed: Bool) {
+    clipboard = text
+    clipboardConcealed = concealed
+  }
 
   func pickFiles(allowedExtensions: [String], allowsMultiple: Bool, pluginName: String, window: NSWindow?) async
     -> [URL]

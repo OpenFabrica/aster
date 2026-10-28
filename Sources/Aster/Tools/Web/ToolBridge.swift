@@ -43,6 +43,8 @@ final class ToolBridge {
   let effectiveNetworkDomains: [String]
   private let services: any ToolBridgeServices
   private let storage: ToolPluginStorage
+  /// 加密存储；所有方法都在 actor 里执行，钥匙串调用不占主线程。
+  private let secureStorage: ToolPluginSecureStorage
   /// 只有可用 network 权限时才创建；失效时取消全部请求。
   private let session: URLSession?
   private let clock: () -> TimeInterval
@@ -55,11 +57,12 @@ final class ToolBridge {
   private var isPresentingPanel = false
   private(set) var isInvalidated = false
 
-  /// `sessionConfiguration` 只给测试替换网络层；`clock` 是单调时钟，用于限流。
+  /// `sessionConfiguration` 只给测试替换网络层；`secureKeyStore` 只给测试换掉钥匙串；`clock` 是单调时钟，用于限流。
   init(
     plugin: ToolPluginRuntimeInfo,
     services: any ToolBridgeServices,
     sessionConfiguration: URLSessionConfiguration? = nil,
+    secureKeyStore: any ToolSecureStorageKeyStoring = ToolSecureStorageKeychain(),
     clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
     self.plugin = plugin
@@ -68,6 +71,8 @@ final class ToolBridge {
     effectivePermissions = plugin.grantedPermissions.intersection(plugin.manifest.permissions)
     effectiveNetworkDomains = plugin.grantedNetworkDomains.filter { plugin.manifest.network.contains($0) }
     storage = ToolPluginStorage.shared(for: plugin.dataDirectory)
+    secureStorage = ToolPluginSecureStorage.shared(
+      for: plugin.dataDirectory, pluginID: plugin.manifest.id, keyStore: secureKeyStore)
     session =
       effectivePermissions.contains(.network)
       ? ToolNetworkFetcher.makeSession(base: sessionConfiguration ?? .ephemeral) : nil
@@ -168,11 +173,24 @@ final class ToolBridge {
       return .null
     case .storageKeys:
       return .array(try await storage.keys().map(JSONValue.string))
+    case .secureStorageGet:
+      return try await secureStorage.value(forKey: try storageKey(params))
+    case .secureStorageSet:
+      let key = try storageKey(params)
+      guard let value = params["value"] else { throw ToolBridgeError.invalidParams("value") }
+      try await secureStorage.setValue(value, forKey: key)
+      return .null
+    case .secureStorageRemove:
+      try await secureStorage.removeValue(forKey: try storageKey(params))
+      return .null
+    case .secureStorageKeys:
+      return .array(try await secureStorage.keys().map(JSONValue.string))
     case .clipboardReadText:
       return try boundedText(services.readClipboardText())
     case .clipboardWriteText:
-      services.writeClipboardText(
-        try ToolBridgeParams.requiredString(params, "text", maximumBytes: ToolBridgeProtocol.maximumTextBytes))
+      let text = try ToolBridgeParams.requiredString(params, "text", maximumBytes: ToolBridgeProtocol.maximumTextBytes)
+      let concealed = try ToolBridgeParams.bool(params, "concealed", default: false)
+      services.writeClipboardText(text, concealed: concealed)
       return .null
     case .terminalInsert:
       return try insertIntoTerminal(params)

@@ -17,8 +17,8 @@ struct ToolNotificationContent: Equatable, Sendable {
 protocol ToolBridgeServices: AnyObject {
   /// 剪贴板里的纯文本；没有文本时为 nil。
   func readClipboardText() -> String?
-  /// 用纯文本替换剪贴板内容。
-  func writeClipboardText(_ text: String)
+  /// 用纯文本替换剪贴板内容；`concealed` 时同时标上 `org.nspasteboard.ConcealedType`，剪贴板管理器不记录。
+  func writeClipboardText(_ text: String, concealed: Bool)
   /// 弹出文件选择框（只能选文件）；取消返回空数组。`allowedExtensions` 为空表示不限类型。
   func pickFiles(allowedExtensions: [String], allowsMultiple: Bool, pluginName: String, window: NSWindow?) async
     -> [URL]
@@ -58,11 +58,15 @@ final class SystemToolBridgeServices: ToolBridgeServices {
     pasteboard.string(forType: .string)
   }
 
-  /// 写剪贴板纯文本。
-  func writeClipboardText(_ text: String) {
+  /// 写剪贴板纯文本；机密内容加上 nspasteboard.org 约定的标记类型。
+  func writeClipboardText(_ text: String, concealed: Bool) {
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
+    if concealed { pasteboard.setData(Data(), forType: Self.concealedType) }
   }
+
+  /// 剪贴板管理器约定的「机密内容」标记（nspasteboard.org）。
+  static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
 
   /// 文件选择框挂在工具所在窗口上；没有窗口时以应用模态弹出。
   func pickFiles(allowedExtensions: [String], allowsMultiple: Bool, pluginName: String, window: NSWindow?) async

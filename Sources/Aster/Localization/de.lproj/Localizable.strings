@@ -414,6 +414,7 @@
 "名称 A–Z" = "Name A–Z";
 "名称不能为空，不能超过 64 字节，也不能包含换行" = "Der Name darf nicht leer sein, höchstens 64 Byte lang sein und keine Zeilenumbrüche enthalten";
 "在 Aster 中生成" = "In Aster erzeugt";
+"密码生成" = "Passwortgenerator";
 "打开主机页" = "Hosts-Seite öffnen";
 "复制 SSH 命令" = "SSH-Befehl kopieren";
 "复制公钥" = "Öffentlichen Schlüssel kopieren";
@@ -438,6 +439,7 @@
 "当前页面" = "Aktuelle Seite";
 "指纹" = "Fingerabdruck";
 "按标签筛选" = "Nach Tag filtern";
+"按自定义规则生成随机密码，复制时连同用途一起记入本机加密历史" = "Erzeugt zufällige Passwörter nach eigenen Regeln; beim Kopieren werden sie samt Verwendungszweck im verschlüsselten lokalen Verlauf gespeichert";
 "排序" = "Sortieren";
 "改用保险库密钥" = "Auf Tresorschlüssel umstellen";
 "改用保险库密钥（%@ 台主机）…" = "Auf Tresorschlüssel umstellen (%@ Hosts)…";
@@ -446,9 +448,12 @@
 "新建主机" = "Neuer Host";
 "新建主机…" = "Neuer Host…";
 "新建本机终端标签" = "Neuer lokaler Terminal-Tab";
+"无法写入加密存储" = "Verschlüsselter Speicher kann nicht geschrieben werden";
 "无法导入私钥：%@" = "Privater Schlüssel konnte nicht importiert werden: %@";
 "无法生成密钥：%@" = "Schlüssel konnte nicht erzeugt werden: %@";
+"无法访问钥匙串" = "Auf den Schlüsselbund kann nicht zugegriffen werden";
 "无法读取主机列表：%@" = "Hostliste konnte nicht gelesen werden: %@";
+"无法读取加密存储" = "Verschlüsselter Speicher kann nicht gelesen werden";
 "更多新建选项" = "Weitere Optionen zum Erstellen";
 "最近使用" = "Zuletzt verwendet";
 "查找主机或 ssh user@hostname…" = "Host suchen oder ssh user@hostname…";
@@ -466,11 +471,13 @@
 "生成一把 Ed25519 密钥，私钥只保存在钥匙串里。把公钥加到服务器的 authorized_keys 后即可使用。" = "Erzeugt einen Ed25519-Schlüssel. Der private Schlüssel liegt nur im Schlüsselbund. Fügen Sie den öffentlichen Schlüssel zu authorized_keys auf dem Server hinzu, um ihn zu verwenden.";
 "生成新密钥" = "Neuen Schlüssel erzeugen";
 "生成新密钥…" = "Neuen Schlüssel erzeugen…";
+"生成随机密码" = "Zufälliges Passwort erzeugen";
 "私钥会从钥匙串删除，不能撤销。使用它的主机会去掉这把密钥。" = "Der private Schlüssel wird aus dem Schlüsselbund gelöscht. Dies kann nicht rückgängig gemacht werden. Hosts, die ihn verwenden, verweisen nicht mehr darauf.";
 "私钥只保存在钥匙串里，不能导出。" = "Private Schlüssel liegen nur im Schlüsselbund und können nicht exportiert werden.";
 "私钥已加密，需要 passphrase" = "Der private Schlüssel ist verschlüsselt und benötigt eine Passphrase";
 "私钥已安全存进钥匙串并核对过指纹。文件会被直接删除，不进废纸篓；同名 .pub 公钥文件保留。" = "Der private Schlüssel ist sicher im Schlüsselbund gespeichert und sein Fingerabdruck wurde geprüft. Die Datei wird direkt gelöscht, nicht in den Papierkorb gelegt; die gleichnamige .pub-Datei mit dem öffentlichen Schlüssel bleibt erhalten.";
 "类型" = "Typ";
+"自定义规则 · 用途 · 加密历史" = "Eigene Regeln · Zweck · Verschlüsselter Verlauf";
 "读写 ssh-keys.json 失败：%@" = "ssh-keys.json konnte nicht gelesen oder geschrieben werden: %@";
 "还没有主机使用这把密钥。在主机设置的“保险库密钥”里勾选它。" = "Noch kein Host verwendet diesen Schlüssel. Wählen Sie ihn in den Host-Einstellungen unter „Tresorschlüssel“ aus.";
 "还没有保存的主机。点「新建主机」添加，或从 ~/.ssh/config 导入；也可以直接在上方输入 user@host 连接。" = "Noch keine gespeicherten Hosts. Klicken Sie auf „Neuer Host“ oder importieren Sie ~/.ssh/config; oder geben Sie oben user@host ein, um sich direkt zu verbinden.";

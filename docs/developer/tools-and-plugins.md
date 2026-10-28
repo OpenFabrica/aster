@@ -25,7 +25,7 @@ v1 范围：
 | 网页运行时 | `Sources/Aster/Tools/Web/` | `WebToolViewController`、`aster-plugin://` scheme handler、桥接、`Resources/tool-runtime/aster-bridge.js`。 |
 | 入口 | `Sources/Aster/Tools/Launcher/`、Open Quickly、`AppModel+Tools.swift` | 工具面板、全局快捷键、Open Quickly「工具」页、工具 Pane、命令面板与菜单入口。 |
 | 设置 | `SettingsToolsBridge.swift`、`Resources/settings-ui/tools.js` | 设置页「工具」分类。 |
-| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色，按普通插件格式编写。 |
+| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写。 |
 
 应用层只通过 `Sources/Aster/Tools/ToolContracts.swift` 里的类型交互：入口与设置页不直接读插件目录、
 不直接创建 WebView 或进程。
@@ -101,7 +101,7 @@ v1 范围：
 
 | 权限 | 能做什么 | 风险 |
 | --- | --- | --- |
-| （隐式）storage | 本插件私有数据，≤ 5 MiB | — |
+| （隐式）storage / secureStorage | 本插件私有数据，各 ≤ 5 MiB；secureStorage 加密落盘 | — |
 | `clipboard.write` | 写剪贴板 | 低 |
 | `terminal.insert` | 把文字预填到来源 Pane，不回车 | 低 |
 | `notify` | 系统通知 | 低 |
@@ -125,7 +125,7 @@ v1 范围：
   工具会话里的授权提示要点「允许并运行…」才弹确认框。
 - 运行用户插件前在后台重算一次摘要（`prepareToRun`）：目录监听只看一层，原地改写的文件靠这一步拦住。
 - 安装：先复制到 `Plugins/.install-<uuid>`，复制后的摘要必须等于确认时的摘要，再用 `renamex_np(RENAME_EXCL)`
-  原子改名；`start()` 清掉中途留下的临时目录。卸载：先关闭该插件的会话，再删 WebKit 存储与 `PluginData/<id>/`；
+  原子改名；`start()` 清掉中途留下的临时目录。卸载：先关闭该插件的会话，再删 WebKit 存储、`PluginData/<id>/` 与加密存储密钥；
   用户插件目录移到废纸篓，开发插件只取消登记，不动用户的源码目录。
 
 文件摘要（`ToolPluginDigest.compute`）：按相对路径（UTF-8 字节序）排序遍历插件目录所有普通文件（跳过 `.DS_Store`
@@ -171,11 +171,15 @@ v1 范围：
 | `aster.regex` | 六个标志、高亮、编号与命名分组；匹配在 Web Worker 里跑，1 s 超时 terminate | —（只靠关键词） | `clipboard.write` |
 | `aster.diff` | Myers 行级 diff（线性空间）、折叠相同行、行内高亮、忽略空白/大小写、复制 unified diff；> 5000 行截断 | — | `clipboard.write` |
 | `aster.color` | HEX 3/4/6/8、rgb(a)/hsl(a)（含 CSS4 空格写法）、裸 `r, g, b`、颜色名；WCAG 对比度 | `#` + 3/4/6/8 位、不带 `#` 且含字母的 6 位、`rgb(`/`hsl(` 开头 | `clipboard.write` |
+| `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
 - 输入分配：JWT 与颜色的 `enter`/`query` 都填输入框；正则的 `enter` 填测试文本（单行 `/…/flags` 填进正则），
   `query` 填正则；Diff 的 `enter` 填左栏、`query` 填右栏。
 - 每个工具自带六种语言字典，按 `context.locale` 选择；`getInput()` 先取语言，最多等 400 ms 再显示，避免先闪英文。
-- 四个目录各放一份相同的 `kit.js` 与 `base.css`（插件只能读自己目录里的文件），改动时四份一起改。
+- 每个内置网页工具目录各放一份相同的 `kit.js` 与 `base.css`（插件只能读自己目录里的文件），改动时所有副本一起改。
+- 密码生成（`aster.password`）：规则与属性定义是普通数据，存 `storage`（`rules`、`attributes` 等）；历史存
+  `secureStorage` 的 `history`（新的在前，上限 500 条，同一密码重复复制只更新该条）。复制一律带 `concealed`。
+  历史条目保存属性名快照，属性定义删掉后旧条目照样能显示。
 - 清单里的 `name`、`description`、`title`、`subtitle`、match `label` 只写简体中文原文。运行时只对内置来源用
   `L(String.LocalizationValue(原文))` 查 `Localizable.strings`（与原生内置工具同一张表），译文由
   `l10n-work` 合并进各语言表，并有测试检查每条都有译文；用户插件原样显示。
@@ -253,7 +257,8 @@ aster.getInput()                    // → Promise<{code, input, context}>（too
 aster.setHeight(px)                 // ui.setHeight
 aster.close()                       // ui.close
 aster.storage.get(key) / set(key, value) / remove(key) / keys()
-aster.clipboard.readText() / writeText(text)
+aster.secureStorage.get(key) / set(key, value) / remove(key) / keys()   // 加密落盘
+aster.clipboard.readText() / writeText(text, {concealed})
 aster.terminal.insert(text) / selection()
 aster.files.pick({extensions, multiple}) / read(path, encoding)
 aster.net.fetch(url, {method, headers, body})
@@ -278,8 +283,9 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 | `storage.set` | `{key, value}` | `null` | — |
 | `storage.remove` | `{key}` | `null` | — |
 | `storage.keys` | — | `[key]` | — |
+| `secureStorage.get` / `set` / `remove` / `keys` | 同 `storage.*` | 同 `storage.*` | — |
 | `clipboard.readText` | — | 文本 | `clipboard.read` |
-| `clipboard.writeText` | `{text}` | `null` | `clipboard.write` |
+| `clipboard.writeText` | `{text, concealed?}` | `null` | `clipboard.write` |
 | `terminal.insert` | `{text}` | `null` | `terminal.insert` |
 | `terminal.selection` | — | 文本或 `null` | `terminal.read` |
 | `files.pick` | `{extensions?, multiple?}` | `[path]` | `files.read` |
@@ -297,6 +303,16 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 - `storage`：同一数据目录在进程内共用一个 actor，原子写入；缓存比对文件大小与修改时间（脚本工具也可能写同一个
   `storage.json`）。写入后超过 5 MiB 即拒绝，原内容不变。
+- `secureStorage`：`PluginData/<id>/secure-storage.bin`，整份 JSON 用 AES-GCM（CryptoKit）加密，文件是 4 字节魔数
+  `AST1` + 合并密文（nonce + 密文 + tag），附加数据是插件 id。密钥是每个插件一把 256 位对称密钥，存钥匙串
+  generic password（service `io.aster.tool-secure-storage` + 身份后缀，account 是插件 id），第一次写入时创建，
+  只读不建。读条目前先按引用核对 ACL（与 Agent 主机「一直允许」授权同一套 `AgentHostKeychainAccessCheck`）：
+  「任何 App 都能解密」的预埋条目不用，删掉重建。解不开（密钥丢失、条目不可信、文件损坏或被换）时把文件改名为
+  `secure-storage.bin.bad` 留底并记诊断，按空存储继续；钥匙串本身访问失败（被拒、未解锁）直接报错、不动文件。
+  只有 Aster 写这个文件，读一次后用内存缓存；上限与 `storage` 相同（明文 JSON ≤ 5 MiB，key ≤ 128 字节）。
+  脚本工具拿不到密钥，不能读写加密存储。卸载插件时随 `PluginData/<id>/` 一起删除密钥，删不掉只记诊断。
+- `clipboard.writeText` 的 `concealed`：只认布尔值；为真时同时写入 `org.nspasteboard.ConcealedType`，
+  遵守 nspasteboard.org 约定的剪贴板管理器不会记录这条内容。
 - `files.read`：允许列表与当前 `input.files` 按规范化路径比对，只读普通文件；经句柄多读 1 字节判断是否超限。
 - `net.fetch`：方法限 GET/POST/PUT/PATCH/DELETE/HEAD，GET 与 HEAD 不能带 body；请求头 ≤ 32 个、值不能含 CR/LF，
   禁止 `Host`、`Cookie`、分帧与连接类头及 `proxy-*`。ephemeral `URLSession`（无 cookie、缓存与凭据存储），
@@ -425,7 +441,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 ```
 <AppSupport>/Plugins/<id>/            用户安装的插件
-<AppSupport>/PluginData/<id>/         插件私有数据（storage.json）与脚本的 ASTER_PLUGIN_DATA
+<AppSupport>/PluginData/<id>/         插件私有数据（storage.json、加密的 secure-storage.bin）与脚本的 ASTER_PLUGIN_DATA
 <AppSupport>/tools-state.json         启用、授权、摘要、开发目录、使用记录
 <App>/Contents/Resources/tools-builtin/   内置网页工具（只读）
 <App>/Contents/Resources/tool-runtime/    aster-bridge.js
@@ -451,4 +467,5 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 
 只跑定向用例：`./scripts/test.sh --filter <name>`。覆盖：清单校验（每条拒绝规则）、匹配与拼音、信任状态机、
 摘要、脚本协议解析与上限、桥接参数与授权、内置转换；scheme handler 路径越界、桥接未授权拒绝、脚本超时与
-输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作。
+输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作；加密存储的密文格式、密钥丢失与预埋条目、
+剪贴板机密标记（`ToolSecureStorageTests`）。

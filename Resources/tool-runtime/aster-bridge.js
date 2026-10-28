@@ -196,9 +196,20 @@
       remove: (key) => call("storage.remove", { key: asText(key) }),
       keys: () => call("storage.keys"),
     }),
+    // 加密存储：接口与 storage 相同，内容用钥匙串里的密钥加密落盘，适合口令这类机密。
+    secureStorage: Object.freeze({
+      get: (key) => call("secureStorage.get", { key: asText(key) }),
+      set: (key, value) => guarded(() => call("secureStorage.set", { key: asText(key), value: toJSONValue(value) })),
+      remove: (key) => call("secureStorage.remove", { key: asText(key) }),
+      keys: () => call("secureStorage.keys"),
+    }),
     clipboard: Object.freeze({
       readText: () => call("clipboard.readText"),
-      writeText: (text) => call("clipboard.writeText", { text: asText(text) }),
+      // options.concealed 为 true 时标成机密内容，剪贴板管理器不记录。
+      writeText: (text, options) => call(
+        "clipboard.writeText",
+        options && options.concealed ? { text: asText(text), concealed: true } : { text: asText(text) }
+      ),
     }),
     terminal: Object.freeze({
       insert: (text) => call("terminal.insert", { text: asText(text) }),

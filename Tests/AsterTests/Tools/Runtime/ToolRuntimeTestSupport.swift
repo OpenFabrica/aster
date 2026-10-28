@@ -65,6 +65,7 @@ final class ToolRuntimeSandbox {
   let approver = FakeToolApprover()
   let trash = ToolTrashRecorder()
   let websiteData = ToolWebsiteDataRecorder()
+  let secureKeys = InMemoryToolSecureStorageKeyStore()
 
   init() throws {
     // 与扫描器用同一种解析（`resolvingSymlinksInPath()`，`/private/var` 会写回 `/var`）：扫描结果里的目录
@@ -94,7 +95,8 @@ final class ToolRuntimeSandbox {
         moveToTrash: { url in try trash.remove(url) },
         removeWebsiteData: { identifier in try websiteData.remove(identifier) },
         watchesFileSystem: false, usageSaveDelay: .milliseconds(10),
-        terminalStyle: { ToolTerminalStyle.current() }, translateBuiltinText: translate))
+        terminalStyle: { ToolTerminalStyle.current() }, translateBuiltinText: translate,
+        secureKeyStore: secureKeys))
   }
 
   /// 删除整个沙箱。

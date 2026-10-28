@@ -1,4 +1,4 @@
-// 卸载与开发目录：按「撤下会话 → WebKit 存储 → 插件数据 → 插件目录」的顺序删除，WebKit 存储仍在使用时重试，
+// 卸载与开发目录：按「撤下会话 → WebKit 存储 → 插件数据与加密存储密钥 → 插件目录」的顺序删除，WebKit 存储仍在使用时重试，
 // 一直删不掉就停下且不动任何文件；开发插件只取消登记；设置页拿到的开发目录与登记字符串逐字一致。
 import AsterCore
 import Foundation
@@ -17,12 +17,14 @@ import Testing
     let data = center.dataDirectory(for: "com.example.echo")
     try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
     try Data("{}".utf8).write(to: data.appendingPathComponent("storage.json"))
+    try sandbox.secureKeys.saveKey(Data(repeating: 7, count: 32), pluginID: "com.example.echo")
     center.recordUse(entryID: "com.example.echo/run")
 
     try await center.uninstall(pluginID: "com.example.echo")
     let installed = sandbox.pluginsDirectory.appendingPathComponent("com.example.echo")
     #expect(sandbox.trash.removed.map(\.path) == [installed.path])
     #expect(!FileManager.default.fileExists(atPath: data.path))
+    #expect(sandbox.secureKeys.keys["com.example.echo"] == nil, "加密存储的密钥随卸载删除")
     #expect(sandbox.websiteData.removed == [ToolPluginIdentity.dataStoreIdentifier(pluginID: "com.example.echo")])
     #expect(center.pluginStatus(pluginID: "com.example.echo") == nil)
     center.flushState()

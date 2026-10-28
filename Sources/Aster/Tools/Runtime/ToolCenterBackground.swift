@@ -53,6 +53,17 @@ enum ToolCenterBackground {
     try ToolPluginFileOperations.removeDirectory(url)
   }
 
+  /// 后台删除插件加密存储的密钥。数据目录已经删掉，密钥留着也解不开任何东西，所以失败只记诊断、不打断卸载。
+  @concurrent
+  static func removeSecureStorageKey(pluginID: String, from store: any ToolSecureStorageKeyStoring) async {
+    do {
+      try store.deleteKey(pluginID: pluginID)
+    } catch {
+      DiagnosticsCenter.shared.record(
+        "tools.secure_storage_key_cleanup_failed", level: .warning, category: .storage, error: error)
+    }
+  }
+
   /// 后台建插件目录并清掉上次安装中途留下的临时目录。建不了时扫描照常进行（目录为空）。
   @concurrent
   static func preparePluginsDirectory(_ directory: URL) async {

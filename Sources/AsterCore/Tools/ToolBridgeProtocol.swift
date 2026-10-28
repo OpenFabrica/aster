@@ -33,6 +33,10 @@ public enum ToolBridgeMethod: String, CaseIterable, Sendable {
   case storageSet = "storage.set"
   case storageRemove = "storage.remove"
   case storageKeys = "storage.keys"
+  case secureStorageGet = "secureStorage.get"
+  case secureStorageSet = "secureStorage.set"
+  case secureStorageRemove = "secureStorage.remove"
+  case secureStorageKeys = "secureStorage.keys"
   case clipboardReadText = "clipboard.readText"
   case clipboardWriteText = "clipboard.writeText"
   case terminalInsert = "terminal.insert"
@@ -46,7 +50,9 @@ public enum ToolBridgeMethod: String, CaseIterable, Sendable {
   /// 调用这个方法需要的权限；nil 表示不需要声明。
   public var requiredPermission: ToolPermission? {
     switch self {
-    case .toolInput, .setHeight, .close, .storageGet, .storageSet, .storageRemove, .storageKeys, .openURL: nil
+    case .toolInput, .setHeight, .close, .storageGet, .storageSet, .storageRemove, .storageKeys, .secureStorageGet,
+      .secureStorageSet, .secureStorageRemove, .secureStorageKeys, .openURL:
+      nil
     case .clipboardReadText: .clipboardRead
     case .clipboardWriteText: .clipboardWrite
     case .terminalInsert: .terminalInsert

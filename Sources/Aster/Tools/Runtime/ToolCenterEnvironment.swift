@@ -25,6 +25,8 @@ struct ToolCenterEnvironment {
   var terminalStyle: @MainActor () -> ToolTerminalStyle
   /// 内置网页插件清单文案的翻译：简体中文原文 → 当前界面语言；源语言下原样返回。
   var translateBuiltinText: (String) -> String
+  /// 网页工具加密存储的密钥；卸载时删除。默认内存实现，测试不碰钥匙串；`live()` 用真实钥匙串。
+  var secureKeyStore: any ToolSecureStorageKeyStoring = InMemoryToolSecureStorageKeyStore()
 
   /// App 运行时的真实环境。
   static func live() -> ToolCenterEnvironment {
@@ -42,6 +44,7 @@ struct ToolCenterEnvironment {
       watchesFileSystem: true,
       usageSaveDelay: .seconds(2),
       terminalStyle: { ToolTerminalStyle.current() },
-      translateBuiltinText: { L(String.LocalizationValue($0)) })
+      translateBuiltinText: { L(String.LocalizationValue($0)) },
+      secureKeyStore: ToolSecureStorageKeychain())
   }
 }

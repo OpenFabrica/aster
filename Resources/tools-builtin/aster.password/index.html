@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-Hans" class="aster-booting">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>密码生成</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="password.css">
+</head>
+<body>
+  <main class="app">
+    <div class="row tabs" role="tablist">
+      <div class="segmented">
+        <button id="tab-generate" class="btn" type="button" role="tab" aria-pressed="true" aria-selected="true"
+          aria-controls="panel-generate" data-i18n="tabGenerate">生成</button>
+        <button id="tab-history" class="btn" type="button" role="tab" aria-pressed="false" aria-selected="false"
+          aria-controls="panel-history"><span data-i18n="tabHistory">历史</span><span id="history-count" class="count"></span></button>
+      </div>
+      <span class="spacer"></span>
+      <span class="hint keys" data-i18n="keysHint">↩ 复制 · ⌘R 重新生成</span>
+    </div>
+
+    <!-- 生成页：密码条 → 规则行 → 规则参数 → 用途属性 -->
+    <section id="panel-generate" class="panel" role="tabpanel" aria-labelledby="tab-generate">
+      <div class="card output">
+        <div id="password" class="password" data-i18n-label="passwordLabel"></div>
+        <div id="param-error" class="message error" role="alert" hidden></div>
+        <div class="row output-bar">
+          <span id="strength" class="badge"></span>
+          <span id="bits" class="hint"></span>
+          <span class="spacer"></span>
+          <button id="regenerate" class="btn" type="button" data-i18n="regenerate" data-i18n-title="regenerateTitle">重新生成</button>
+          <button id="copy" class="btn primary" type="button" data-requires-bridge data-i18n="copy" data-i18n-title="copyTitle">复制</button>
+        </div>
+      </div>
+
+      <div class="row rule-row">
+        <span class="label" data-i18n="rule">规则</span>
+        <select id="rule" class="field select" data-i18n-label="rule"></select>
+        <span class="spacer"></span>
+        <div id="rule-actions" class="row">
+          <button id="save-rule" class="btn" type="button" data-i18n="saveRule">保存为规则</button>
+          <button id="delete-rule" class="btn" type="button" data-i18n="deleteRule">删除规则</button>
+        </div>
+        <form id="save-form" class="row inline-form" hidden>
+          <input id="rule-name" class="field" type="text" maxlength="32" autocomplete="off" spellcheck="false"
+            data-i18n-placeholder="ruleNamePlaceholder" data-i18n-label="ruleNamePlaceholder">
+          <button class="btn primary" type="submit" data-i18n="save">保存</button>
+          <button id="save-cancel" class="btn" type="button" data-i18n="cancel">取消</button>
+        </form>
+      </div>
+      <div id="rule-error" class="message error inline-error" role="alert" hidden></div>
+
+      <div class="card params">
+        <div class="param-line">
+          <span class="label" data-i18n="length">长度</span>
+          <input id="length-range" class="range" type="range" min="4" max="128" step="1" data-i18n-label="length">
+          <input id="length" class="field number" type="number" min="4" max="128" step="1" data-i18n-label="length">
+        </div>
+        <div class="param-line wrap">
+          <label class="check"><input id="opt-upper" type="checkbox"><span data-i18n="upper">大写</span><code>A–Z</code></label>
+          <label class="check"><input id="opt-lower" type="checkbox"><span data-i18n="lower">小写</span><code>a–z</code></label>
+          <label class="check"><input id="opt-digits" type="checkbox"><span data-i18n="digits">数字</span><code>0–9</code></label>
+          <label class="check"><input id="opt-symbols" type="checkbox"><span data-i18n="symbols">符号</span></label>
+          <input id="symbol-set" class="field mono grow" type="text" maxlength="256" autocomplete="off" spellcheck="false"
+            data-i18n-label="symbolSet" data-i18n-title="symbolSet">
+        </div>
+        <div class="param-line wrap">
+          <label class="check" data-i18n-title="ambiguousTitle"><input id="opt-ambiguous" type="checkbox"><span data-i18n="ambiguous">排除易混字符</span></label>
+          <label class="check"><input id="opt-require" type="checkbox"><span data-i18n="requireEach">每类至少一个</span></label>
+          <span class="param-group">
+            <span class="label" data-i18n="exclude">额外排除</span>
+            <input id="exclude" class="field mono grow" type="text" maxlength="256" autocomplete="off" spellcheck="false"
+              data-i18n-placeholder="excludePlaceholder" data-i18n-label="exclude">
+          </span>
+        </div>
+      </div>
+
+      <div class="card attributes">
+        <div class="card-head">
+          <span class="label" data-i18n="attributes">用途</span>
+          <span class="hint" data-i18n="optional">选填，复制时一起记入历史</span>
+          <span class="spacer"></span>
+          <button id="add-attribute" class="btn small" type="button" data-i18n="addAttribute">添加属性</button>
+          <form id="attribute-form" class="row inline-form" hidden>
+            <input id="attribute-name" class="field small" type="text" maxlength="32" autocomplete="off" spellcheck="false"
+              data-i18n-placeholder="attributeNamePlaceholder" data-i18n-label="attributeNamePlaceholder">
+            <button class="btn small primary" type="submit" data-i18n="add">添加</button>
+            <button id="attribute-cancel" class="btn small" type="button" data-i18n="cancel">取消</button>
+          </form>
+        </div>
+        <div id="attribute-error" class="message error inline-error" role="alert" hidden></div>
+        <div id="attribute-fields" class="card-body attribute-grid"></div>
+      </div>
+    </section>
+
+    <!-- 历史页：搜索、清空、列表与加密说明 -->
+    <section id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+      <div class="row">
+        <input id="search" class="field" type="search" autocomplete="off" spellcheck="false"
+          data-i18n-placeholder="searchPlaceholder" data-i18n-label="searchPlaceholder">
+        <button id="clear-history" class="btn" type="button" data-requires-bridge data-i18n="clearHistory">清空历史</button>
+        <button id="clear-cancel" class="btn" type="button" data-i18n="cancel" hidden>取消</button>
+      </div>
+      <div id="history-error" class="message error" role="alert" hidden></div>
+      <div id="history-list" class="history-list"></div>
+      <div id="history-empty" class="empty" hidden>
+        <p id="history-empty-text"></p>
+      </div>
+      <p class="hint secure-note"><span class="lock" aria-hidden="true"></span><span data-i18n="secureNote">历史已加密保存在本机</span></p>
+    </section>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <script src="kit.js"></script>
+  <script src="i18n.js"></script>
+  <script src="password-core.js"></script>
+  <script src="password-store.js"></script>
+  <script src="password-history.js"></script>
+  <script src="password-attributes.js"></script>
+  <script src="password.js"></script>
+</body>
+</html>

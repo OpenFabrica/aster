@@ -304,7 +304,7 @@ final class ToolCenter: ToolManaging {
     Task { await reloadAndWait() }
   }
 
-  /// 卸载，按顺序：撤下正在用它的会话 → 删 WebKit 数据存储 → 删 `PluginData/<id>/` → 用户插件目录移到废纸篓
+  /// 卸载，按顺序：撤下正在用它的会话 → 删 WebKit 数据存储 → 删 `PluginData/<id>/` 与加密存储密钥 → 用户插件目录移到废纸篓
   /// （开发目录只取消登记、不动文件）→ 清掉授权与使用记录。任何一步失败都停在那里并抛错，已撤下的会话
   /// 随重新扫描恢复；WebKit 存储排在最前，删不掉时插件还完整可用。
   func uninstall(pluginID: String) async throws {
@@ -314,6 +314,7 @@ final class ToolCenter: ToolManaging {
     do {
       try await removeWebsiteData(pluginID: pluginID)
       try await ToolCenterBackground.removeDirectory(dataDirectory(for: pluginID))
+      await ToolCenterBackground.removeSecureStorageKey(pluginID: pluginID, from: environment.secureKeyStore)
       if record.source == .user, let directory = record.directory {
         try await ToolCenterBackground.moveToTrash(directory, using: environment.moveToTrash)
       }

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.password",
+  "name": "密码生成",
+  "version": "1.0.0",
+  "description": "按自定义规则生成随机密码，复制时连同用途一起记入本机加密历史",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "ui": { "main": "index.html", "height": 520 },
+  "permissions": ["clipboard.write"],
+  "features": [
+    {
+      "code": "generate",
+      "title": "生成随机密码",
+      "subtitle": "自定义规则 · 用途 · 加密历史",
+      "keywords": ["password", "pwd", "passwd", "generator", "密码", "随机密码", "口令"],
+      "action": { "type": "ui" }
+    }
+  ]
+}

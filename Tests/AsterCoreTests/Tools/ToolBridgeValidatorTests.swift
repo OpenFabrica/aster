@@ -143,7 +143,8 @@ struct ToolBridgeValidatorTests {
   @Test func methodTableMatchesDocumentedPermissions() throws {
     let table: [(String, ToolPermission?)] = [
       ("tool.input", nil), ("ui.setHeight", nil), ("ui.close", nil), ("storage.get", nil), ("storage.set", nil),
-      ("storage.remove", nil), ("storage.keys", nil), ("shell.openURL", nil),
+      ("storage.remove", nil), ("storage.keys", nil), ("secureStorage.get", nil), ("secureStorage.set", nil),
+      ("secureStorage.remove", nil), ("secureStorage.keys", nil), ("shell.openURL", nil),
       ("clipboard.readText", .clipboardRead), ("clipboard.writeText", .clipboardWrite),
       ("terminal.insert", .terminalInsert), ("terminal.selection", .terminalRead),
       ("files.pick", .filesRead), ("files.read", .filesRead), ("net.fetch", .network), ("notify", .notify),

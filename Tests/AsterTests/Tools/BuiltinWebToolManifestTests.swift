@@ -24,7 +24,7 @@ private func builtinManifests() throws -> [(directory: String, manifest: ToolMan
 @Test("内置网页工具清单按最终规则解码，目录名就是 aster. 开头的插件 id")
 func builtinWebToolManifestsDecode() throws {
   let manifests = try builtinManifests()
-  #expect(manifests.map(\.directory) == ["aster.color", "aster.diff", "aster.jwt", "aster.regex"])
+  #expect(manifests.map(\.directory) == ["aster.color", "aster.diff", "aster.jwt", "aster.password", "aster.regex"])
   for (directory, manifest) in manifests {
     #expect(manifest.id == directory)
     #expect(manifest.id.hasPrefix(ToolManifest.builtinIDPrefix))
