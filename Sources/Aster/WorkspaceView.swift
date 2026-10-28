@@ -62,6 +62,8 @@ final class WorkspaceViewController: NSViewController {
   private var tabActivityRefreshScheduled = false
   private var retainedObjects: [AnyObject] = []
   private var refreshScheduled = false
+  /// 最近一次整树刷新时机器编排的当前机器。只有它变了，机器列表的变化才需要整树刷新。
+  private var renderedFleetMachineID: UUID?
   /// 设置窗口独立于工作区，但配置仍是全局的。展示期间只延后配置触发的结构刷新，
   /// 避免设置控件动画与多个工作区整树重建争抢主线程；Tab/Pane 等工作区模型变化
   /// 必须继续立即刷新，现存终端偏好也会立即就地应用。
@@ -252,8 +254,10 @@ final class WorkspaceViewController: NSViewController {
     model.isInspectorPresented = preferences.inspectorPresented
     // 机器列表是客户端级事实：先让 Local 立即可见，enabled 的远端机器在各自
     // 独立任务里连接，任何一台失联都不阻塞本地启动与输入（§4.1 第 1 条）。
+    // objectWillChange 在赋值前发出，切到下一轮主队列再读新值。
     machineFleet.objectWillChange
-      .sink { [weak self] _ in self?.scheduleRefresh() }
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in self?.machineFleetDidChange() }
       .store(in: &modelSubscriptions)
     machineFleet.start()
     model.ensureInitialTab()
@@ -836,6 +840,16 @@ final class WorkspaceViewController: NSViewController {
     }
   }
 
+  /// 机器编排变了。连接状态、改名、增删机器、配置错误只影响侧栏左下角的机器切换器，就地换掉它；
+  /// 整树刷新会把终端视图拆下再装回，画面跟着闪一下。只有当前机器换了（整组标签跟着换）才整树刷新。
+  private func machineFleetDidChange() {
+    guard machineFleet.activeMachineID == renderedFleetMachineID else {
+      scheduleRefresh()
+      return
+    }
+    refreshMachineSwitcher()
+  }
+
   func scheduleRefresh() {
     guard !refreshScheduled else { return }
     refreshScheduled = true
@@ -959,6 +973,7 @@ final class WorkspaceViewController: NSViewController {
 
     let theme = preferences.activeTheme
     renderedTheme = theme
+    renderedFleetMachineID = machineFleet.activeMachineID
     renderedAppearance = preferences.appearance
     renderedTabBarLayout = preferences.tabBarLayout
     renderedShowsTabBar = resolvedShowsTabBar

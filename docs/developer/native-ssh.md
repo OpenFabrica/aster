@@ -37,6 +37,12 @@
 
 用的是基于文件的登录钥匙串，不是 data protection 钥匙串：后者需要 `keychain-access-groups` entitlement，Aster 没有。broker 本身不访问钥匙串，秘密只经 App 与 broker 之间的私有管道进入内存，用完即丢，不写文件，也不写日志。
 
+配置目录的监听（`SSHHostDirectory`、`SSHVaultKeyDirectory`、`MachineFleetModel`）都盯 `Application Support/Aster/`
+整个目录：保存走原子替换会换掉 inode，只盯文件的话第一次保存后就失效。目录事件不带文件名，同目录里的便笺、
+工具状态等文件写盘也会唤醒，所以监听经 `FileSystemDirectoryWatcher.start(onChangeOf:)` 过滤：只有自己那份文件的
+设备、inode、大小或修改时间变了才重读。重读后机器编排只在值真的变了时才发布。工作区收到机器编排变化时只就地换掉侧栏
+左下角的机器切换器（`refreshMachineSwitcher`），当前机器换了才整树刷新——整树刷新会把终端视图拆下再装回，画面会闪。
+
 ## 引擎选择与回退
 
 - 优先级：环境变量 `ASTER_SSH_ENGINE`（`native` / `openssh`，不区分大小写）→ 设置「高级 → SSH → SSH 引擎」（`shell.sshEngine`，默认 native）。

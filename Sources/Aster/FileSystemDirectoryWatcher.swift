@@ -70,6 +70,19 @@ final class FileSystemDirectoryWatcher {
     source.activate()
   }
 
+  /// 监听目录，但只在其中的 `file` 真的变了（换了文件、大小或修改时间不同、出现或消失）才回调。
+  ///
+  /// 目录事件不带文件名：同目录里任何文件写盘都会唤醒监听。配置目录（Application Support）
+  /// 同时放着便笺、工具状态等频繁写入的文件，不过滤就会每次都整份重读配置并通知界面。
+  /// 基准取开始监听时的状态；之后自己写盘同样会改变文件，照常回调。
+  func start(onChangeOf file: URL, onChange: @escaping @MainActor @Sendable () -> Void) throws {
+    let tracker = FileChangeTracker(file: file)
+    try start {
+      guard tracker.consumeChange() else { return }
+      onChange()
+    }
+  }
+
   /// 停止监听并异步关闭文件描述符。重复调用没有额外副作用。
   func stop() {
     let source = source
@@ -79,5 +92,45 @@ final class FileSystemDirectoryWatcher {
 
   deinit {
     source?.cancel()
+  }
+}
+
+/// 一个文件此刻的身份与内容标记：设备、inode、大小与修改时间（纳秒）。文件不存在时为 nil。
+/// 原子写会换 inode，原地写会改大小或修改时间，都能区分出来。
+struct FileChangeStamp: Equatable {
+  let device: Int64
+  let inode: UInt64
+  let size: Int64
+  let modifiedSeconds: Int
+  let modifiedNanoseconds: Int
+
+  /// 读取 `url` 的标记；读不到（不存在、无权限）返回 nil。
+  static func of(_ url: URL) -> FileChangeStamp? {
+    var info = stat()
+    guard stat(url.path, &info) == 0 else { return nil }
+    return FileChangeStamp(
+      device: Int64(info.st_dev), inode: UInt64(info.st_ino), size: Int64(info.st_size),
+      modifiedSeconds: Int(info.st_mtimespec.tv_sec), modifiedNanoseconds: Int(info.st_mtimespec.tv_nsec))
+  }
+}
+
+/// 记住文件上一次的标记，判断这次目录事件是不是它变了。只在主线程使用。
+@MainActor
+final class FileChangeTracker {
+  private let file: URL
+  private var last: FileChangeStamp?
+
+  /// 以当前状态为基准。
+  init(file: URL) {
+    self.file = file
+    last = FileChangeStamp.of(file)
+  }
+
+  /// 文件和上次相比变了就返回 true，并把基准更新为当前状态。
+  func consumeChange() -> Bool {
+    let current = FileChangeStamp.of(file)
+    guard current != last else { return false }
+    last = current
+    return true
   }
 }

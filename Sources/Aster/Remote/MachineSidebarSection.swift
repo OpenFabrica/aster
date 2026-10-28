@@ -343,4 +343,7 @@ final class MachineSwitcherButton: NSButton {
   }
 
   func dismissPopover() { popover.performClose(nil) }
+
+  /// 机器列表弹出层是否开着。
+  var isPopoverShown: Bool { popover.isShown }
 }

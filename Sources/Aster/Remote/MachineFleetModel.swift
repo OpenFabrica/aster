@@ -363,7 +363,10 @@ final class MachineFleetModel: ObservableObject {
         }
       }
     }
-    if !loaded.contains(where: { $0.id == activeMachineID }) {
+    // Local 不在 `loaded` 里，当前就是 Local 时不能再赋一次：`@Published` 写同值也会发
+    // objectWillChange，工作区据此整树刷新。配置目录里任何文件写盘（便笺、工具状态）都会
+    // 触发这里，重复赋值会让终端 Pane 跟着闪烁。
+    if activeMachineID != MachineProfile.localProfileID, !loaded.contains(where: { $0.id == activeMachineID }) {
       activeMachineID = MachineProfile.localProfileID
     }
     rebuildRows()
@@ -380,7 +383,7 @@ final class MachineFleetModel: ObservableObject {
       at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])
     let watcher = FileSystemDirectoryWatcher(directory: directory)
-    try? watcher.start { [weak self] in self?.reloadProfiles() }
+    try? watcher.start(onChangeOf: store.fileURL) { [weak self] in self?.reloadProfiles() }
     self.watcher = watcher
   }
 

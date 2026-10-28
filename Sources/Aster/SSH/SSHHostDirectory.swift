@@ -54,7 +54,7 @@ final class SSHHostDirectory: ObservableObject {
       at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     let watcher = FileSystemDirectoryWatcher(directory: directory)
     do {
-      try watcher.start { [weak self] in self?.reload() }
+      try watcher.start(onChangeOf: store.fileURL) { [weak self] in self?.reload() }
       self.watcher = watcher
     } catch {
       loadError = String(describing: error)

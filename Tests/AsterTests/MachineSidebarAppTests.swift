@@ -188,3 +188,34 @@ func machineSidebarMenuEntryMatchesSidebarButton() async throws {
   #expect(addButton.action == #selector(WorkspaceViewController.presentAddMachine))
   #expect(fixture.controller.responds(to: #selector(WorkspaceViewController.presentAddMachine)))
 }
+
+@Test("机器列表变化只换左下角切换器，终端与 Pane 树不重建；切换当前机器才整树刷新")
+@MainActor
+func machineFleetChangeRefreshesOnlySwitcher() async throws {
+  let fixture = try makeMachineSidebarFixture()
+  defer { fixture.tearDown() }
+  try await Task.sleep(for: .milliseconds(120))
+  fixture.window.contentView?.layoutSubtreeIfNeeded()
+  let paneHost = try #require(allViews(fixture.controller.view).first { $0 is ActivePaneHostView })
+  let oldSwitcher = try #require(fixture.controller.machineSwitcher)
+
+  guard case .added(let profile) = await fixture.fleet.addMachine(
+    label: "orb", sshTarget: "root@ubuntu@orb", sessionName: "work", confirm: { _ in true })
+  else {
+    Issue.record("前置添加失败")
+    return
+  }
+  try await Task.sleep(for: .milliseconds(150))
+  // Pane 容器还是原来那个、仍在窗口里：终端视图没有被拆下重装。
+  #expect(paneHost.window === fixture.window)
+  let newSwitcher = try #require(fixture.controller.machineSwitcher)
+  #expect(newSwitcher !== oldSwitcher)
+  #expect(oldSwitcher.window == nil)
+  #expect(machineSidebarViews(fixture.controller.view).compactMap { $0 as? MachineRowButton }.count == 2)
+  newSwitcher.dismissPopover()
+
+  // 当前机器换了：整组标签跟着换，整树刷新。
+  _ = fixture.fleet.selectMachine(profile.id)
+  try await Task.sleep(for: .milliseconds(150))
+  #expect(paneHost.window == nil)
+}

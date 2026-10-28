@@ -653,6 +653,26 @@ struct MachineFleetTests {
     #expect(fleet.rows.count == 2)
   }
 
+  @Test("配置没变时重读不发变更：同目录里别的文件写盘不能让工作区整树刷新")
+  func unchangedReloadDoesNotPublish() async throws {
+    let (fleet, url, _) = makeFleet()
+    defer { cleanUp(fleet, url) }
+    guard case .added = await fleet.addMachine(
+      label: "orb", sshTarget: "root@ubuntu@orb", sessionName: "work", confirm: { _ in true })
+    else {
+      Issue.record("前置添加失败")
+      return
+    }
+    fleet.reloadProfiles()
+    #expect(fleet.activeMachineID == MachineProfile.localProfileID)
+    var changes = 0
+    let subscription = fleet.objectWillChange.sink { _ in changes += 1 }
+    defer { subscription.cancel() }
+    fleet.reloadProfiles()
+    fleet.reloadProfiles()
+    #expect(changes == 0)
+  }
+
   @Test("配置文件不存在是合法首次启动，不是损坏")
   func absentConfigurationIsNotCorruption() {
     let (fleet, url, _) = makeFleet()

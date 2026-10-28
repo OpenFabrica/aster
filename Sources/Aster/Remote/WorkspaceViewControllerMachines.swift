@@ -39,6 +39,40 @@ extension WorkspaceViewController {
     return host
   }
 
+  /// 就地换掉侧栏左下角的机器切换器，终端与 Pane 树不动。还没有侧栏（尚未整树刷新）时退回整树刷新。
+  /// 弹出层开着时先关掉旧的，换好后在新按钮上重新打开，里面的机器行也就是最新的。
+  func refreshMachineSwitcher() {
+    guard let oldHost = Self.findView(in: view, identifier: "machine-switcher-host"),
+      let column = oldHost.superview as? NSStackView,
+      let index = column.arrangedSubviews.firstIndex(of: oldHost)
+    else {
+      scheduleRefresh()
+      return
+    }
+    let reopensPopover = machineSwitcher?.isPopoverShown == true
+    machineSwitcher?.dismissPopover()
+    // 与整树刷新一样在根视图的实际外观下创建，动态颜色才会按当前明暗解析。
+    var newHost: NSView?
+    view.effectiveAppearance.performAsCurrentDrawingAppearance { [self] in newHost = makeMachineSwitcher() }
+    guard let newHost else { return }
+    column.removeArrangedSubview(oldHost)
+    oldHost.removeFromSuperview()
+    column.insertArrangedSubview(newHost, at: index)
+    newHost.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+    if reopensPopover {
+      DispatchQueue.main.async { [weak self] in self?.machineSwitcher?.presentPopover() }
+    }
+  }
+
+  /// 按标识在视图树里找第一个视图。
+  private static func findView(in root: NSView, identifier: String) -> NSView? {
+    if root.identifier?.rawValue == identifier { return root }
+    for child in root.subviews {
+      if let found = findView(in: child, identifier: identifier) { return found }
+    }
+    return nil
+  }
+
   /// 胶囊文字「机器名 · 工作区名」。
   static func capsuleTitle(machine: String, workspace: String) -> String {
     "\(machine) · \(workspace)"
