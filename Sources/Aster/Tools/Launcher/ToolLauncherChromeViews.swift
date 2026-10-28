@@ -71,6 +71,8 @@ final class ToolLauncherSearchBar: NSStackView {
     icon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("搜索"))
     icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
     icon.contentTintColor = AsterTheme.secondaryInk
+    icon.translatesAutoresizingMaskIntoConstraints = false
+    icon.widthAnchor.constraint(equalToConstant: 20).isActive = true
     searchField.font = NSFont.interface(ofSize: 20)
     searchField.isBezeled = false
     searchField.drawsBackground = false
@@ -93,7 +95,9 @@ final class ToolLauncherSearchBar: NSStackView {
     orientation = .horizontal
     alignment = .centerY
     spacing = 10
-    edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 16)
+    // 与结果行对齐：放大镜中线对准行图标块中线（8 + 10 + 14），输入文字起点对准行标题（再 + 14 + 12）。
+    edgeInsets = NSEdgeInsets(top: 0, left: 22, bottom: 0, right: 16)
+    setCustomSpacing(16, after: icon)
     heightAnchor.constraint(equalToConstant: height).isActive = true
   }
 
@@ -166,9 +170,27 @@ final class ToolLauncherFooterView: NSView {
   /// 每条短提示一个代号；到点时代号已变（又来了新提示或被收起）就不再动它。
   private var noticeGeneration = 0
 
-  /// 按键提示，按顺序以空格隔开。
+  /// 按键提示，按顺序排开。每条第一个空格前是按键（加粗），之后是说明；都用次色，三级色在浅色底上太淡。
   var hints: [String] = [] {
-    didSet { hintLabel.stringValue = hints.joined(separator: "   ") }
+    didSet { hintLabel.attributedStringValue = Self.attributedHints(hints) }
+  }
+
+  /// 把「↩ 打开」拆成按键与说明分别着色；没有空格的整条当按键（例如 ⌘1–9）。
+  private static func attributedHints(_ hints: [String]) -> NSAttributedString {
+    let result = NSMutableAttributedString()
+    let keyAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.interface(ofSize: 11, weight: .semibold), .foregroundColor: AsterTheme.secondaryInk,
+    ]
+    let labelAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.interface(ofSize: 11), .foregroundColor: AsterTheme.secondaryInk,
+    ]
+    for (index, hint) in hints.enumerated() {
+      if index > 0 { result.append(NSAttributedString(string: "     ", attributes: labelAttributes)) }
+      let parts = hint.split(separator: " ", maxSplits: 1).map(String.init)
+      result.append(NSAttributedString(string: parts.first ?? hint, attributes: keyAttributes))
+      if parts.count == 2 { result.append(NSAttributedString(string: " " + parts[1], attributes: labelAttributes)) }
+    }
+    return result
   }
 
   /// 搭建「短提示 | 按键提示 | 弹性空白」一行。
@@ -179,7 +201,8 @@ final class ToolLauncherFooterView: NSView {
     row.orientation = .horizontal
     row.alignment = .centerY
     row.spacing = 8
-    row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+    // 左边对齐结果行的图标块（8 + 10）。
+    row.edgeInsets = NSEdgeInsets(top: 0, left: 18, bottom: 0, right: 16)
     addSubview(row)
     row.pinEdges(to: self)
   }

@@ -180,7 +180,7 @@ func toolLauncherDragHandlesAreChromeOnly() throws {
   #expect(!content.isDragHandle(searchField))
   #expect(!content.isDragHandle(pin))
   #expect(!content.isDragHandle(content.view))
-  for row in views where row is OpenQuicklyRowView { #expect(!content.isDragHandle(row)) }
+  for row in views where row is ToolLauncherRowView { #expect(!content.isDragHandle(row)) }
 }
 
 @MainActor

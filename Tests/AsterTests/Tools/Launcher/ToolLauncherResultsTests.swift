@@ -47,10 +47,11 @@ func launcherRowsPutRecognizedFirstAndDeduplicate() {
   #expect(rows[0].detail == "2023-11-15 06:13:20 UTC")
   #expect(rows[0].inlineResult == "2023-11-15 06:13:20\nUTC")
   #expect(rows[1].title == "Title hash")
-  #expect(rows[1].detail == "Title hash · Plugin")
+  // 内置工具不写插件名。
+  #expect(rows[1].detail == "Title hash")
   #expect(rows[1].inlineResult == nil)
   #expect(rows[2].inlineResult == nil)
-  #expect(rows[2].detail == "Plugin")
+  #expect(rows[2].detail.isEmpty)
 }
 
 @Test("只认「是文字」的识别到排在搜索结果后面；同一功能也被搜到时只留搜索行，也不再算行内结果")
@@ -107,7 +108,7 @@ func launcherLaunchInputRules() throws {
   #expect(withFiles.source == .file)
 }
 
-@Test("徽章与图标：内置来源一律「内置」，用户插件按运行方式区分")
+@Test("徽章、图标与副标题：内置来源一律「内置」、副标题不写插件名，原生工具各有符号，用户插件按运行方式区分")
 func toolEntryPresentationBadgesAndSymbols() {
   let builtinWeb = entry("jwt", pluginID: "aster.jwt", source: .builtin, action: .ui)
   let userWeb = entry("diff", pluginID: "com.example.diff", source: .user, action: .ui)
@@ -118,10 +119,19 @@ func toolEntryPresentationBadgesAndSymbols() {
   #expect(ToolEntryPresentation.badge(for: builtinWeb) == L("内置"))
   #expect(ToolEntryPresentation.badge(for: userWeb) == L("网页"))
   #expect(ToolEntryPresentation.badge(for: script) == L("脚本"))
-  #expect(ToolEntryPresentation.symbol(for: entry("json")) == "wand.and.stars")
+  #expect(ToolEntryPresentation.symbol(for: entry("json")) == "curlybraces")
+  #expect(ToolEntryPresentation.symbol(for: entry("timestamp")) == "clock")
+  // 原生插件里认不出的处理器退回按动作选的符号。
+  #expect(ToolEntryPresentation.symbol(for: entry("unknown")) == "wand.and.stars")
+  #expect(ToolEntryPresentation.symbol(for: builtinWeb) == "macwindow")
   #expect(ToolEntryPresentation.symbol(for: userWeb) == "macwindow")
   #expect(ToolEntryPresentation.symbol(for: script) == "terminal")
   #expect(ToolEntryPresentation.detail(for: script) == "Plugin · 秒")
+  #expect(ToolEntryPresentation.detail(for: entry("json", subtitle: "格式化")) == "格式化")
+  #expect(ToolEntryPresentation.detail(for: builtinWeb).isEmpty)
+  #expect(ToolEntryPresentation.matchDetail(for: searchMatch(entry("json")), inlineResult: nil) == "Title json")
+  #expect(
+    ToolEntryPresentation.matchDetail(for: searchMatch(userWeb), inlineResult: nil) == "Title diff · Plugin")
   #expect(ToolEntryPresentation.singleLine(String(repeating: "a", count: 300), limit: 10) == "aaaaaaaaaa…")
 }
 

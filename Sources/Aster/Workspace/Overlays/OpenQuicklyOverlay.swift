@@ -1250,9 +1250,7 @@ final class OpenQuicklyRowView: NSButton {
 
     shortcutBackground.wantsLayer = true
     shortcutBackground.layer?.cornerRadius = 4
-    shortcutBackground.layer?.backgroundColor = AsterTheme.panel.cgColor
     shortcutBackground.layer?.borderWidth = 1
-    shortcutBackground.layer?.borderColor = AsterTheme.hairline.withAlphaComponent(0.72).cgColor
     shortcutBackground.addSubview(shortcutLabel)
     shortcutLabel.pinEdges(
       to: shortcutBackground, insets: NSEdgeInsets(top: 2, left: 5, bottom: 2, right: 5))
@@ -1279,9 +1277,6 @@ final class OpenQuicklyRowView: NSButton {
     trailing.addArrangedSubview(timestampLabel)
     badgeBackground.wantsLayer = true
     badgeBackground.layer?.cornerRadius = 4
-    badgeBackground.layer?.backgroundColor =
-      AsterTheme.secondaryInk
-      .withAlphaComponent(0.12).cgColor
     badgeBackground.addSubview(badgeLabel)
     badgeLabel.pinEdges(
       to: badgeBackground, insets: NSEdgeInsets(top: 2, left: 5, bottom: 2, right: 5))
@@ -1300,9 +1295,27 @@ final class OpenQuicklyRowView: NSButton {
     textColumn.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     translatesAutoresizingMaskIntoConstraints = false
     heightAnchor.constraint(equalToConstant: InterfaceScale.length(44)).isActive = true
+    applyLayerColors()
   }
 
   required init?(coder: NSCoder) { nil }
+
+  /// 键帽、徽章与选中底色写在 layer 上，是按某个外观解析出的固定 CGColor。行加入面板或明暗、主题变化时
+  /// 按新外观重算；否则深色面板里会留着 init 时按浅色解析出的白色键帽。
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    applyLayerColors()
+  }
+
+  /// 按当前有效外观写入键帽、徽章与选中底色。
+  private func applyLayerColors() {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      shortcutBackground.layer?.backgroundColor = AsterTheme.panel.cgColor
+      shortcutBackground.layer?.borderColor = AsterTheme.hairline.withAlphaComponent(0.72).cgColor
+      badgeBackground.layer?.backgroundColor = AsterTheme.secondaryInk.withAlphaComponent(0.12).cgColor
+    }
+    applySelection()
+  }
 
   /// 跨视图宽度约束只在行已经加入 Stack 后激活；复用前先停用，避免约束引用已经
   /// 移出层级的行。这样既得到整行选中背景，也不会触发 no-common-ancestor 异常。
@@ -1362,9 +1375,12 @@ final class OpenQuicklyRowView: NSButton {
     onContextMenu()
   }
 
+  /// 选中底色同样按当前有效外观解析。
   private func applySelection() {
-    layer?.backgroundColor =
-      isRowSelected
-      ? AsterTheme.accent.withAlphaComponent(0.16).cgColor : NSColor.clear.cgColor
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      layer?.backgroundColor =
+        isRowSelected
+        ? AsterTheme.accent.withAlphaComponent(0.16).cgColor : NSColor.clear.cgColor
+    }
   }
 }

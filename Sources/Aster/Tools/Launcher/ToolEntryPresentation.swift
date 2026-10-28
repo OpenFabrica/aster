@@ -5,9 +5,12 @@ import Foundation
 
 /// 工具条目的纯展示计算。
 enum ToolEntryPresentation {
-  /// 静态行的副标题：「插件名 · 功能副标题」；功能没有副标题时只写插件名。
+  /// 静态行的副标题：「插件名 · 功能副标题」；功能没有副标题时只写插件名。随 App 发布的工具不写插件名——
+  /// 原生工具的插件名都是「Aster 内置工具」，内置网页工具的插件名就是标题，写上只是每行重复一遍。
   static func detail(for entry: ToolCatalogEntry) -> String {
-    guard let subtitle = entry.feature.subtitle, !subtitle.isEmpty else { return entry.pluginName }
+    let subtitle = entry.feature.subtitle ?? ""
+    if entry.source == .builtin { return subtitle }
+    guard !subtitle.isEmpty else { return entry.pluginName }
     return "\(entry.pluginName) · \(subtitle)"
   }
 
@@ -22,12 +25,24 @@ enum ToolEntryPresentation {
     }
   }
 
-  /// 行图标（SF Symbol）。启动器的行没有自定义图片位，按动作类型选符号。
+  /// 行图标（SF Symbol）。内置原生工具每个一个符号，便于扫读；其它按动作类型选。插件自带图标时工具面板
+  /// 优先用图标，这个符号是退路。
   static func symbol(for entry: ToolCatalogEntry) -> String {
+    if entry.pluginID == BuiltinToolCatalog.pluginID, let handler = ToolBuiltinHandler(rawValue: entry.feature.code) {
+      switch handler {
+      case .timestamp: return "clock"
+      case .base64: return "arrow.left.arrow.right"
+      case .url: return "link"
+      case .hash: return "number"
+      case .uuid: return "dice"
+      case .ports: return "network"
+      case .json: return "curlybraces"
+      }
+    }
     switch entry.feature.action {
-    case .builtin: "wand.and.stars"
-    case .ui: "macwindow"
-    case .script: "terminal"
+    case .builtin: return "wand.and.stars"
+    case .ui: return "macwindow"
+    case .script: return "terminal"
     }
   }
 
@@ -37,9 +52,10 @@ enum ToolEntryPresentation {
     return match.entry.feature.title
   }
 
-  /// 「识别到」行的副标题：能立即算出结果时直接显示结果（压成一行），否则写功能与插件名。
+  /// 「识别到」行的副标题：能立即算出结果时直接显示结果（压成一行），否则写功能与插件名（内置工具只写功能）。
   static func matchDetail(for match: ToolMatch, inlineResult: String?) -> String {
     if let inlineResult, !inlineResult.isEmpty { return singleLine(inlineResult) }
+    if match.entry.source == .builtin { return match.entry.feature.title }
     return "\(match.entry.feature.title) · \(match.entry.pluginName)"
   }
 

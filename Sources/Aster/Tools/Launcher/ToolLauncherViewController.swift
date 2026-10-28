@@ -32,8 +32,8 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
   private let footer = ToolLauncherFooterView()
   private var resultsHeightConstraint: NSLayoutConstraint?
   private var toolHeightConstraint: NSLayoutConstraint?
-  private var rowPool: [OpenQuicklyRowView] = []
-  private var rowViews: [OpenQuicklyRowView] = []
+  private var rowPool: [ToolLauncherRowView] = []
+  private var rowViews: [ToolLauncherRowView] = []
   private var keyMonitor: Any?
   private var showsCommandHints = false
   private var context = ToolContext()
@@ -128,7 +128,7 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
     resultsStack.alignment = .width
     resultsStack.spacing = 2
     // 行宽约束成等于栈宽（`attach(to:)`），栈的左右内边距会被压掉；左右留白改由栈相对文档视图缩进 8pt。
-    resultsStack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+    resultsStack.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
     let document = FlippedDocumentView()
     document.addSubview(resultsStack)
     resultsStack.translatesAutoresizingMaskIntoConstraints = false
@@ -313,10 +313,10 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
   private var resultsHeight: CGFloat {
     guard !rows.isEmpty else { return 44 }
     let visible = CGFloat(min(rows.count, Self.maximumVisibleRows))
-    return visible * InterfaceScale.length(44) + (visible - 1) * resultsStack.spacing + 8
+    return visible * InterfaceScale.length(ToolLauncherRowView.baseHeight) + (visible - 1) * resultsStack.spacing + 12
   }
 
-  /// 复用行视图重画结果。行视图与 Open Quickly 共用，外观一致。
+  /// 复用行视图重画结果。
   private func renderRows() {
     for row in rowViews { row.detachFromResultsStack() }
     for view in resultsStack.arrangedSubviews { view.removeFromSuperview() }
@@ -326,17 +326,14 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
       resultsStack.addArrangedSubview(emptyLabel)
     }
     for (index, row) in rows.enumerated() {
-      let rowView: OpenQuicklyRowView
+      let rowView: ToolLauncherRowView
       if rowPool.indices.contains(index) {
         rowView = rowPool[index]
       } else {
-        rowView = OpenQuicklyRowView()
+        rowView = ToolLauncherRowView()
         rowPool.append(rowView)
       }
-      let item = OpenQuicklyItem(id: row.id, kind: .tool, title: row.title, detail: row.detail)
-      rowView.configure(
-        item: item, symbol: row.symbol, badge: row.badge, accented: row.origin == .recognized
-      ) { [weak self] in
+      rowView.configure(row: row) { [weak self] in
         self?.select(index)
         self?.openSelectedRow()
       }

@@ -79,3 +79,32 @@ func toolLauncherContentSwitchesBetweenResultsAndTool() throws {
   #expect(session.parent == nil)
   #expect(content.preferredContentHeight == resultsHeight)
 }
+
+@MainActor
+@Test("结果行：内置工具不挂「内置」徽章，识别到与用户插件才挂；按住 ⌘ 时键帽占住徽章位，松开后徽章回来")
+func toolLauncherRowShowsOnlyInformativeBadges() {
+  _ = NSApplication.shared
+  func row(_ origin: ToolLauncherRow.Origin, source: ToolPluginSource, badge: String) -> ToolLauncherRow {
+    let entry = ToolCatalogEntry(
+      pluginID: source == .builtin ? BuiltinToolCatalog.pluginID : "com.example.tool", pluginName: "Plugin",
+      pluginVersion: "1", source: source,
+      feature: ToolFeature(code: "json", title: "JSON", action: .builtin(ToolBuiltinAction(handler: .json))))
+    return ToolLauncherRow(
+      origin: origin, entry: entry, title: "JSON", detail: "", badge: badge, symbol: "curlybraces",
+      inlineResult: nil)
+  }
+  let view = ToolLauncherRowView()
+  view.configure(row: row(.search, source: .builtin, badge: L("内置"))) {}
+  #expect(view.visibleBadge == nil)
+  view.configure(row: row(.recognized, source: .builtin, badge: L("识别到"))) {}
+  #expect(view.visibleBadge == L("识别到"))
+  view.configure(row: row(.search, source: .user, badge: L("脚本"))) {}
+  #expect(view.visibleBadge == L("脚本"))
+
+  view.setCommandHint("⌘1", visible: true)
+  #expect(view.visibleKeycap == "⌘1")
+  #expect(view.visibleBadge == nil)
+  view.setCommandHint("⌘1", visible: false)
+  #expect(view.visibleKeycap == nil)
+  #expect(view.visibleBadge == L("脚本"))
+}

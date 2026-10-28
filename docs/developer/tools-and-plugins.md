@@ -319,7 +319,8 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 **A · Open Quickly「工具」页**：新增 `OpenQuicklyKind.tool` 与 `OpenQuicklyFilter.tool`（chip「工具」，`⌘U`）。
 
-- 静态行：每个可用功能一行（标题、插件名 · 副标题、来源徽章）。
+- 静态行：每个可用功能一行（标题、插件名 · 副标题、来源徽章）。随 App 发布的工具副标题不写插件名（原生工具的插件名都是
+  「Aster 内置工具」，内置网页工具的插件名就是标题）。内置原生工具按处理器各用一个符号（`ToolEntryPresentation.symbol`）。
 - 「识别到」行：查询文本命中 match 规则时显示（`ToolCenter.contentMatches`）；内置转换在行内直接显示结果。
   regex / files 规则命中置顶；text 规则接受任意文字（如「计算 Hash」），命中排在关键词搜索结果后面，
   否则输入工具名「json」时默认选中的是 Hash。同一功能既被 text 规则命中、又被关键词搜到时只留搜索行
@@ -347,6 +348,11 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 - `↩` 的语义两边不同：Open Quickly 里「识别到」行有行内结果时 `↩` 复制；工具面板里 `↩` 一律打开工具，`⌘↩` 才把
   行内结果或工具结果预填到终端。
 - 支持把文件拖到面板上作为输入（`files` 匹配）。
+- 结果行（`ToolLauncherRowView`，与 Open Quickly 的通用行分开）：行高 48，左侧 28pt 图标块——插件自带图标优先
+  （`iconPath`，按路径缓存），否则用与内置网页工具图标同族的固定深色底 + 符号，原生工具每个一种色相。右侧徽章只在
+  有信息量时出现：「识别到」用强调色，用户 / 开发插件写「网页」「脚本」，内置工具不挂「内置」。按住 `⌘` 时快选键帽
+  显示在徽章位，图标与标题不动。颜色都在 `updateLayer` 里按外观解析，切换明暗与主题后自动跟上。
+- 对齐：放大镜对准行图标块中线、输入文字对准行标题、底栏左边对准图标块。底栏每条提示的按键加粗、说明常规，都用次色。
 - 全局快捷键：兼容设置键 `tools.launcherShortcut`，取值 `none`（默认）/ `optionSpace` / `controlOptionSpace`；
   不能与 Quick Terminal 选同一组合（设置页禁用冲突选项，注册失败时提示一次）。Carbon 热键签名 `'ASTL'`。
 - 其它入口：「窗口 → 工具面板」菜单项、命令面板「工具面板」（发 `.asterShowToolLauncher` 通知）。
