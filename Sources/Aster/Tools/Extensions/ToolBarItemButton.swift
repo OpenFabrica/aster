@@ -154,9 +154,15 @@ final class ToolBarItemButton: NSControl {
     width += CGFloat(icons.count) * iconSide + CGFloat(max(0, icons.count - 1)) * gap
     if !label.stringValue.isEmpty {
       if !icons.isEmpty { width += gap }
-      width += ceil(label.intrinsicContentSize.width)
+      width += labelWidth
     }
     return NSSize(width: min(width, InterfaceScale.length(Self.maximumWidth)), height: NSView.noIntrinsicMetric)
+  }
+
+  /// 文字需要的宽度。单行 label 的 `intrinsicContentSize` 只量字形、不含 cell 左右各 2pt 的
+  /// 内边距，按它给宽度会让每一项都被截成「5h 4…」；cell 的 `cellSize` 才是画字时真正要的宽度。
+  private var labelWidth: CGFloat {
+    ceil(max(label.cell?.cellSize.width ?? 0, label.intrinsicContentSize.width))
   }
 
   override func layout() {
