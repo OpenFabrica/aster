@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.codexbar",
+  "name": "Codex 速率条",
+  "version": "1.0.0",
+  "description": "在运行 Codex 的 Pane 底部显示这个会话的模型、状态、token 速率与累计用量",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "permissions": ["exec", "clipboard.write"],
+  "contributes": {
+    "views": [
+      {
+        "id": "rate",
+        "title": "Codex 速率",
+        "kind": "bar",
+        "slot": "pane.bottom",
+        "source": { "type": "script", "command": ["bin/codexbar.sh"], "timeout": 10 },
+        "refresh": { "interval": 10, "on": ["agent", "cwd"] }
+      }
+    ]
+  }
+}

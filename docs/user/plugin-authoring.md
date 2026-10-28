@@ -353,6 +353,9 @@ Aster 在合适的时候运行你的脚本：窗口里第一次显示、定时�
 
 `trigger` 是这次运行的原因：`initial`、`interval`、`cwd`、`branch`、`activePane`、`agent` 或 `manual`。
 环境变量和脚本工具一样（`ASTER_CWD`、`ASTER_LOCALE`、`ASTER_PLUGIN_DIR` 等），另有 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`。
+Pane 里跑着 Agent（Claude Code、Codex 等）时，`agent` 是 `{"provider": "codex", "state": "processing", "sessionID": "…"}`：
+`state` 是 `processing`、`idle` 或 `awaitingInput`，`sessionID` 是 Aster 为这个 Pane 绑定的 Agent 会话 ID（还没绑定为 `null`）；
+同时有环境变量 `ASTER_AGENT` 和 `ASTER_AGENT_SESSION`。内置的 Codex / Claude Code 速率条就是这样只读自己 Pane 的会话。
 远端（SSH）标签没有本地目录：`isRemote` 为 `true`，`ASTER_CWD` 不存在。
 
 **输出。** stdout 写一份 JSON，不超过 64 KiB：

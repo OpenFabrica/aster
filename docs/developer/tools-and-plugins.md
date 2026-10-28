@@ -28,7 +28,7 @@ v1 范围：
 | 网页运行时 | `Sources/Aster/Tools/Web/` | `WebToolViewController`、`aster-plugin://` scheme handler、桥接、`Resources/tool-runtime/aster-bridge.js`。 |
 | 入口 | `Sources/Aster/Tools/Launcher/`、Open Quickly、`AppModel+Tools.swift` | 工具面板、全局快捷键、Open Quickly「工具」页、工具 Pane、命令面板与菜单入口。 |
 | 设置 | `SettingsToolsBridge.swift`、`Resources/settings-ui/tools.js` | 设置页「工具」分类（含视图的开关与位置）。 |
-| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写；`aster.gitbar` 是只贡献视图的示例。 |
+| 内置网页工具 | `Resources/tools-builtin/<id>/` | JWT、正则、Diff、颜色、密码生成，按普通插件格式编写；`aster.gitbar`、`aster.codexbar`、`aster.claudebar` 只贡献视图。 |
 
 应用层只通过 `Sources/Aster/Tools/ToolContracts.swift` 里的类型交互：入口与设置页不直接读插件目录、
 不直接创建 WebView 或进程。
@@ -176,6 +176,8 @@ v1 范围：
 | `aster.diff` | Myers 行级 diff（线性空间）、折叠相同行、行内高亮、忽略空白/大小写、复制 unified diff；> 5000 行截断 | — | `clipboard.write` |
 | `aster.color` | HEX 3/4/6/8、rgb(a)/hsl(a)（含 CSS4 空格写法）、裸 `r, g, b`、颜色名；WCAG 对比度 | `#` + 3/4/6/8 位、不带 `#` 且含字母的 6 位、`rgb(`/`hsl(` 开头 | `clipboard.write` |
 | `aster.gitbar` | 示例：`activePane.bottom` 状态条（跟着当前 Pane 走），显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
+| `aster.codexbar` | `pane.bottom` 状态条：运行 Codex 的 Pane 显示该会话的模型 · 思考等级、状态、最近用量区间的输入 / 输出速率、累计；见「内置 Agent 速率条」 | — | `exec`、`clipboard.write` |
+| `aster.claudebar` | `pane.bottom` 状态条：运行 Claude Code 的 Pane 显示该会话的模型 · 思考等级、状态、最近一条回复的输出速率、上下文大小、累计输出 | — | `exec`、`clipboard.write` |
 | `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
 - 输入分配：JWT 与颜色的 `enter`/`query` 都填输入框；正则的 `enter` 填测试文本（单行 `/…/flags` 填进正则），
@@ -552,11 +554,15 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 ```json
 { "view": "branch", "trigger": "initial|interval|cwd|branch|activePane|agent|manual",
   "context": { "workingDirectory": "/Users/me/repo", "isRemote": false, "locale": "zh-Hans", "appearance": "dark",
-               "branch": "main", "tabID": "…", "paneID": "…", "agent": { "provider": "claude", "state": "running" } } }
+               "branch": "main", "tabID": "…", "paneID": "…", "agent": { "provider": "claudeCode", "state": "processing", "sessionID": "…" } } }
 ```
 
 **环境变量**：功能脚本那一组（`ASTER_FEATURE` 此处为 `view:<id>`、`ASTER_CWD`、`ASTER_LOCALE`、`ASTER_PLUGIN_*` 等），
-再加 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`。远端标签（`isRemote == true`）没有本地 cwd，`workingDirectory` 为 `null`。
+再加 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`；Pane 跑着 Agent 时还有 `ASTER_AGENT`（provider，如 `codex`、
+`claudeCode`）与 `ASTER_AGENT_SESSION`（已绑定的会话 ID）。`agent` 只在 Pane 跑着已识别的 Agent 时有：`provider` 是
+`AgentProvider.rawValue`，`state` 是 `processing` / `idle` / `awaitingInput`，`sessionID` 是 `TerminalSession.activeAgentSessionID`
+（hook 上报或 `AgentSessionFileLocator` 按会话文件定位；还没绑定为 `null`）。脚本凭 `sessionID` 读这个 Pane 自己的会话记录，
+同目录开两个 Agent 也不会串。会话 ID 绑定本身不发触发，下一次 `agent` 状态变化或定时到点时带上。远端标签（`isRemote == true`）没有本地 cwd，`workingDirectory` 为 `null`。
 
 **stdout**（≤ 64 KiB，超出整份作废）：
 
@@ -643,6 +649,28 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 - `schemaVersion` 仍为 1，`contributes` 是可选节。旧版 Aster 读到带 `contributes` 的清单会因「未知字段」**整份拒绝该插件**
   （记一条问题，不崩溃）；不用 `contributes` 的插件不受影响。使用界面扩展的插件文档里应写明需要新版本 Aster。
 - 未实现的 slot 可以声明，将来版本实现后无需改清单。
+
+### 内置 Agent 速率条：`aster.codexbar` / `aster.claudebar`
+
+两个插件都只贡献一个 `pane.bottom` 的 bar `rate`（权限 `exec`、`clipboard.write`；每 10 s 加 `agent` / `cwd` 触发，
+超时 10 s）。源自用户的 `codex-token-rate.py` 终端表格，改成按 Pane 输出一行。
+
+- **入口** `bin/<名字>bar.sh`：`ASTER_AGENT` 不是对应 provider 时直接输出 `{"items":[],"ttl":600}`，不启动 Python，
+  所以不跑 Agent 的 Pane 几乎零开销。否则按 `/opt/homebrew/bin`、`/usr/local/bin`、（有 Command Line Tools 时）`/usr/bin`
+  的顺序找 `python3`，用 `-B` 执行同目录的 `.py`（App 包已签名，不能写 `__pycache__`）。没装 Command Line Tools 时
+  `/usr/bin/python3` 只是会弹安装框的占位程序，所以先查 `xcode-select -p`；都没有时显示「需要 python3」提示项。
+- **找会话**：先按 `agent.sessionID` 找文件；没绑定时回退到「这个目录里最近 1 小时写入的会话」（Codex 跳过子代理会话）。
+  超过 1 小时没有活动的会话不显示。
+- **Codex**（`$CODEX_HOME/sessions/年/月/日/rollout-*-<id>.jsonl`，按 ID 先看最近 7 天目录）：从文件尾部 64 KiB 起倍增
+  （上限 8 MiB）读到有设置、两次 `token_count` 和任务状态为止；速率是相邻两次累计用量之差除以间隔（「最近一个用量区间」
+  的均值，不是逐秒实时值）。
+- **Claude Code**（`$CLAUDE_CONFIG_DIR/projects/<目录名>/<id>.jsonl`，目录名是 cwd 里非字母数字换成 `-`）：同一条回复的
+  多个内容块各写一行、共用 `message.id`，用量以最后一行为准；`isSidechain` 行（子代理）不计。输出速率 = 最近一条回复的
+  输出 token ÷（最后一行时间 − 回复前一行的时间）；上下文 = 最近一次请求的 `input + cache_creation + cache_read`。
+  累计输出按偏移量增量统计，进度写在 `$ASTER_PLUGIN_DATA/sessions/<id>.json`（文件变小或版本不符就重算），
+  只用正则取非回复行的时间，大会话也快。
+- 状态优先用 stdin 里 Aster 的 `agent.state`（`processing` 进行中、`awaitingInput` 等待确认、其它待输入）；进行中 `ttl` 5，
+  否则 30。点击模型项复制会话 ID。文案按 `ASTER_LOCALE` 选中文或英文。
 
 ### 内置示例：`aster.gitbar`
 
@@ -732,7 +760,7 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 只跑定向用例：`./scripts/test.sh --filter <name>`。覆盖：清单校验（每条拒绝规则）、匹配与拼音、信任状态机、
 摘要、脚本协议解析与上限、桥接参数与授权、内置转换；scheme handler 路径越界、桥接未授权拒绝、脚本超时与
 输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作；加密存储的密文格式、密钥丢失与预埋条目、
-剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）。
+剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）。
 
 ## 独立工具窗口
 

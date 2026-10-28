@@ -534,7 +534,8 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     }
     var agent: ToolBarAgentContext?
     if let session = tab.activeSession, let provider = session.activeAgentProvider {
-      agent = ToolBarAgentContext(provider: provider.rawValue, state: session.agentTaskState.rawValue)
+      agent = ToolBarAgentContext(
+        provider: provider.rawValue, state: session.agentTaskState.rawValue, sessionID: session.activeAgentSessionID)
     }
     return ToolBarContext(
       workingDirectory: tool.workingDirectory, isRemote: tool.isRemote, locale: tool.locale,

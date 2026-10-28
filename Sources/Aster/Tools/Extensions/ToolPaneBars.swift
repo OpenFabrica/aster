@@ -96,7 +96,8 @@ final class ToolPaneBars {
     else { return nil }
     let tool = model.toolContext(for: ToolTerminalOrigin(session: session, paneID: paneID))
     let agent = session.activeAgentProvider.map {
-      ToolBarAgentContext(provider: $0.rawValue, state: session.agentTaskState.rawValue)
+      ToolBarAgentContext(
+        provider: $0.rawValue, state: session.agentTaskState.rawValue, sessionID: session.activeAgentSessionID)
     }
     return ToolBarContext(
       workingDirectory: tool.workingDirectory, isRemote: tool.isRemote, locale: tool.locale,

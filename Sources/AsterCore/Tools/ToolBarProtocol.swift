@@ -20,10 +20,26 @@ public enum ToolBarTrigger: String, Codable, CaseIterable, Sendable {
 public struct ToolBarAgentContext: Codable, Equatable, Hashable, Sendable {
   public var provider: String
   public var state: String
+  /// Pane 绑定的 Agent 会话 ID（hook 上报或按会话文件定位）；还没绑定时为 nil。
+  /// 脚本据此读取「这个 Pane 自己的」会话记录，同目录多个 Agent 不会互相串。
+  public var sessionID: String?
 
-  public init(provider: String, state: String) {
+  public init(provider: String, state: String, sessionID: String? = nil) {
     self.provider = provider
     self.state = state
+    self.sessionID = sessionID
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case provider, state, sessionID
+  }
+
+  /// 按 stdin 约定写出：没绑定会话时 `sessionID` 写 `null` 而不是省略。
+  public func encode(to encoder: any Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(provider, forKey: .provider)
+    try values.encode(state, forKey: .state)
+    try values.encode(sessionID, forKey: .sessionID)
   }
 }
 
@@ -189,7 +205,8 @@ public enum ToolBarProtocol {
     ToolBarOutputParser.stdinData(viewID: viewID, trigger: trigger, context: context)
   }
 
-  /// 在功能脚本的 `ASTER_*` 变量之上追加 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`。
+  /// 在功能脚本的 `ASTER_*` 变量之上追加 `ASTER_VIEW`、`ASTER_TRIGGER`、`ASTER_BRANCH`，
+  /// 有 Agent 时再加 `ASTER_AGENT`（provider）与 `ASTER_AGENT_SESSION`（已绑定的会话 ID）。
   public static func environment(
     viewID: String,
     trigger: ToolBarTrigger,

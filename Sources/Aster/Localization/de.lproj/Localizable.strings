@@ -2831,4 +2831,10 @@
 "↩ 执行：%@" = "↩ Führt aus: %@";
 "当前 Pane 底部" = "Unten im aktiven Bereich";
 "在当前终端 Pane 底部显示当前仓库的分支、领先 / 落后提交数和未提交改动数，点击可复制分支名或预填 git 命令" = "Zeigt unten im aktiven Terminalbereich Branch, Vorsprung/Rückstand und nicht committete Änderungen des aktuellen Repositorys an; per Klick Branch-Namen kopieren oder einen git-Befehl vorausfüllen";
+"Codex 速率条" = "Codex-Ratenleiste";
+"在运行 Codex 的 Pane 底部显示这个会话的模型、状态、token 速率与累计用量" = "Zeigt Modell, Status, Token-Rate und Gesamtverbrauch der Sitzung unten in Bereichen an, in denen Codex läuft";
+"Codex 速率" = "Codex-Rate";
+"Claude Code 速率条" = "Claude-Code-Ratenleiste";
+"在运行 Claude Code 的 Pane 底部显示这个会话的模型、状态、输出速率、上下文与累计输出" = "Zeigt Modell, Status, Ausgaberate, Kontext und Gesamtausgabe der Sitzung unten in Bereichen an, in denen Claude Code läuft";
+"Claude Code 速率" = "Claude-Code-Rate";
 "调整状态条高度" = "Höhe der Statusleiste anpassen";

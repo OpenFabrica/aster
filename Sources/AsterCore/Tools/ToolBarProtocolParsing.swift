@@ -238,6 +238,11 @@ enum ToolBarOutputParser {
   static func environment(viewID: String, trigger: ToolBarTrigger, context: ToolBarContext) -> [String: String] {
     var environment = ["ASTER_VIEW": viewID, "ASTER_TRIGGER": trigger.rawValue]
     if let branch = context.branch, !branch.isEmpty { environment["ASTER_BRANCH"] = branch }
+    // Agent 信息也给环境变量，shell 脚本不用解析 stdin JSON 就能判断「这个 Pane 跑的是谁」。
+    if let agent = context.agent {
+      environment["ASTER_AGENT"] = agent.provider
+      if let sessionID = agent.sessionID, !sessionID.isEmpty { environment["ASTER_AGENT_SESSION"] = sessionID }
+    }
     return environment.mapValues(ScriptToolProtocol.environmentValue)
   }
 }

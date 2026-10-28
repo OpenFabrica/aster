@@ -366,7 +366,11 @@ script tools.
 
 `trigger` is the reason for this run: `initial`, `interval`, `cwd`, `branch`, `activePane`, `agent`, or `manual`.
 The environment variables are the same as for script tools (`ASTER_CWD`, `ASTER_LOCALE`, `ASTER_PLUGIN_DIR`, and so on),
-plus `ASTER_VIEW`, `ASTER_TRIGGER`, and `ASTER_BRANCH`. A remote (SSH) tab has no local directory: `isRemote` is `true`
+plus `ASTER_VIEW`, `ASTER_TRIGGER`, and `ASTER_BRANCH`. When an agent (Claude Code, Codex, and so on) runs in the pane,
+`agent` is `{"provider": "codex", "state": "processing", "sessionID": "…"}`: `state` is `processing`, `idle`, or
+`awaitingInput`, and `sessionID` is the agent session ID that Aster bound to this pane (`null` until it is bound). The
+variables `ASTER_AGENT` and `ASTER_AGENT_SESSION` are also set. The built-in Codex and Claude Code rate bars use this to
+read only the session of their own pane. A remote (SSH) tab has no local directory: `isRemote` is `true`
 and `ASTER_CWD` is not set.
 
 **Output.** Print one JSON document to stdout, at most 64 KiB:

@@ -286,7 +286,7 @@ struct ToolBarProtocolTests {
     let full = ToolBarProtocol.stdinData(viewID: "v", trigger: .activePane, context: context)
     #expect(
       String(decoding: full, as: UTF8.self)
-        == #"{"context":{"agent":{"provider":"claude","state":"running"},"appearance":"light","branch":"feat/x","isRemote":false,"locale":"en","paneID":"P1","tabID":"T1","workingDirectory":"/tmp/a b"},"trigger":"activePane","view":"v"}"#)
+        == #"{"context":{"agent":{"provider":"claude","sessionID":null,"state":"running"},"appearance":"light","branch":"feat/x","isRemote":false,"locale":"en","paneID":"P1","tabID":"T1","workingDirectory":"/tmp/a b"},"trigger":"activePane","view":"v"}"#)
     let object = try #require(try JSONSerialization.jsonObject(with: full) as? [String: Any])
     #expect(Set(object.keys) == ["context", "trigger", "view"])
   }
@@ -300,5 +300,20 @@ struct ToolBarProtocolTests {
     #expect(withBranch["ASTER_BRANCH"] == "main" && withBranch["ASTER_TRIGGER"] == "manual")
     let emptyBranch = ToolBarProtocol.environment(viewID: "v", trigger: .cwd, context: ToolBarContext(branch: ""))
     #expect(emptyBranch["ASTER_BRANCH"] == nil)
+  }
+
+  /// Pane 跑着 Agent 时 stdin 带会话 ID，环境变量给出 ASTER_AGENT 与 ASTER_AGENT_SESSION；没绑定会话只给 provider。
+  @Test func agentSessionReachesStdinAndEnvironment() throws {
+    let bound = ToolBarContext(agent: ToolBarAgentContext(provider: "codex", state: "processing", sessionID: "S-1"))
+    let data = ToolBarProtocol.stdinData(viewID: "rate", trigger: .agent, context: bound)
+    let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let agent = try #require((object["context"] as? [String: Any])?["agent"] as? [String: Any])
+    #expect(agent["sessionID"] as? String == "S-1" && agent["provider"] as? String == "codex")
+    let environment = ToolBarProtocol.environment(viewID: "rate", trigger: .agent, context: bound)
+    #expect(environment["ASTER_AGENT"] == "codex" && environment["ASTER_AGENT_SESSION"] == "S-1")
+
+    let unbound = ToolBarContext(agent: ToolBarAgentContext(provider: "claudeCode", state: "idle"))
+    let plain = ToolBarProtocol.environment(viewID: "rate", trigger: .agent, context: unbound)
+    #expect(plain["ASTER_AGENT"] == "claudeCode" && plain["ASTER_AGENT_SESSION"] == nil)
   }
 }

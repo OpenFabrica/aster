@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "aster.claudebar",
+  "name": "Claude Code 速率条",
+  "version": "1.0.0",
+  "description": "在运行 Claude Code 的 Pane 底部显示这个会话的模型、状态、输出速率、上下文与累计输出",
+  "author": "Aster",
+  "icon": "icon.svg",
+  "permissions": ["exec", "clipboard.write"],
+  "contributes": {
+    "views": [
+      {
+        "id": "rate",
+        "title": "Claude Code 速率",
+        "kind": "bar",
+        "slot": "pane.bottom",
+        "source": { "type": "script", "command": ["bin/claudebar.sh"], "timeout": 10 },
+        "refresh": { "interval": 10, "on": ["agent", "cwd"] }
+      }
+    ]
+  }
+}
