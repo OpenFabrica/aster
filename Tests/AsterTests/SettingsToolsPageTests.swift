@@ -119,7 +119,7 @@ func settingsToolsPageRendersViewControls() async throws {
       views: [
         toolViewSummary("branch", slot: .tabTop),
         toolViewSummary("status", title: "Git 状态", kind: .panel, slot: .inspectorPanel, defaultSlot: .inspectorPanel, enabled: false, inactiveReason: .disabled),
-        toolViewSummary("future", title: "未来", slot: .windowTop, defaultSlot: .windowTop, inactiveReason: .unsupported),
+        toolViewSummary("future", title: "未来", slot: .paneHeader, defaultSlot: .paneHeader, inactiveReason: .unsupported),
       ]),
     toolSummary("com.example.plain", name: "没有视图"),
   ]
@@ -140,13 +140,13 @@ func settingsToolsPageRendersViewControls() async throws {
   #expect(try await eval("[...document.querySelectorAll('.tool-view')].map(n => n.dataset.viewId).join(',')") == "branch,status,future")
   // 类型徽章。
   #expect(try await eval("[...document.querySelectorAll('.tool-view .tool-badge')].map(n => n.dataset.kind).join(',')") == "bar,panel,bar")
-  // bar 只能选 tab.top / tab.bottom；当前值是 tab.top；缺省位置（tab.bottom）带「（默认）」后缀。
+  // bar 可选所有已实现的 bar 位置；当前值是 tab.top；缺省位置（tab.bottom）带「（默认）」后缀。
   let branch = "document.querySelector('[data-view-id=\"branch\"] select')"
-  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "tab.top,tab.bottom,pane.bottom")
+  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "window.top,window.bottom,tab.top,tab.bottom,pane.bottom")
   #expect(try await eval("\(branch).value") == "tab.top")
   #expect(try await eval("[...\(branch).options].find(o => o.value === 'tab.bottom').textContent").hasSuffix("（默认）"))
   // 声明了未实现位置的视图，下拉框补一项当前值，并带灰字提示。
-  #expect(try await eval("document.querySelector('[data-view-id=\"future\"] select').value") == "window.top")
+  #expect(try await eval("document.querySelector('[data-view-id=\"future\"] select').value") == "pane.header")
   #expect(try await eval("document.querySelector('[data-view-id=\"future\"] .tool-view-hint')?.textContent ?? ''") == "本版本暂不支持这个位置")
   #expect(try await eval("String(document.querySelector('[data-view-id=\"status\"] input[type=checkbox]').checked)") == "false")
 

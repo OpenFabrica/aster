@@ -17,7 +17,7 @@ private func makeViewTools() -> FakeToolCenter {
         toolViewSummary(
           "status", title: "Git 状态", kind: .panel, slot: .inspectorPanel, defaultSlot: .inspectorPanel),
         toolViewSummary(
-          "future", title: "未来", slot: .windowTop, defaultSlot: .windowTop, inactiveReason: .unsupported),
+          "future", title: "未来", slot: .paneHeader, defaultSlot: .paneHeader, inactiveReason: .unsupported),
       ])
   ]
   return tools
@@ -40,7 +40,7 @@ func snapshotIncludesViewRowsAndSlots() throws {
   #expect(branch["enabled"] as? Bool == true)
   #expect(branch["inactiveReason"] is NSNull)
   // 可选位置只含本版本已实现且接受该类型的挂载点。
-  #expect(branch["slots"] as? [String] == ["tab.top", "tab.bottom", "pane.bottom"])
+  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "tab.top", "tab.bottom", "pane.bottom"])
   #expect(views[1]["slots"] as? [String] == ["inspector.panel"])
   #expect(views[2]["inactiveReason"] as? String == "unsupported")
 
@@ -50,8 +50,8 @@ func snapshotIncludesViewRowsAndSlots() throws {
   #expect(bottom["title"] as? String == L("标签底部"))
   #expect(bottom["kinds"] as? [String] == ["bar"])
   #expect(bottom["implemented"] as? Bool == true)
-  let windowTop = try #require(slots.first { $0["id"] as? String == "window.top" })
-  #expect(windowTop["implemented"] as? Bool == false)
+  let paneHeader = try #require(slots.first { $0["id"] as? String == "pane.header" })
+  #expect(paneHeader["implemented"] as? Bool == false)
   #expect(JSONSerialization.isValidJSONObject(snapshot))
 }
 
@@ -62,8 +62,8 @@ func setViewSlotRejectsIncompatibleKind() async {
   let (bridge, recorder) = makeToolsBridge(tools)
   let base: [String: Any] = ["id": "com.example.views", "view": "branch"]
 
-  // panel 的位置不接受 bar；window.top 接受 bar 但本版本没有实现；其余是未知字符串或错误类型。
-  for slot: Any in ["inspector.panel", "window.top", "nowhere", 7] {
+  // panel 的位置不接受 bar；pane.header 接受 bar 但本版本没有实现；其余是未知字符串或错误类型。
+  for slot: Any in ["inspector.panel", "pane.header", "nowhere", 7] {
     #expect(await performToolsAction(bridge, "tools.setViewSlot", base.merging(["slot": slot]) { $1 }) == false)
   }
   // 不存在的视图与缺少 view 参数。

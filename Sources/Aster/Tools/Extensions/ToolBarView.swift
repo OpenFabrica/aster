@@ -46,6 +46,16 @@ final class ToolBarView: NSView {
   var themeProvider: (() -> TerminalTheme?)?
   /// 判断 spinner 是否到时（测试可替换）。
   var now: () -> Date = { Date() }
+  /// 全部段为空时是否隐藏整条并把高度归零。`window.top` 不收起：红绿灯那一行归它，收起后侧栏与内容会顶到红绿灯下面。
+  var collapsesWhenEmpty = true {
+    didSet { updateEmptiness() }
+  }
+  /// 左内边距（点）。`window.top` 由工作区按红绿灯位置设置；其余位置用缺省 8。
+  var leadingInset: CGFloat? {
+    didSet { if leadingInset != oldValue { needsLayout = true } }
+  }
+  /// 空白处可以拖动窗口、双击缩放（`window.top` 占着标题栏那一行，系统标题栏的手势要手动补回）。
+  var isWindowDragRegion = false
 
   private(set) var segments: [ToolBarSegment] = []
   /// 按「段 id + 项目 id（没有就用序号）」复用的按钮：跨刷新保持悬停态。
@@ -65,7 +75,7 @@ final class ToolBarView: NSView {
   /// `height` 是清单里的条高（点，未缩放）。
   init(slot: ToolViewSlot, height: Int) {
     self.slot = slot
-    barHeight = InterfaceScale.length(CGFloat(height))
+    barHeight = Self.scaledHeight(height, slot: slot)
     super.init(frame: .zero)
     identifier = NSUserInterfaceItemIdentifier("tool-bar-\(slot.rawValue)")
     wantsLayer = true
@@ -86,8 +96,13 @@ final class ToolBarView: NSView {
 
   /// 换条高（清单变化）。
   func setHeight(_ height: Int) {
-    barHeight = InterfaceScale.length(CGFloat(height))
+    barHeight = Self.scaledHeight(height, slot: slot)
     heightConstraint.constant = isHidden ? 0 : barHeight
+  }
+
+  /// 条高随界面字号缩放；window.top 与红绿灯同一行，几何由窗口决定，不缩放。
+  private static func scaledHeight(_ height: Int, slot: ToolViewSlot) -> CGFloat {
+    slot == .windowTop ? CGFloat(height) : InterfaceScale.length(CGFloat(height))
   }
 
   /// 隐藏时高度归零：插入点的约束链是必需约束，隐藏视图仍参与布局，不归零会在终端下留一条空白。
@@ -120,11 +135,19 @@ final class ToolBarView: NSView {
       spinner.removeFromSuperview()
       spinners[id] = nil
     }
-    isHidden = groups.allSatisfy { $0.buttons.isEmpty }
+    updateEmptiness()
     scheduleSpinnerReveal()
     refreshAppearance()
     needsLayout = true
   }
+
+  /// 没有任何可显示的按钮时按 `collapsesWhenEmpty` 收起。
+  private func updateEmptiness() {
+    isHidden = collapsesWhenEmpty && groups.allSatisfy { $0.buttons.isEmpty }
+  }
+
+  /// 没有内容（测试与布局用）：与是否收起无关。
+  var isEmpty: Bool { groups.allSatisfy { $0.buttons.isEmpty } }
 
   /// 一段要显示的按钮内容与复用键。
   private static func contents(of segment: ToolBarSegment) -> [(String, ToolBarItemButton.Content)] {
@@ -214,7 +237,7 @@ final class ToolBarView: NSView {
   /// 从第一个放不下的项目起全部收进菜单（不跳着塞，顺序与脚本输出一致）。
   override func layout() {
     super.layout()
-    let inset = InterfaceScale.length(8)
+    let inset = leadingInset ?? InterfaceScale.length(8)
     let spacing = InterfaceScale.length(2)
     let separatorGap = InterfaceScale.length(6)
     let buttonHeight = max(0, min(bounds.height - InterfaceScale.length(4), InterfaceScale.length(22)))
@@ -244,7 +267,7 @@ final class ToolBarView: NSView {
     let total =
       viewWidths.reduce(0, +) + CGFloat(max(0, viewWidths.count - plan.count)) * spacing
       + CGFloat(max(0, plan.count - 1)) * separatorWidth
-    let available = max(0, bounds.width - inset * 2)
+    let available = max(0, bounds.width - inset - InterfaceScale.length(8))
     let overflowWidth = ceil(overflowButton.intrinsicContentSize.width)
     let limit = total <= available ? available : max(0, available - overflowWidth - spacing)
 
@@ -288,7 +311,8 @@ final class ToolBarView: NSView {
   private func layoutLayers(separators: [CGFloat], buttonHeight: CGFloat) {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    let lineY: CGFloat = slot == .tabTop ? 0 : bounds.height - 1
+    // 条在上方（tab.top、window.top）时边线画在底部，贴着下面的内容；其余画在顶部。
+    let lineY: CGFloat = slot == .tabTop || slot == .windowTop ? 0 : bounds.height - 1
     edgeLine.frame = NSRect(x: 0, y: lineY, width: bounds.width, height: 1)
     while separatorLayers.count < separators.count {
       let layer = CALayer()
@@ -316,6 +340,20 @@ final class ToolBarView: NSView {
     effectiveAppearance.performAsCurrentDrawingAppearance { resolved = border.cgColor }
     edgeLine.backgroundColor = resolved
     separatorLayers.forEach { $0.backgroundColor = resolved }
+  }
+
+  // MARK: - 拖动窗口
+
+  override var mouseDownCanMoveWindow: Bool { isWindowDragRegion }
+
+  /// 空白处：单击拖动窗口，双击与系统标题栏一样缩放（同 `WorkspaceTitleBarBackgroundView`）。按钮自己先吃掉命中。
+  override func mouseDown(with event: NSEvent) {
+    guard isWindowDragRegion, let window else { return super.mouseDown(with: event) }
+    if event.clickCount == 2 {
+      window.performZoom(nil)
+    } else {
+      window.performDrag(with: event)
+    }
   }
 
   // MARK: - 溢出菜单

@@ -25,7 +25,8 @@ extension ToolCenter: ToolViewCatalog {}
 final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 本版本由宿主挂 bar 的标签范围位置（`pane.bottom` 每 Pane 一条，见 `paneBar(for:)`；
   /// `inspector.panel` 由详情面板经 `ToolPanelProviding` 取用）。
-  static let mountedBarSlots: [ToolViewSlot] = [.tabTop, .tabBottom]
+  /// `window.*` 的上下文与标签范围相同（窗口选中标签），共用调度器的 `context`。
+  static let mountedBarSlots: [ToolViewSlot] = [.windowTop, .windowBottom, .tabTop, .tabBottom]
 
   /// 挂了 bar 的位置集合变了（从无到有或从有到无）：工作区需要整树重建一次把条插进去或撤掉。
   var onMountedSlotsChanged: (() -> Void)?
@@ -110,6 +111,11 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     guard !isTornDown, mountedSlots.contains(slot), let bar = bars[slot] else { return nil }
     bar.removeFromSuperview()
     return bar
+  }
+
+  /// 这个位置有没有可挂载的条（工作区据此决定布局，例如 window.top 接管红绿灯行）。
+  func hasBar(for slot: ToolViewSlot) -> Bool {
+    !isTornDown && mountedSlots.contains(slot) && bars[slot] != nil
   }
 
   /// 已建好的 bar（测试用）。
@@ -250,6 +256,11 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 建一条 bar 并接上点击回调。
   private func makeBar(slot: ToolViewSlot, height: Int) -> ToolBarView {
     let bar = ToolBarView(slot: slot, height: height)
+    if slot == .windowTop {
+      // 红绿灯那一行归 window.top：没有项目也保持 28pt，空白处可以拖动窗口。
+      bar.collapsesWhenEmpty = false
+      bar.isWindowDragRegion = true
+    }
     bar.themeProvider = { [weak preferences] in preferences?.activeTheme }
     bar.onItem = { [weak self] id, item in self?.perform(item, entryID: id) }
     bar.onRetry = { [weak self] id in self?.scheduler.refresh(entryID: id) }

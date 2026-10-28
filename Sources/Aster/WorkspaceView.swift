@@ -281,6 +281,7 @@ final class WorkspaceViewController: NSViewController {
     super.viewDidLayout()
     updateSidebarHoverVisibility(animated: false)
     updateInspectorToggleVisibility(animated: false)
+    updateWindowTopBarInset()
   }
 
   /// 局部显示或移除 Open Quickly。关闭后终端焦点同步恢复，避免等待下一轮 run loop
@@ -1422,6 +1423,8 @@ final class WorkspaceViewController: NSViewController {
 
   private func makeWorkspaceLayout() -> NSView {
     let showsTabs = resolvedShowsTabBar
+    // 插件 window.top 条接管红绿灯那一行：侧栏不再预留红绿灯行，顶部标签栏不再建标题带。
+    let windowTopBar = extensionHost.bar(for: .windowTop)
     var panels: [WorkspacePanel] = []
     let content: NSView
 
@@ -1430,7 +1433,8 @@ final class WorkspaceViewController: NSViewController {
       // 悬停带时淡入，离开淡出——折叠后无需进设置页也能恢复侧栏。
       content = makeCollapsedContentArea()
     } else if preferences.tabBarLayout == .vertical {
-      panels.append(WorkspacePanel(role: .sidebar, contentView: makeVerticalTabBar()))
+      panels.append(
+        WorkspacePanel(role: .sidebar, contentView: makeVerticalTabBar(reservesTitleBarRow: windowTopBar == nil)))
       content = makeContentArea()
     } else {
       let stack = NSStackView()
@@ -1492,7 +1496,7 @@ final class WorkspaceViewController: NSViewController {
       layoutStore: panelLayoutStore,
       dividerColor: sidebarDividerColor
     )
-    return split
+    return wrapWithWindowBars(split, top: windowTopBar, bottom: extensionHost.bar(for: .windowBottom))
   }
 
   private func makeContentArea() -> NSView {
@@ -1524,7 +1528,8 @@ final class WorkspaceViewController: NSViewController {
   // MARK: - Tab bars
 
   /// 纵向侧栏：红绿灯行 + 工作区区块 + 标签区块（含分组头与标签行）。
-  private func makeVerticalTabBar() -> NSView {
+  /// `reservesTitleBarRow` 为 false 时红绿灯行归插件 window.top 条，顶部只留放悬停按钮的一小条。
+  private func makeVerticalTabBar(reservesTitleBarRow: Bool = true) -> NSView {
     let theme = preferences.activeTheme
     let background = ThemeVisualEffectView()
     background.identifier = NSUserInterfaceItemIdentifier("workspace-sidebar")
@@ -1555,9 +1560,14 @@ final class WorkspaceViewController: NSViewController {
 
     // 顶部 header 是红绿灯行（30pt，几何由窗口决定、不缩放）加一点留白；其下依次是
     // 「主机」入口行与「工作区」区块的标题行（eyebrow + 新建按钮）。
+    // 没有红绿灯行时 header 只装「+ / 折叠」两个悬停按钮（22pt）加上下 3pt：按钮叠到下面的「主机」行
+    // 会压住主机计数，所以不能完全取消这一条。
+    let titleBarRowHeight: CGFloat = reservesTitleBarRow ? 30 : 22 + 6
     let header = NSView()
     header.translatesAutoresizingMaskIntoConstraints = false
-    header.heightAnchor.constraint(equalToConstant: 30 + InterfaceScale.length(8)).isActive = true
+    header.heightAnchor.constraint(
+      equalToConstant: reservesTitleBarRow ? 30 + InterfaceScale.length(8) : titleBarRowHeight
+    ).isActive = true
     column.addArrangedSubview(header)
 
     // 红绿灯行感应区：header 顶部与交通灯同高的一条带子，只用来界定「折叠」按钮的
@@ -1570,7 +1580,7 @@ final class WorkspaceViewController: NSViewController {
       titleBarRow.leadingAnchor.constraint(equalTo: header.leadingAnchor),
       titleBarRow.trailingAnchor.constraint(equalTo: header.trailingAnchor),
       titleBarRow.topAnchor.constraint(equalTo: header.topAnchor),
-      titleBarRow.heightAnchor.constraint(equalToConstant: 30),
+      titleBarRow.heightAnchor.constraint(equalToConstant: titleBarRowHeight),
     ])
     titleBarHoverRegion = titleBarRow
 
@@ -1581,7 +1591,7 @@ final class WorkspaceViewController: NSViewController {
     hoverActions.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
       hoverActions.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
-      hoverActions.topAnchor.constraint(equalTo: header.topAnchor, constant: 4),
+      hoverActions.topAnchor.constraint(equalTo: header.topAnchor, constant: reservesTitleBarRow ? 4 : 3),
     ])
     sidebarHoverActions = hoverActions
 
@@ -1985,9 +1995,11 @@ final class WorkspaceViewController: NSViewController {
     // 顶部布局在标签行上方叠一条 28pt 标题带（与交通灯同一行，承载中央目录胶囊）；
     // 标签行整体落在系统标题栏命中区之下，标签左上角不会被窗口拖拽区吃掉点击。
     let titleBandHeight: CGFloat = 28
+    // 插件 window.top 条占了红绿灯行时不建标题带，路径胶囊回到内容区标题（见 titleLivesInTabBar）。
+    let showsTitleBand = !isBottom && titleLivesInTabBar
     background.translatesAutoresizingMaskIntoConstraints = false
     background.heightAnchor.constraint(
-      equalToConstant: isBottom ? rowHeight : rowHeight + titleBandHeight
+      equalToConstant: showsTitleBand ? rowHeight + titleBandHeight : rowHeight
     ).isActive = true
 
     let row = NSStackView()
@@ -2054,7 +2066,7 @@ final class WorkspaceViewController: NSViewController {
       newTab.heightAnchor.constraint(equalToConstant: InterfaceScale.length(26)),
     ])
     row.addArrangedSubview(newTab)
-    if isBottom {
+    if !showsTitleBand {
       background.addSubview(row)
       row.pinEdges(to: background)
     } else {
@@ -2480,11 +2492,22 @@ final class WorkspaceViewController: NSViewController {
     )
     view.addSubview(button)
     button.translatesAutoresizingMaskIntoConstraints = false
+    // 按钮与内容区标题同一行。插件 window.top 条占了窗口最上面一行时，标题行下移，按钮跟着标题走
+    // （顶部标签布局时标题在标签行下面）；没有标题（主机页）时退到条下方同样的位置。
+    let centerY: NSLayoutConstraint
+    if extensionHost.hasBar(for: .windowTop), let header = inspectorTitleBarHoverRegion,
+      header.window === view.window, header.isDescendant(of: view)
+    {
+      centerY = button.centerYAnchor.constraint(equalTo: header.centerYAnchor)
+    } else {
+      let top = extensionHost.hasBar(for: .windowTop) ? WindowTopBarMetrics.height : 0
+      centerY = button.centerYAnchor.constraint(
+        equalTo: view.topAnchor, constant: top + InspectorToggleMetrics.centerYFromTop)
+    }
     NSLayoutConstraint.activate([
       button.trailingAnchor.constraint(
         equalTo: view.trailingAnchor, constant: -InspectorToggleMetrics.trailingInset),
-      button.centerYAnchor.constraint(
-        equalTo: view.topAnchor, constant: InspectorToggleMetrics.centerYFromTop),
+      centerY,
       button.widthAnchor.constraint(equalToConstant: InspectorToggleMetrics.buttonSize),
       button.heightAnchor.constraint(equalToConstant: InspectorToggleMetrics.buttonSize),
     ])
@@ -2603,8 +2626,9 @@ final class WorkspaceViewController: NSViewController {
   }
 
   /// 顶部标签布局把中央标题并入标签条上方的整宽标题带，内容区不再渲染标题行。
+  /// 插件 window.top 条接管红绿灯行时没有标题带，标题回到内容区。
   private var titleLivesInTabBar: Bool {
-    preferences.tabBarLayout == .top && resolvedShowsTabBar
+    preferences.tabBarLayout == .top && resolvedShowsTabBar && !extensionHost.hasBar(for: .windowTop)
   }
 
   private func makePaneTree(
