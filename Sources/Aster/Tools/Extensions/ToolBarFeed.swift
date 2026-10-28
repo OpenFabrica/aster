@@ -10,6 +10,8 @@ struct ToolBarRunRequest: Sendable {
   let source: ToolViewScriptSource
   let trigger: ToolBarTrigger
   let context: ToolBarContext
+  /// 最多解析几项：横条 `ToolBarProtocol.itemLimit`，`sidebar.section` 的纵向列表 `listItemLimit`。
+  let itemLimit: Int
 }
 
 /// 运行一次 bar 脚本并解析输出。生产实现见 `ToolBarFeed.liveRunner(center:)`，测试注入假实现。
@@ -220,7 +222,8 @@ final class ToolBarFeed {
     runningSince = startedAt
     let request = ToolBarRunRequest(
       pluginID: entry.pluginID, viewID: entry.contribution.id,
-      source: entry.contribution.source ?? ToolViewScriptSource(command: []), trigger: trigger, context: context)
+      source: entry.contribution.source ?? ToolViewScriptSource(command: []), trigger: trigger, context: context,
+      itemLimit: entry.slot == .sidebarSection ? ToolBarProtocol.listItemLimit : ToolBarProtocol.itemLimit)
     let runner = runner
     task = Task { [weak self] in
       let result: Result<ToolBarOutput, any Error>
@@ -349,6 +352,6 @@ extension ToolBarFeed {
       source: request.source, viewID: request.viewID, trigger: request.trigger, context: request.context,
       plugin: plugin)
     let output = try await ScriptToolRunner.run(invocation)
-    return try ToolBarProtocol.parse(output.stdout, pluginDirectory: plugin.directory)
+    return try ToolBarProtocol.parse(output.stdout, pluginDirectory: plugin.directory, itemLimit: request.itemLimit)
   }
 }

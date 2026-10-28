@@ -142,7 +142,7 @@ func settingsToolsPageRendersViewControls() async throws {
   #expect(try await eval("[...document.querySelectorAll('.tool-view .tool-badge')].map(n => n.dataset.kind).join(',')") == "bar,panel,bar")
   // bar 可选所有已实现的 bar 位置；当前值是 tab.top；缺省位置（tab.bottom）带「（默认）」后缀。
   let branch = "document.querySelector('[data-view-id=\"branch\"] select')"
-  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "window.top,window.bottom,tab.top,tab.bottom,pane.bottom")
+  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "window.top,window.bottom,sidebar.section,tab.top,tab.bottom,pane.bottom")
   #expect(try await eval("\(branch).value") == "tab.top")
   #expect(try await eval("[...\(branch).options].find(o => o.value === 'tab.bottom').textContent").hasSuffix("（默认）"))
   // 声明了未实现位置的视图，下拉框补一项当前值，并带灰字提示。
@@ -160,4 +160,29 @@ func settingsToolsPageRendersViewControls() async throws {
   for _ in 0..<150 where tools.viewEnabledCalls.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
   #expect(tools.viewEnabledCalls.count == 1)
   #expect(tools.viewEnabledCalls.first?.view == "status" && tools.viewEnabledCalls.first?.enabled == true)
+}
+
+@Test("设置页「工具」：顶部标签栏布局下，侧栏视图显示「当前布局不显示侧栏」提示")
+@MainActor
+func settingsToolsPageShowsLayoutHintForSidebarViews() async throws {
+  let tools = FakeToolCenter()
+  tools.pluginSummaries = [
+    toolSummary(
+      "com.example.side", name: "侧栏插件",
+      views: [toolViewSummary("list", slot: .sidebarSection), toolViewSummary("branch")])
+  ]
+  let preferences = isolatedToolsPreferences()
+  preferences.tabBarLayout = .top
+  let bridge = SettingsToolsBridge(preferences: preferences, tools: tools)
+  let controller = SettingsViewController(preferences: preferences, updateController: nil, toolsBridge: bridge)
+  controller.loadViewIfNeeded()
+  let webView = try #require(controller.settingsWebViewForTesting)
+
+  #expect(try await poll("String(document.querySelectorAll('.nav-item').length)", until: "12", in: webView) == "12")
+  _ = try await evaluate("document.querySelector('[data-section=\"tools\"]')?.click(); 'ok'", in: webView)
+  #expect(try await poll("document.querySelector('.page-title')?.textContent ?? ''", until: "工具", in: webView) == "工具")
+  let hint = "document.querySelector('[data-view-id=\"list\"] .tool-view-hint')?.textContent ?? ''"
+  #expect(try await evaluate(hint, in: webView) == "当前标签栏布局不显示侧栏，改成竖排标签后生效")
+  #expect(try await evaluate("document.querySelector('[data-view-id=\"list\"]')?.dataset.inactive ?? ''", in: webView) == "layout")
+  #expect(try await evaluate("document.querySelector('[data-view-id=\"branch\"] .tool-view-hint')?.textContent ?? ''", in: webView) == "")
 }

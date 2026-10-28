@@ -87,6 +87,18 @@ final class SettingsToolsBridge {
     tools.changes
       .sink { [weak self] _ in self?.scheduleSnapshot() }
       .store(in: &cancellables)
+    // 标签栏布局或显隐变了：侧栏视图的「当前布局不显示」随之变化。`$configuration` 在赋值前发新值。
+    preferences.$configuration
+      .map { Self.showsSidebarSections(layout: $0.tabBarLayout, showsTabBar: $0.appearance.showTabBar) }
+      .removeDuplicates()
+      .dropFirst()
+      .sink { [weak self] _ in self?.scheduleSnapshot() }
+      .store(in: &cancellables)
+  }
+
+  /// 侧栏插件区块只在竖排且开着的标签栏里显示。「只有一个标签时自动隐藏」随标签数变化，不在这里判断。
+  static func showsSidebarSections(layout: TabBarLayout, showsTabBar: Bool) -> Bool {
+    layout == .vertical && showsTabBar
   }
 
   /// 打开工具面板（网页按钮与原生回退页共用）。
@@ -102,7 +114,10 @@ final class SettingsToolsBridge {
       "launcherShortcut": preferences.compatibilityString(forKey: Self.launcherShortcutKey, default: "none"),
       "quickTerminalShortcut": preferences.compatibilityString(forKey: Self.quickTerminalShortcutKey, default: "none"),
       "pluginsDirectory": tools.pluginsDirectory.path,
-      "plugins": Self.displayOrder(tools.pluginSummaries).map(Self.pluginRow),
+      "plugins": Self.displayOrder(tools.pluginSummaries).map {
+        Self.pluginRow($0, showsSidebar: Self.showsSidebarSections(
+          layout: preferences.tabBarLayout, showsTabBar: preferences.configuration.appearance.showTabBar))
+      },
       "viewSlots": Self.viewSlotRows(),
       "issues": tools.pluginIssues.map { ["path": $0.path, "message": $0.message] },
       "developmentFolders": tools.developmentFolders,
@@ -110,7 +125,8 @@ final class SettingsToolsBridge {
   }
 
   /// 一个插件的快照行。`statusReason` 只在需要确认时有值，其余为 null。
-  static func pluginRow(_ plugin: ToolPluginSummary) -> [String: Any] {
+  /// `showsSidebar` 为 false 时，正在生效的 `sidebar.section` 视图标成 `inactiveReason: "layout"`。
+  static func pluginRow(_ plugin: ToolPluginSummary, showsSidebar: Bool = true) -> [String: Any] {
     let granted = Set(plugin.grantedPermissions)
     let status: String
     var reason: Any = NSNull()
@@ -144,8 +160,16 @@ final class SettingsToolsBridge {
       "networkDomains": plugin.networkDomains,
       "featureCount": plugin.featureCount,
       "removable": plugin.isRemovable,
-      "views": plugin.views.map(viewRow),
+      "views": plugin.views.map { viewRow(Self.applyingLayout($0, showsSidebar: showsSidebar)) },
     ]
+  }
+
+  /// 侧栏不显示时把正在生效的侧栏视图改成 `.layout` 不生效；其它原因（停用、关掉）优先。
+  static func applyingLayout(_ view: ToolViewSummary, showsSidebar: Bool) -> ToolViewSummary {
+    guard !showsSidebar, view.slot == .sidebarSection, view.inactiveReason == nil else { return view }
+    return ToolViewSummary(
+      id: view.id, title: view.title, kind: view.kind, slot: view.slot, defaultSlot: view.defaultSlot,
+      isEnabled: view.isEnabled, inactiveReason: .layout)
   }
 
   /// 一个视图的快照行；`slots` 是它能改放的位置（接受该类型且本版本已实现），`inactiveReason` 为 null 表示正在生效。

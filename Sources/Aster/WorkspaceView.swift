@@ -988,6 +988,8 @@ final class WorkspaceViewController: NSViewController {
     renderedAppearance = preferences.appearance
     renderedTabBarLayout = preferences.tabBarLayout
     renderedShowsTabBar = resolvedShowsTabBar
+    // 侧栏插件区块只在竖排且可见的标签栏里挂载；先告诉扩展宿主，下面建侧栏时它才交出区块。
+    extensionHost.setSidebarAvailable(resolvedShowsTabBar && preferences.tabBarLayout == .vertical)
     renderedViewConfiguration = preferences.configuration.resolvedView
     renderedStrengthensText = preferences.strengthensInterfaceText
     renderedBadgeSettings = currentBadgeSettings()
@@ -1742,6 +1744,11 @@ final class WorkspaceViewController: NSViewController {
     rows.setContentCompressionResistancePriority(.required, for: .vertical)
     column.addArrangedSubview(rows)
     rows.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+    // 插件的 `sidebar.section` 区块：标签之后、留白之前；容器由扩展宿主长期持有，这里只借用。
+    if let sections = extensionHost.sidebarSections(eyebrowColor: eyebrowColor, eyebrowLeading: eyebrowLeading) {
+      column.addArrangedSubview(sections)
+      sections.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+    }
     let spacer = NSView()
     spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
     spacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)

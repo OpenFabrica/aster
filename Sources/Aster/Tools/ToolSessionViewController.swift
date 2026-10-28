@@ -376,9 +376,9 @@ final class ToolSessionViewController: NSViewController, ToolWebHost {
     if !isTornDown { requestHeightUpdate() }
   }
 
-  /// 告诉容器当前希望的高度。
+  /// 告诉容器当前希望的高度。panel 视图的高度由位置决定，只转交页面明确的 `ui.setHeight`（见 `webTool(_:didRequestHeight:)`）。
   private func requestHeightUpdate() {
-    guard !isTornDown else { return }
+    guard !isTornDown, request.view == nil else { return }
     host?.toolSession(self, didRequestHeight: preferredHeight)
   }
 
@@ -418,6 +418,11 @@ final class ToolSessionViewController: NSViewController, ToolWebHost {
 
   func webTool(_ controller: WebToolViewController, didRequestHeight height: CGFloat) {
     guard isCurrent(controller) else { return }
+    // panel 视图：桥接已按位置夹过范围，原样交给容器（侧栏改高度，Inspector 忽略）。
+    if request.view != nil {
+      host?.toolSession(self, didRequestHeight: height)
+      return
+    }
     webHeight = min(max(height, CGFloat(ToolUIConfig.heightRange.lowerBound)), CGFloat(ToolUIConfig.heightRange.upperBound))
     requestHeightUpdate()
   }

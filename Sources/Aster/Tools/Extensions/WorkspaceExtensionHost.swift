@@ -47,6 +47,18 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   private(set) var paneEntries: [ToolViewEntry] = []
   /// pane feed 键 → Pane。
   private var paneFeedPanes: [String: UUID] = [:]
+  /// 当前布局能显示侧栏插件区块（竖排标签栏且标签栏可见）。由工作区在每次整树重建前设置；
+  /// 不能显示时 `sidebar.section` 视图不挂载、不建 feed、不建 panel 会话。
+  private(set) var isSidebarAvailable = false
+  /// 挂到侧栏的视图（bar 与 panel），按目录顺序；侧栏不可用时为空。
+  private(set) var sidebarEntries: [ToolViewEntry] = []
+  /// 侧栏 bar 视图（`sidebarEntries` 里的 bar），与标签范围的 bar 一样按当前标签取上下文。
+  private var sidebarBarEntries: [ToolViewEntry] { sidebarEntries.filter { $0.contribution.kind == .bar } }
+  /// 侧栏区块容器；跨整树重建复用。
+  let sidebarView = ToolSidebarSectionsView()
+  /// 侧栏面板经 `ui.setHeight` 改过的高度；区块重建（声明没变）时沿用。
+  private var sidebarPanelHeights: [String: CGFloat] = [:]
+  private var sidebarRemountScheduled = false
   private lazy var paneBars: ToolPaneBars = {
     let bars = ToolPaneBars { [weak self] paneID in
       self?.makeBar(slot: .paneBottom, height: self?.paneBarHeight ?? 24) ?? ToolBarView(slot: .paneBottom, height: 24)
@@ -83,6 +95,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     context = ToolBarContext()
     scheduler = ToolBarScheduler(runner: runner ?? ToolBarFeed.liveRunner(), clock: clock)
     panelCache = ToolPanelSessionCache(model: model)
+    panelCache.onHeightRequest = { [weak self] id, height in self?.setSidebarPanelHeight(height, entryID: id) }
     scheduler.onFeedChange = { [weak self] id in self?.feedDidChange(id) }
     branchWatcher.onBranchChange = { [weak self] in self?.updateContext() }
     catalog.changes
@@ -156,6 +169,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     updateContext()
     refreshPanes()
     bars.values.forEach { $0.refreshAppearance() }
+    sidebarView.refreshAppearance()
     paneBars.refreshAppearance()
     updateVisibility()
   }
@@ -181,7 +195,9 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
 
   /// 把标签范围与 pane 范围的 feed 一起交给调度器（没列出的 feed 被取消）。
   private func syncFeeds() {
-    var specs = barEntries.map { ToolBarFeedSpec(key: $0.id, entry: $0, paneID: nil, context: nil) }
+    var specs = (barEntries + sidebarBarEntries).map {
+      ToolBarFeedSpec(key: $0.id, entry: $0, paneID: nil, context: nil)
+    }
     var index: [String: UUID] = [:]
     for paneID in paneBars.paneIDs {
       for entry in paneEntries {
@@ -216,15 +232,90 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     tabSubscriptions.removeAll()
     bars.values.forEach { $0.apply(segments: []) }
     paneBars.removeAll()
+    sidebarView.removeAllBlocks()
+    sidebarEntries = []
     mountedSlots = []
+  }
+
+  // MARK: - 侧栏
+
+  /// 工作区每次整树重建前告诉宿主当前布局能不能显示侧栏区块。变了就重新挑视图（建或撤 feed 与 panel 会话）；
+  /// 这次重建本身就会按新状态取 `sidebarSections`，所以不再请求整树重建。
+  func setSidebarAvailable(_ available: Bool) {
+    guard !isTornDown, available != isSidebarAvailable else { return }
+    isSidebarAvailable = available
+    reloadEntries(requestsRefresh: false)
+  }
+
+  /// 侧栏插件区块：没有可挂载的侧栏视图（或布局不显示侧栏）时为 nil。同一实例跨整树重建复用，交出前先从旧父视图摘下，
+  /// 并换上这次侧栏的 eyebrow 样式。
+  func sidebarSections(eyebrowColor: NSColor, eyebrowLeading: CGFloat) -> NSView? {
+    guard !isTornDown, isSidebarAvailable, !sidebarEntries.isEmpty else { return nil }
+    sidebarView.applyStyle(eyebrowColor: eyebrowColor, eyebrowLeading: eyebrowLeading)
+    sidebarView.removeFromSuperview()
+    return sidebarView
+  }
+
+  /// 按 `sidebarEntries` 对齐区块并重画 bar；panel 区块新建时就借会话挂上。
+  private func reloadSidebar() {
+    sidebarView.setEntries(sidebarEntries) { entry in
+      let height = sidebarPanelHeights[entry.id] ?? ToolSidebarSectionBlock.declaredPanelHeight(entry.contribution)
+      let block = ToolSidebarSectionBlock(entry: entry, panelHeight: height)
+      if let list = block.listView {
+        list.themeProvider = { [weak preferences] in preferences?.activeTheme }
+        list.onItem = { [weak self] id, item in self?.perform(item, entryID: id) }
+        list.onRetry = { [weak self] id in self?.scheduler.refresh(entryID: id) }
+        list.onApprove = { [weak self] id in self?.approve(entryID: id) }
+      } else {
+        block.mount(panelCache.session(for: entry, context: context))
+      }
+      return block
+    }
+    // 声明变了的 panel：缓存在下一轮主队列才拆旧会话，这里再晚一轮重新借，挂上新会话。
+    scheduleSidebarRemount()
+    sidebarBarEntries.forEach(renderSidebar)
+  }
+
+  /// 重画一个侧栏 bar 区块。
+  private func renderSidebar(_ entry: ToolViewEntry) {
+    sidebarView.block(for: entry.id)?.render(segment(for: entry, key: entry.id))
+  }
+
+  /// 下一轮主队列重新借 panel 会话（排在 `ToolPanelSessionCache.reconcile` 的延后拆除之后）。
+  private func scheduleSidebarRemount() {
+    guard !sidebarRemountScheduled, sidebarEntries.contains(where: { $0.contribution.kind == .panel }) else { return }
+    sidebarRemountScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.sidebarRemountScheduled = false
+      guard !self.isTornDown else { return }
+      for block in self.sidebarView.blocks where block.panelContainer != nil {
+        block.mount(self.panelCache.session(for: block.entry, context: self.context))
+      }
+    }
+  }
+
+  /// 侧栏面板请求了新高度：记下并只改该区块的高度约束。
+  private func setSidebarPanelHeight(_ height: CGFloat, entryID: String) {
+    guard sidebarEntries.contains(where: { $0.id == entryID }) else { return }
+    sidebarPanelHeights[entryID] = height
+    sidebarView.block(for: entryID)?.setPanelHeight(height)
   }
 
   // MARK: - 目录
 
-  /// 工具中心变化：挑出本窗口要调度的 bar 与 Inspector 面板；bar 位置的有无变了才请求整树重建。
-  private func reloadEntries() {
+  /// 工具中心变化：挑出本窗口要调度的 bar、侧栏区块与 Inspector 面板；bar 位置（含侧栏）的有无变了才请求整树重建。
+  /// `requestsRefresh` 为 false 时（由整树重建本身触发）只更新状态，不再请求重建。
+  private func reloadEntries(requestsRefresh: Bool = true) {
     guard !isTornDown else { return }
     let all = catalog.viewEntries
+    let sidebar = isSidebarAvailable ? all.filter { $0.isMountable && $0.slot == .sidebarSection } : []
+    // 侧栏视图的声明变了：之前 `ui.setHeight` 改过的高度作废，回到清单高度。
+    for id in sidebarPanelHeights.keys
+    where sidebar.first(where: { $0.id == id })?.contribution != sidebarEntries.first(where: { $0.id == id })?.contribution {
+      sidebarPanelHeights[id] = nil
+    }
+    sidebarEntries = sidebar
     barEntries = all.filter {
       $0.isMountable && $0.contribution.kind == .bar && Self.mountedBarSlots.contains($0.slot)
     }
@@ -234,18 +325,22 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     syncFeeds()
     var slots = Set(barEntries.map(\.slot))
     if !paneEntries.isEmpty { slots.insert(.paneBottom) }
-    for slot in slots where slot != .paneBottom {
+    if !sidebarEntries.isEmpty { slots.insert(.sidebarSection) }
+    for slot in slots where slot != .paneBottom && slot != .sidebarSection {
       let height = barEntries.first { $0.slot == slot }?.contribution.barHeight(in: slot) ?? 26
       if let bar = bars[slot] { bar.setHeight(height) } else { bars[slot] = makeBar(slot: slot, height: height) }
     }
     Self.mountedBarSlots.forEach(render)
     paneBars.paneIDs.forEach(renderPane)
+    // 先让缓存核对（侧栏不可用时侧栏面板不在 `sidebarEntries` 里，其会话随之拆掉），再对齐区块。
+    let liveEntries = all.filter { $0.slot != .sidebarSection || sidebar.contains($0) }
+    panelCache.reconcile(entries: liveEntries)
+    reloadSidebar()
     if slots != mountedSlots {
       mountedSlots = slots
-      onMountedSlotsChanged?()
+      if requestsRefresh { onMountedSlotsChanged?() }
     }
     let panels = all.filter { $0.isMountable && $0.contribution.kind == .panel && $0.slot == .inspectorPanel }
-    panelCache.reconcile(entries: all)
     if panels != inspectorPanelEntries {
       inspectorPanelEntries = panels
       panelEntriesSubject.send()
@@ -274,6 +369,8 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
       renderPane(paneID)
     } else if let slot = barEntries.first(where: { $0.id == id })?.slot {
       render(slot)
+    } else if let entry = sidebarBarEntries.first(where: { $0.id == id }) {
+      renderSidebar(entry)
     }
   }
 
@@ -308,7 +405,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
       return paneEntries.first { ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID) == key }
         .map { ($0, paneID) }
     }
-    return barEntries.first { $0.id == key }.map { ($0, nil) }
+    return (barEntries + sidebarBarEntries).first { $0.id == key }.map { ($0, nil) }
   }
 
   /// 按 feed 状态生成段并交给条。没有可挂载视图的位置清空（条随之隐藏）。
@@ -448,6 +545,8 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     }
     let onScreen = window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     scheduler.isVisible =
-      onScreen && (bars.values.contains { $0.window === window } || !paneBars.mountedPaneIDs(in: window).isEmpty)
+      onScreen
+      && (bars.values.contains { $0.window === window } || !paneBars.mountedPaneIDs(in: window).isEmpty
+        || sidebarView.window === window)
   }
 }

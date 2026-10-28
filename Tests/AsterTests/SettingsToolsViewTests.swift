@@ -40,8 +40,8 @@ func snapshotIncludesViewRowsAndSlots() throws {
   #expect(branch["enabled"] as? Bool == true)
   #expect(branch["inactiveReason"] is NSNull)
   // 可选位置只含本版本已实现且接受该类型的挂载点。
-  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "tab.top", "tab.bottom", "pane.bottom"])
-  #expect(views[1]["slots"] as? [String] == ["inspector.panel"])
+  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom"])
+  #expect(views[1]["slots"] as? [String] == ["sidebar.section", "inspector.panel"])
   #expect(views[2]["inactiveReason"] as? String == "unsupported")
 
   let slots = try #require(snapshot["viewSlots"] as? [[String: Any]])
@@ -115,4 +115,48 @@ func setViewEnabledUsesStrictBool() async {
   #expect(await performToolsAction(bridge, "tools.setViewEnabled", ["id": "com.example.none", "view": "branch", "enabled": true]) == false)
   #expect(tools.viewEnabledCalls.count == 1)
   #expect(recorder.toasts.count == 6 && recorder.toasts.allSatisfy { $0.isError })
+}
+
+@Test("工具快照：标签栏不是竖排或被关掉时，正在生效的侧栏视图标成 layout；改回竖排推一份新快照")
+@MainActor
+func snapshotMarksSidebarViewsInactiveInHorizontalLayout() async throws {
+  let tools = FakeToolCenter()
+  tools.pluginSummaries = [
+    toolSummary(
+      "com.example.side", name: "侧栏插件",
+      views: [
+        toolViewSummary("list", slot: .sidebarSection),
+        toolViewSummary(
+          "notes", title: "便笺", kind: .panel, slot: .sidebarSection, defaultSlot: .sidebarSection),
+        toolViewSummary("off", slot: .sidebarSection, enabled: false, inactiveReason: .disabled),
+        toolViewSummary("branch"),
+      ])
+  ]
+  let preferences = isolatedToolsPreferences()
+  let (bridge, recorder) = makeToolsBridge(tools, preferences: preferences)
+  bridge.start()
+  func reasons() throws -> [String] {
+    let plugin = try #require((bridge.snapshot()["plugins"] as? [[String: Any]])?.first)
+    let views = try #require(plugin["views"] as? [[String: Any]])
+    return views.map { $0["inactiveReason"] as? String ?? "-" }
+  }
+  // 竖排（缺省）：侧栏视图正在生效。
+  #expect(try reasons() == ["-", "-", "disabled", "-"])
+
+  preferences.tabBarLayout = .top
+  #expect(try reasons() == ["layout", "layout", "disabled", "-"])
+  await drainToolsMainQueue()
+  #expect(recorder.pushes == 1, "布局变化推一份新快照")
+
+  preferences.tabBarLayout = .vertical
+  var configuration = preferences.configuration
+  configuration.appearance.showTabBar = false
+  preferences.configuration = configuration
+  #expect(try reasons() == ["layout", "layout", "disabled", "-"])
+
+  configuration.appearance.showTabBar = true
+  preferences.configuration = configuration
+  #expect(try reasons() == ["-", "-", "disabled", "-"])
+  await drainToolsMainQueue()
+  #expect(recorder.pushes >= 2)
 }

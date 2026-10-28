@@ -25,6 +25,8 @@ final class ToolPanelSessionCache {
   private var latestEntries: [ToolViewEntry] = []
   private var reconcileScheduled = false
   private var isTornDown = false
+  /// 侧栏面板经 `ui.setHeight` 请求了新高度（视图 id、夹取后的高度）。
+  var onHeightRequest: ((_ entryID: String, _ height: CGFloat) -> Void)?
 
   init(model: AppModel, center: ToolCenter = .shared) {
     self.model = model
@@ -52,7 +54,9 @@ final class ToolPanelSessionCache {
     let request = center.viewLaunchRequest(
       for: entry, input: Self.input(for: context), origin: model.toolTerminalOrigin(),
       extendedContext: Self.extendedContext(for: context))
-    let host = ToolPanelSessionHost(model: model)
+    let host = ToolPanelSessionHost(model: model, slot: entry.slot)
+    let entryID = entry.id
+    host.onHeightRequest = { [weak self] height in self?.onHeightRequest?(entryID, height) }
     let session = center.makeSession(for: request, host: host)
     host.session = session
     records[entry.id] = Record(session: session, host: host, contribution: entry.contribution, slot: entry.slot)

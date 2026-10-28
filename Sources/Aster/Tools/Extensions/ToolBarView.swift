@@ -149,8 +149,8 @@ final class ToolBarView: NSView {
   /// 没有内容（测试与布局用）：与是否收起无关。
   var isEmpty: Bool { groups.allSatisfy { $0.buttons.isEmpty } }
 
-  /// 一段要显示的按钮内容与复用键。
-  private static func contents(of segment: ToolBarSegment) -> [(String, ToolBarItemButton.Content)] {
+  /// 一段要显示的按钮内容与复用键。侧栏的纵向列表 `ToolBarListView` 共用同一套规则。
+  static func contents(of segment: ToolBarSegment) -> [(String, ToolBarItemButton.Content)] {
     switch segment.content {
     case .items(let items):
       return items.enumerated().map { index, item in

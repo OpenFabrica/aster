@@ -114,6 +114,7 @@
   function viewHint(reason, t) {
     const map = {
       unsupported: t("本版本暂不支持这个位置"), pluginDisabled: t("插件已停用"), disabled: "",
+      layout: t("当前标签栏布局不显示侧栏，改成竖排标签后生效"),
     };
     return map[reason] ?? "";
   }

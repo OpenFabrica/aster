@@ -173,6 +173,9 @@ struct ToolViewSummary: Equatable {
     case pluginDisabled
     /// 本版本还不能挂到这个位置（`ToolViewSlot.isImplemented == false`）。
     case unsupported
+    /// 当前标签栏布局不显示这个位置（`sidebar.section` 只在竖排且可见的标签栏里）。工具中心不知道布局，
+    /// 由设置页桥接按偏好补上。
+    case layout
   }
 
   let id: String

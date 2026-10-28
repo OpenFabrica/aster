@@ -230,10 +230,12 @@ final class ToolBridge {
     }
   }
 
-  /// `ui.setHeight`：取整后夹到清单允许的高度范围。
+  /// `ui.setHeight`：取整后夹到允许的高度范围——普通网页工具按 `ui.height` 的范围，侧栏面板按 80–400。
   private func setHeight(_ params: [String: JSONValue]) throws -> JSONValue {
     let requested = try ToolBridgeParams.number(params, "height").rounded()
-    let range = ToolUIConfig.heightRange
+    let range =
+      delegate?.bridgeLaunchRequest.view?.slot == .sidebarSection
+      ? ToolViewContribution.sidebarPanelHeightRange : ToolUIConfig.heightRange
     let height = min(max(requested, Double(range.lowerBound)), Double(range.upperBound))
     delegate?.bridge(self, didRequestHeight: CGFloat(height))
     return .null

@@ -1,5 +1,6 @@
-// 插件 panel 视图作为工具会话的容器（第四种 ToolSessionHost）：常驻在窗口上（P1 是 Inspector 页签），
-// 不能被工具自己关掉；高度由宿主决定；提示走工作区 toast；预填与运行命令都按窗口当前的活动终端。
+// 插件 panel 视图作为工具会话的容器（第四种 ToolSessionHost）：常驻在窗口上（Inspector 页签或侧栏区块），
+// 不能被工具自己关掉；Inspector 的高度由宿主决定，侧栏接受 `ui.setHeight`（夹到 80–400）；提示走工作区 toast；
+// 预填与运行命令都按窗口当前的活动终端。
 import AppKit
 import AsterCore
 
@@ -9,10 +10,15 @@ final class ToolPanelSessionHost: ToolSessionHost {
   private weak var model: AppModel?
   /// 承载的会话；只用来找它所在的窗口。
   weak var session: ToolSessionViewController?
+  /// 视图所在的位置；决定接不接受 `ui.setHeight`。
+  let slot: ToolViewSlot
+  /// 侧栏面板请求了新高度（已夹到 `ToolViewContribution.sidebarPanelHeightRange`）；由会话缓存接到窗口宿主。
+  var onHeightRequest: ((CGFloat) -> Void)?
 
-  /// 绑定所属窗口的模型。
-  init(model: AppModel?) {
+  /// 绑定所属窗口的模型与视图位置。
+  init(model: AppModel?, slot: ToolViewSlot = .inspectorPanel) {
     self.model = model
+    self.slot = slot
   }
 
   /// panel 由用户在设置里关掉，不响应 `ui.close`；提示原因，避免页面以为已经关了。
@@ -20,8 +26,17 @@ final class ToolPanelSessionHost: ToolSessionHost {
     model?.notice = L("界面扩展视图不能自己关闭，可以在设置的「工具」里关掉它")
   }
 
-  /// 高度由挂载位置决定（Inspector 填满内容区），忽略 `ui.setHeight`。
-  func toolSession(_ session: ToolSessionViewController, didRequestHeight height: CGFloat) {}
+  /// Inspector 填满内容区，忽略 `ui.setHeight`；侧栏区块夹到 80–400 后交给窗口改高度约束。
+  func toolSession(_ session: ToolSessionViewController, didRequestHeight height: CGFloat) {
+    guard slot == .sidebarSection else { return }
+    onHeightRequest?(Self.clampedSidebarHeight(height))
+  }
+
+  /// 侧栏面板高度夹到清单允许的范围。
+  static func clampedSidebarHeight(_ height: CGFloat) -> CGFloat {
+    let range = ToolViewContribution.sidebarPanelHeightRange
+    return min(max(height.rounded(), CGFloat(range.lowerBound)), CGFloat(range.upperBound))
+  }
 
   /// 工作区只有一种提示（toast），错误与普通提示共用。
   func toolSession(_ session: ToolSessionViewController, showNotice text: String, isError: Bool) {
