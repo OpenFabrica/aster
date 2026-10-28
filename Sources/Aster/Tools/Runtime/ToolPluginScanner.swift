@@ -15,6 +15,8 @@ struct ToolPluginRecord: Equatable, Sendable {
   let iconPath: String?
   /// 功能 code → 功能图标的绝对路径。
   let featureIconPaths: [String: String]
+  /// 视图 id → 视图图标的绝对路径。
+  var viewIconPaths: [String: String] = [:]
   /// 开发来源：`developmentFolders` 里登记的原字符串。设置页按它和登记列表逐字比对，
   /// 取消登记、监听变化也认它，不用重新解析过符号链接的 `directory`。
   var registeredPath: String?
@@ -148,11 +150,18 @@ enum ToolPluginScanner {
         featureIcons[feature.code] = path
       }
     }
-    return .success(
-      ToolPluginRecord(
-        manifest: manifest, source: source, directory: directory, digest: digest,
-        iconPath: manifest.icon.flatMap { resolveIcon($0, in: directory, fileManager: fileManager) },
-        featureIconPaths: featureIcons))
+    var viewIcons: [String: String] = [:]
+    for view in manifest.views {
+      if let icon = view.icon, let path = resolveIcon(icon, in: directory, fileManager: fileManager) {
+        viewIcons[view.id] = path
+      }
+    }
+    var record = ToolPluginRecord(
+      manifest: manifest, source: source, directory: directory, digest: digest,
+      iconPath: manifest.icon.flatMap { resolveIcon($0, in: directory, fileManager: fileManager) },
+      featureIconPaths: featureIcons)
+    record.viewIconPaths = viewIcons
+    return .success(record)
   }
 
   /// 开发目录的变化指纹：普通文件与子目录的相对路径、大小、修改时间。只用来发现变化，不做安全校验；

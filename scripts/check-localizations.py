@@ -126,6 +126,8 @@ def builtin_tool_keys():
         for feature in manifest.get("features", []):
             texts += [feature.get("title"), feature.get("subtitle")]
             texts += [rule.get("label") for rule in feature.get("match", [])]
+        for view in manifest.get("contributes", {}).get("views", []):
+            texts.append(view.get("title"))
         for text in texts:
             if text:
                 keys.setdefault(text, rel)

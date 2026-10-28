@@ -57,9 +57,13 @@ extension ToolManifest {
 enum ToolManifestKeyChecker {
   static let rootKeys: Set<String> = [
     "schemaVersion", "id", "name", "version", "description", "author", "homepage", "icon", "ui", "permissions",
-    "network", "features",
+    "network", "features", "contributes",
   ]
   static let uiKeys: Set<String> = ["main", "height"]
+  static let contributesKeys: Set<String> = ["views"]
+  static let viewKeys: Set<String> = ["id", "title", "kind", "slot", "icon", "height", "source", "refresh", "main"]
+  static let viewSourceKeys: Set<String> = ["type", "command", "timeout"]
+  static let refreshKeys: Set<String> = ["interval", "on"]
   static let featureKeys: Set<String> = ["code", "title", "subtitle", "icon", "keywords", "match", "action"]
   /// match 规则的字段随 `type` 不同；`type` 缺失或不认识时交给类型解码报错。
   static let matchKeys: [String: Set<String>] = [
@@ -81,6 +85,7 @@ enum ToolManifestKeyChecker {
       try reject(ui, allowed: uiKeys, path: "ui")
       try requireInteger(ui["height"], path: "ui.height")
     }
+    try checkContributes(root["contributes"])
     guard let features = root["features"] as? [Any] else { return }
     for (index, element) in features.enumerated() {
       guard let feature = element as? [String: Any] else { continue }
@@ -102,6 +107,27 @@ enum ToolManifestKeyChecker {
         let allowed = actionKeys[type]
       {
         try reject(action, allowed: allowed, path: "\(path).action")
+      }
+    }
+  }
+
+  /// 检查 `contributes` 节：每一层拒绝未知字段，`height`、`timeout`、`interval` 必须是整数。
+  private static func checkContributes(_ value: Any?) throws {
+    guard let contributes = value as? [String: Any] else { return }
+    try reject(contributes, allowed: contributesKeys, path: "contributes")
+    guard let views = contributes["views"] as? [Any] else { return }
+    for (index, element) in views.enumerated() {
+      guard let view = element as? [String: Any] else { continue }
+      let path = "contributes.views[\(index)]"
+      try reject(view, allowed: viewKeys, path: path)
+      try requireInteger(view["height"], path: "\(path).height")
+      if let source = view["source"] as? [String: Any] {
+        try reject(source, allowed: viewSourceKeys, path: "\(path).source")
+        try requireInteger(source["timeout"], path: "\(path).source.timeout")
+      }
+      if let refresh = view["refresh"] as? [String: Any] {
+        try reject(refresh, allowed: refreshKeys, path: "\(path).refresh")
+        try requireInteger(refresh["interval"], path: "\(path).refresh.interval")
       }
     }
   }

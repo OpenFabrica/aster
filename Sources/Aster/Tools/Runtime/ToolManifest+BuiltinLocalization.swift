@@ -4,7 +4,7 @@ import AsterCore
 import Foundation
 
 extension ToolManifest {
-  /// 翻译显示文字后的副本：插件 `name`、`description`，每个功能的 `title`、`subtitle`，每条匹配规则的 `label`。
+  /// 翻译显示文字后的副本：插件 `name`、`description`，每个功能的 `title`、`subtitle`，每条匹配规则的 `label`，每个视图的 `title`。
   /// `keywords`、id、动作、权限等不变：关键词要保留原文供搜索，其余字段决定运行行为。
   func localizedForBuiltin(_ translate: (String) -> String) -> ToolManifest {
     var copy = self
@@ -16,6 +16,14 @@ extension ToolManifest {
       localized.subtitle = feature.subtitle.map(translate)
       localized.match = feature.match.map { $0.relabeled(translate) }
       return localized
+    }
+    if var contributes = copy.contributes {
+      contributes.views = contributes.views.map { view in
+        var localized = view
+        localized.title = translate(view.title)
+        return localized
+      }
+      copy.contributes = contributes
     }
     return copy
   }

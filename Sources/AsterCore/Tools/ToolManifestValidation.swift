@@ -57,6 +57,7 @@ struct ToolManifestValidator {
     try validatePermissions()
     try validateNetwork()
     try validateFeatures()
+    try validateContributes()
   }
 
   // MARK: 顶层字段
@@ -131,9 +132,11 @@ struct ToolManifestValidator {
 
   // MARK: 功能
 
-  /// 功能数量、代码唯一，以及每个功能自身的字段。
+  /// 功能数量、代码唯一，以及每个功能自身的字段。`features` 可以缺省，但功能与视图至少要有一个。
   private func validateFeatures() throws {
-    guard !manifest.features.isEmpty else { throw failure("features", L("至少需要一个功能")) }
+    guard !manifest.features.isEmpty || !manifest.views.isEmpty else {
+      throw failure("features", L("至少需要一个功能或一个视图"))
+    }
     guard manifest.features.count <= Limits.features else {
       throw failure("features", countReason(Limits.features))
     }
@@ -228,7 +231,7 @@ struct ToolManifestValidator {
 
   /// 命令 1–32 项、每项 ≤ 4096 字节且不含控制字符；相对的 `command[0]` 还要符合插件内路径规则。
   /// 控制字符一律拒绝：`terminal` 输出模式会把命令输入终端，ESC、Ctrl-C 之类会被终端解释。
-  private func validateCommand(_ command: [String], path: String) throws {
+  func validateCommand(_ command: [String], path: String) throws {
     guard let executable = command.first else { throw failure(path, L("不能为空")) }
     guard command.count <= Limits.commandItems else { throw failure(path, countReason(Limits.commandItems)) }
     for (index, item) in command.enumerated() {
@@ -246,7 +249,7 @@ struct ToolManifestValidator {
   // MARK: 通用字段规则
 
   /// 必填文本：去掉首尾空白后不能为空，再按可选文本检查。
-  private func requiredText(_ value: String, field: String, maximum: Int) throws {
+  func requiredText(_ value: String, field: String, maximum: Int) throws {
     guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw failure(field, L("不能为空")) }
     try optionalText(value, field: field, maximum: maximum)
   }
@@ -259,7 +262,7 @@ struct ToolManifestValidator {
   }
 
   /// 插件内的相对路径：非空、不以 / 开头、没有 .. 段、不含控制字符、≤ 256 个字符。
-  private func relativePath(_ path: String, field: String) throws {
+  func relativePath(_ path: String, field: String) throws {
     guard !path.isEmpty else { throw failure(field, L("不能为空")) }
     guard !path.hasPrefix("/") else { throw failure(field, L("必须是插件目录内的相对路径")) }
     guard !path.split(separator: "/").contains("..") else { throw failure(field, L("路径不能包含 .. 段")) }
@@ -270,7 +273,7 @@ struct ToolManifestValidator {
   }
 
   /// 图标路径：相对路径规则 + 扩展名白名单（大小写无关）。
-  private func iconPath(_ path: String, field: String) throws {
+  func iconPath(_ path: String, field: String) throws {
     try relativePath(path, field: field)
     guard Limits.iconExtensions.contains((path as NSString).pathExtension.lowercased()) else {
       throw failure(field, L("图标只支持 svg、png、jpg、jpeg、pdf"))
@@ -306,17 +309,17 @@ struct ToolManifestValidator {
   }
 
   /// 统一构造错误。
-  private func failure(_ field: String, _ reason: String) -> ToolManifestError {
+  func failure(_ field: String, _ reason: String) -> ToolManifestError {
     ToolManifestError(field: field, reason: reason)
   }
 
   /// 「最多 N 项」。
-  private func countReason(_ limit: Int) -> String {
+  func countReason(_ limit: Int) -> String {
     L("最多 \(String(limit)) 项")
   }
 
   /// 「必须在 A 到 B 之间」。
-  private func rangeReason(_ range: ClosedRange<Int>) -> String {
+  func rangeReason(_ range: ClosedRange<Int>) -> String {
     L("必须在 \(String(range.lowerBound)) 到 \(String(range.upperBound)) 之间")
   }
 

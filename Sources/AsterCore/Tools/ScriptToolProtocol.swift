@@ -156,12 +156,32 @@ public enum ScriptToolProtocol {
 
   // MARK: 可执行文件
 
-  /// 解析 `command`：相对路径相对插件目录，解析符号链接后必须仍在插件目录内；绝对路径原样使用。
-  /// 两种情况都要求目标是可执行的普通文件。
+  /// 固定 PATH 拆成的目录列表，裸名命令按这个顺序查找。
+  public static var defaultSearchDirectories: [String] {
+    defaultPath.split(separator: ":").map(String.init)
+  }
+
+  /// 裸名：不含 `/`，只用 `[A-Za-z0-9._+-]`，1–64 个字符，且不是纯点号（`.`、`..`）。
+  /// 用来区分「去 PATH 里找解释器」（`python3`）和「插件目录里的脚本」（`bin/run.sh`）。
+  public static func isBareCommandName(_ name: String) -> Bool {
+    guard (1...64).contains(name.utf8.count), name.contains(where: { $0 != "." }) else { return false }
+    return name.unicodeScalars.allSatisfy {
+      ToolTextRules.isAlphanumeric($0) || $0 == "." || $0 == "_" || $0 == "+" || $0 == "-"
+    }
+  }
+
+  /// 解析 `command[0]`，三种写法：
+  /// - 含 `/` 的相对路径：相对插件目录，解析符号链接后必须仍在插件目录内；
+  /// - 绝对路径：原样使用；
+  /// - 裸名（`python3`、`node`）：先看插件目录里有没有同名文件，有就按插件目录解析（保持 `run.sh` 这类
+  ///   旧写法不变，且不受 PATH 影响）；没有再在 `searchPath` 里逐目录找可执行的普通文件，找不到抛
+  ///   `executableNotFound`。不扩 PATH、不读用户 shell 配置，nvm / pyenv 等装的解释器因此找不到。
+  /// 目标都必须是可执行的普通文件。`searchPath` 缺省为固定 PATH，测试可以注入。
   public static func resolveExecutable(
     _ command: [String],
     pluginDirectory: URL,
-    fileManager: FileManager = .default
+    fileManager: FileManager = .default,
+    searchPath: [String] = defaultSearchDirectories
   ) throws -> (executable: URL, arguments: [String]) {
     guard let first = command.first, !first.isEmpty else {
       throw ScriptToolError.invalidCommand(L("命令为空"))
@@ -177,7 +197,14 @@ public enum ScriptToolProtocol {
       guard let root = ToolPluginDigest.canonicalPath(pluginDirectory.path) else {
         throw ScriptToolError.invalidCommand(L("插件目录不存在"))
       }
-      guard let resolved = ToolPluginDigest.canonicalPath((root as NSString).appendingPathComponent(first)) else {
+      let candidate = (root as NSString).appendingPathComponent(first)
+      // 裸名且插件目录里没有同名条目（含悬空链接）时才去 PATH 找；有同名条目一律走插件目录规则，
+      // 这样 `run.sh` 即使 PATH 里也有同名文件，运行的仍是插件自己的。
+      if isBareCommandName(first), !fileManager.fileExists(atPath: candidate) {
+        let found = try searchExecutable(first, in: searchPath, fileManager: fileManager)
+        return (found, Array(command.dropFirst()))
+      }
+      guard let resolved = ToolPluginDigest.canonicalPath(candidate) else {
         throw ScriptToolError.invalidCommand(L("命令不存在或不可执行"))
       }
       let prefix = root.hasSuffix("/") ? root : root + "/"
@@ -191,6 +218,24 @@ public enum ScriptToolProtocol {
       fileManager.isExecutableFile(atPath: executable.path)
     else { throw ScriptToolError.invalidCommand(L("命令不存在或不可执行")) }
     return (executable, Array(command.dropFirst()))
+  }
+
+  /// 在目录列表里按顺序找第一个可执行的普通文件；不解析符号链接（Homebrew 的 bin 都是链接，保留原路径）。
+  private static func searchExecutable(
+    _ name: String,
+    in directories: [String],
+    fileManager: FileManager
+  ) throws -> URL {
+    for directory in directories where !directory.isEmpty {
+      let path = (directory as NSString).appendingPathComponent(name)
+      var isDirectory: ObjCBool = false
+      if fileManager.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue,
+        fileManager.isExecutableFile(atPath: path)
+      {
+        return URL(fileURLWithPath: path)
+      }
+    }
+    throw ScriptToolError.executableNotFound(name)
   }
 }
 
@@ -271,6 +316,8 @@ public enum ScriptToolError: Error, Equatable, Sendable {
   case cancelled
   case exitStatus(Int32, stderr: String)
   case launchFailed(String)
+  /// 裸名命令在固定 PATH 里找不到（参数是命令名）。
+  case executableNotFound(String)
 
   /// 给用户看的说明。插值都转成 String，保证本地化表的 key 是 `%@`。
   public var localizedMessage: String {
@@ -283,6 +330,7 @@ public enum ScriptToolError: Error, Equatable, Sendable {
     case .exitStatus(let status, let stderr):
       stderr.isEmpty ? L("退出码 \(String(status))") : L("退出码 \(String(status))：\(stderr)")
     case .launchFailed(let reason): L("无法启动：\(reason)")
+    case .executableNotFound(let name): L("PATH 里没有 \(name)")
     }
   }
 }

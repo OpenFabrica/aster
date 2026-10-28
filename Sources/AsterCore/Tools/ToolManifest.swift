@@ -24,6 +24,8 @@ public struct ToolManifest: Codable, Equatable, Sendable {
   /// 允许访问的域名；只在声明 `network` 权限时非空。
   public var network: [String]
   public var features: [ToolFeature]
+  /// 挂到工作区窗口上的界面；可选节，旧插件没有。
+  public var contributes: ToolContributions?
 
   public init(
     schemaVersion: Int = ToolManifest.currentSchemaVersion,
@@ -37,7 +39,8 @@ public struct ToolManifest: Codable, Equatable, Sendable {
     ui: ToolUIConfig? = nil,
     permissions: [ToolPermission] = [],
     network: [String] = [],
-    features: [ToolFeature]
+    features: [ToolFeature],
+    contributes: ToolContributions? = nil
   ) {
     self.schemaVersion = schemaVersion
     self.id = id
@@ -51,11 +54,12 @@ public struct ToolManifest: Codable, Equatable, Sendable {
     self.permissions = permissions
     self.network = network
     self.features = features
+    self.contributes = contributes
   }
 
   private enum CodingKeys: String, CodingKey {
     case schemaVersion, id, name, version, description, author, homepage, icon, ui, permissions, network,
-      features
+      features, contributes
   }
 
   /// 数组字段缺省视为空，其余缺省字段保持 nil；未知字段的拒绝在 `decode(_:source:)` 里统一做。
@@ -72,7 +76,17 @@ public struct ToolManifest: Codable, Equatable, Sendable {
     ui = try values.decodeIfPresent(ToolUIConfig.self, forKey: .ui)
     permissions = try values.decodeIfPresent([ToolPermission].self, forKey: .permissions) ?? []
     network = try values.decodeIfPresent([String].self, forKey: .network) ?? []
-    features = try values.decode([ToolFeature].self, forKey: .features)
+    // 只贡献视图的插件可以不写 `features`；「至少一个功能或一个视图」由校验保证。
+    features = try values.decodeIfPresent([ToolFeature].self, forKey: .features) ?? []
+    contributes = try values.decodeIfPresent(ToolContributions.self, forKey: .contributes)
+  }
+
+  /// 清单声明的视图；没有 `contributes` 时为空。
+  public var views: [ToolViewContribution] { contributes?.views ?? [] }
+
+  /// 按 id 查视图。
+  public func view(id: String) -> ToolViewContribution? {
+    views.first { $0.id == id }
   }
 
   /// 网页工具的入口与默认高度。

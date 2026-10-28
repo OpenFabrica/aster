@@ -57,6 +57,8 @@ public struct ToolPluginState: Codable, Equatable, Sendable {
   public var approvedDigest: String?
   /// 同意时的版本，仅用于展示。
   public var approvedVersion: String?
+  /// 视图 id → 用户对该视图的设置（启用、改放的位置）。没有记录的视图按清单缺省。
+  public var views: [String: ToolViewState]
 
   /// 逐字段构造；缺省为启用且没有任何授权。
   public init(
@@ -64,13 +66,15 @@ public struct ToolPluginState: Codable, Equatable, Sendable {
     grantedPermissions: [ToolPermission] = [],
     grantedNetworkDomains: [String] = [],
     approvedDigest: String? = nil,
-    approvedVersion: String? = nil
+    approvedVersion: String? = nil,
+    views: [String: ToolViewState] = [:]
   ) {
     self.enabled = enabled
     self.grantedPermissions = grantedPermissions
     self.grantedNetworkDomains = grantedNetworkDomains
     self.approvedDigest = approvedDigest
     self.approvedVersion = approvedVersion
+    self.views = views
   }
 
   /// 是否经过用户确认。只切换过启用开关的记录不算，信任判断据此区分「第一次运行」与「新增了权限」。
@@ -79,7 +83,7 @@ public struct ToolPluginState: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case enabled, grantedPermissions, grantedNetworkDomains, approvedDigest, approvedVersion
+    case enabled, grantedPermissions, grantedNetworkDomains, approvedDigest, approvedVersion, views
   }
 
   /// 缺 `enabled` 视为启用；不认识的权限丢弃，宁可让插件重新请求授权，也不让整条记录失效。
@@ -94,7 +98,40 @@ public struct ToolPluginState: Codable, Equatable, Sendable {
       (values.lossyDecode([ToolLossy<String>].self, forKey: .grantedNetworkDomains) ?? []).compactMap(\.value)
     approvedDigest = values.lossyDecode(String.self, forKey: .approvedDigest)
     approvedVersion = values.lossyDecode(String.self, forKey: .approvedVersion)
+    views =
+      values.lossyDecode([String: ToolLossy<ToolViewState>].self, forKey: .views)?.compactMapValues(\.value) ?? [:]
   }
+
+  /// 只有缺省值、没有任何用户决定（授权或视图设置）。
+  public var isPristine: Bool {
+    !hasApproval && views.isEmpty
+  }
+}
+
+/// 用户对单个视图的设置。
+public struct ToolViewState: Codable, Equatable, Sendable {
+  public var enabled: Bool
+  /// 用户改放的位置；nil 表示用清单缺省。
+  public var slot: ToolViewSlot?
+
+  public init(enabled: Bool = true, slot: ToolViewSlot? = nil) {
+    self.enabled = enabled
+    self.slot = slot
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case enabled, slot
+  }
+
+  /// 缺 `enabled` 视为启用；不认识的位置（例如新版本写入的挂载点）按没改过处理。
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = values.lossyDecode(Bool.self, forKey: .enabled) ?? true
+    slot = values.lossyDecode(String.self, forKey: .slot).flatMap(ToolViewSlot.init(rawValue:))
+  }
+
+  /// 与缺省相同（启用、没改位置），可以不存。
+  public var isDefault: Bool { enabled && slot == nil }
 }
 
 /// 功能使用记录，用于排序。

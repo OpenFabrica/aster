@@ -111,4 +111,42 @@ struct ToolStateTests {
     usage.removeRecords(forPluginID: "com.a.b")
     #expect(usage.records.keys.sorted() == ["com.c.d/x"])
   }
+
+  /// 视图设置容错：坏记录逐条丢弃，缺 `enabled` 视为启用，不认识的 slot（新版本写入的）回落为 nil 而不是让记录失效；
+  /// `views` 整体类型不对时当作没有。
+  @Test func viewStateDecodesLossilyAndUnknownSlotFallsBack() throws {
+    let state = try decode(
+      #"""
+      {"plugins": {"com.a.b": {"views": {
+        "moved": {"enabled": false, "slot": "tab.top"},
+        "future": {"enabled": true, "slot": "window.middle"},
+        "bare": {},
+        "badTypes": {"enabled": "no", "slot": 3},
+        "broken": "nope"
+      }}}}
+      """#)
+    let views = try #require(state.plugins["com.a.b"]?.views)
+    #expect(views["moved"] == ToolViewState(enabled: false, slot: .tabTop))
+    #expect(views["future"] == ToolViewState(enabled: true, slot: nil))
+    #expect(views["bare"] == ToolViewState())
+    #expect(views["badTypes"] == ToolViewState())
+    #expect(views["broken"] == nil)
+    #expect(views.count == 4)
+
+    let wrongContainer = try decode(#"{"plugins": {"com.a.b": {"views": [1, 2]}}}"#)
+    #expect(wrongContainer.plugins["com.a.b"]?.views == [:])
+  }
+
+  /// 视图设置往返编码；只有视图设置的记录不算「已授权」，但也不再是缺省记录。
+  @Test func viewStateRoundTripsAndKeepsRecordNonPristine() throws {
+    var plugin = ToolPluginState()
+    #expect(plugin.isPristine)
+    plugin.views["bar"] = ToolViewState(enabled: false, slot: .tabTop)
+    #expect(!plugin.isPristine && !plugin.hasApproval)
+    let file = ToolStateFile(plugins: ["com.a.b": plugin])
+    let decoded = try JSONDecoder().decode(ToolStateFile.self, from: JSONEncoder().encode(file))
+    #expect(decoded == file)
+    #expect(ToolViewState().isDefault && !ToolViewState(enabled: false).isDefault)
+    #expect(!ToolViewState(slot: .tabTop).isDefault)
+  }
 }
