@@ -16,6 +16,7 @@ private final class RecordingContentDelegate: ToolLauncherContentDelegate {
   ) {}
   func launcherContentDidRequestPrefill(_ content: ToolLauncherViewController) {}
   func launcherContentDidRequestOpenAsPane(_ content: ToolLauncherViewController) {}
+  func launcherContentDidRequestOpenInWindow(_ content: ToolLauncherViewController) {}
   func launcherContent(_ content: ToolLauncherViewController, toolQueryChanged text: String) {}
   func launcherContent(_ content: ToolLauncherViewController, toolReceivedFiles files: [String]) {}
   func launcherContentDidRequestExitTool(_ content: ToolLauncherViewController) {}

@@ -28,7 +28,7 @@ func openQuicklyToolTargetsBuildRowsPerFilter() throws {
   #expect(recognized.badge == L("识别到"))
   #expect(recognized.actionTitle == L("复制结果"))
   #expect(!recognized.item.detail.isEmpty)
-  #expect(recognized.menuActions.map(\.title) == [L("预填到终端"), L("在工具面板打开"), L("开成 Pane")])
+  #expect(recognized.menuActions.map(\.title) == [L("预填到终端"), L("在工具面板打开"), L("在新窗口打开"), L("开成 Pane")])
   // 认出时间戳的行排第一，默认选中它。
   #expect(rows.first?.item.id == "tool-match:\(timestampID)")
 
@@ -37,7 +37,7 @@ func openQuicklyToolTargetsBuildRowsPerFilter() throws {
   let toolPage = targets.entries(query: "", filter: .tool)
   #expect(!toolPage.isEmpty)
   #expect(toolPage.allSatisfy { $0.item.id.hasPrefix("tool:") && $0.actionTitle == L("在工具面板打开") })
-  #expect(toolPage.allSatisfy { $0.menuActions.map(\.title) == [L("开成 Pane")] })
+  #expect(toolPage.allSatisfy { $0.menuActions.map(\.title) == [L("在新窗口打开"), L("开成 Pane")] })
 }
 
 @MainActor

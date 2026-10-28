@@ -381,6 +381,18 @@ final class ToolLauncherController: NSObject, NSWindowDelegate {
     revealWorkspace(model, paneID: nil)
   }
 
+  /// 在独立窗口里打开工具（带当前输入与来源），然后收起面板；钉住时只退出面板里的工具，免得同一个工具开两份。
+  private func openInWindow(entry: ToolCatalogEntry, input: ToolInput) {
+    let request = ToolLaunchRequest(entry: entry, input: input, origin: origin)
+    let model = targetModel
+    if isPinned {
+      if session != nil { exitTool() }
+    } else {
+      hide(restoreFocus: false)
+    }
+    ToolWindowController.open(request: request, model: model)
+  }
+
   /// 激活 Aster 并把工作区窗口提到前面；给了 Pane 就同时切到它所在的标签并聚焦。
   private func revealWorkspace(_ model: AppModel?, paneID: UUID?) {
     NSApp.activate()
@@ -461,6 +473,15 @@ extension ToolLauncherController: ToolLauncherContentDelegate {
       openAsPane(entry: session.request.entry, input: session.request.input)
     } else if let row = content.selectedRow {
       openAsPane(entry: row.entry, input: content.launchInput(for: row))
+    }
+  }
+
+  /// 工具打开时把当前工具（带当前输入）放进新窗口，否则开选中行。
+  func launcherContentDidRequestOpenInWindow(_ content: ToolLauncherViewController) {
+    if let session {
+      openInWindow(entry: session.request.entry, input: session.request.input)
+    } else if let row = content.selectedRow {
+      openInWindow(entry: row.entry, input: content.launchInput(for: row))
     }
   }
 

@@ -13,6 +13,8 @@ protocol ToolLauncherContentDelegate: AnyObject {
   func launcherContentDidRequestPrefill(_ content: ToolLauncherViewController)
   /// `⌥↩`：开成工作区 Pane。
   func launcherContentDidRequestOpenAsPane(_ content: ToolLauncherViewController)
+  /// `⇧↩`：在新窗口里打开。
+  func launcherContentDidRequestOpenInWindow(_ content: ToolLauncherViewController)
   /// 工具打开后搜索框继续输入。
   func launcherContent(_ content: ToolLauncherViewController, toolQueryChanged text: String)
   /// 工具打开时拖入了文件。

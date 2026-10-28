@@ -1,5 +1,5 @@
 // Open Quickly「工具」页（启动器 A）的数据与动作：按查询向工具中心取「识别到」与搜索结果，
-// 接上复制结果、预填到终端、在工具面板打开与开成 Pane。哪些过滤器出工具行、插在哪里是
+// 接上复制结果、预填到终端、在工具面板打开、在新窗口打开与开成 Pane。哪些过滤器出工具行、插在哪里是
 // `OpenQuicklyToolCatalog` 里的纯规则；浮层只把条目转成自己的行。
 import AppKit
 import AsterCore
@@ -96,6 +96,7 @@ final class OpenQuicklyToolTargets {
     let entryID = row.entry.id
     let openInLauncher: () -> Void = { [weak self] in self?.openInLauncher(entry: row.entry, input: input) }
     let openAsPane: () -> Void = { [weak self] in self?.openAsPane(entryID: entryID, input: input) }
+    let openInWindow: () -> Void = { [weak self] in self?.openInWindow(entry: row.entry, input: input) }
     var menu: [(title: String, handler: () -> Void)] = []
     var entry: OpenQuicklyToolEntry
     if let result = row.inlineResult {
@@ -110,6 +111,7 @@ final class OpenQuicklyToolTargets {
         item: item, symbol: row.symbol, badge: row.badge, accented: row.origin == .recognized,
         actionTitle: L("在工具面板打开"), action: openInLauncher)
     }
+    menu.append((L("在新窗口打开"), openInWindow))
     menu.append((L("开成 Pane"), openAsPane))
     entry.menuActions = menu
     return entry
@@ -149,6 +151,13 @@ final class OpenQuicklyToolTargets {
     let request = ToolLaunchRequest(entry: entry, input: input, origin: model.toolTerminalOrigin())
     NotificationCenter.default.post(
       name: .asterShowToolLauncher, object: ToolLauncherRequestBox(request: request))
+  }
+
+  /// 在独立窗口里打开，预填等动作作用于本窗口的活动终端。
+  private func openInWindow(entry: ToolCatalogEntry, input: ToolInput) {
+    dismiss()
+    let request = ToolLaunchRequest(entry: entry, input: input, origin: model.toolTerminalOrigin())
+    ToolWindowController.open(request: request, model: model)
   }
 
   /// 开成当前标签里的 Pane。

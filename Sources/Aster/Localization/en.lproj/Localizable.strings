@@ -2744,3 +2744,6 @@
 "取消钉住" = "Unpin";
 "钉住面板：点别处时不自动收起" = "Pin panel: stays open when you click elsewhere";
 "无法解码这张图片。" = "Unable to decode this image.";
+
+/* 独立工具窗口 */
+"⇧↩ 新窗口" = "⇧↩ New Window";

@@ -2742,3 +2742,6 @@
 "取消钉住" = "Désépingler";
 "钉住面板：点别处时不自动收起" = "Épingler le panneau : reste ouvert quand vous cliquez ailleurs";
 "无法解码这张图片。" = "Impossible de décoder cette image.";
+
+/* 独立工具窗口 */
+"⇧↩ 新窗口" = "⇧↩ Nouvelle fenêtre";

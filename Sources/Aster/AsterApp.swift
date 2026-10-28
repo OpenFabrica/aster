@@ -919,6 +919,9 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
       record.controller.window?.appearance = preferences.preferredAppearance
     }
     settingsWindowController?.window?.appearance = preferences.preferredAppearance
+    for case let window as ToolStandaloneWindow in NSApp.windows where window.followsAppAppearance {
+      window.appearance = preferences.preferredAppearance
+    }
   }
 
   private func synchronizeWorkspaceConfiguration() {
@@ -1252,12 +1255,14 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   @objc private func closeTab(_ sender: Any?) {
     if quickTerminalController.ownsKeyWindow { quickTerminalController.hide() }
     else if toolLauncherOwnsKeyWindow { toolLauncherController?.hide() }
+    else if let window = standaloneToolWindow { window.performClose(sender) }
     else { activeWorkspaceModel.closeSelectedTab() }
   }
   /// ⌘W：标签内还有分屏时只关闭聚焦面板，最后一个面板才关闭整个标签页。
   @objc private func closePaneOrTab(_ sender: Any?) {
     if quickTerminalController.ownsKeyWindow { quickTerminalController.hide() }
     else if toolLauncherOwnsKeyWindow { toolLauncherController?.hide() }
+    else if let window = standaloneToolWindow { window.performClose(sender) }
     else if floatingPictureInPictureOwnsKeyWindow { closePictureInPicture(nil) }
     else if agentHostTerminalHandlesClose() { return }
     else { activeWorkspaceModel.closeSelectedPaneOrTab() }
@@ -1273,6 +1278,8 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
   }
   /// 键盘焦点在工具面板里时，⌘W 收起面板；面板是非激活浮窗，菜单动作否则会落到背后的工作区。
   private var toolLauncherOwnsKeyWindow: Bool { toolLauncherController?.ownsKeyWindow == true }
+  /// 拿着键盘的独立工具窗口或便笺；关闭类快捷键只关它，不能落到背后工作区的活动 Pane。
+  private var standaloneToolWindow: ToolStandaloneWindow? { NSApp.keyWindow as? ToolStandaloneWindow }
   /// 键盘焦点在可交互画中画小窗里时，关闭类快捷键收回小窗，不能误关工作区的活动 Pane。
   private var floatingPictureInPictureOwnsKeyWindow: Bool {
     (pictureInPictureController as? PaneFloatingTerminalController)?.ownsKeyWindow == true
@@ -2319,7 +2326,7 @@ extension AsterAppDelegate: NSMenuItemValidation {
       return MachineFleetModel.shared.activeMachineID != MachineProfile.localProfileID
     }
     // 独立终端与工具面板没有工作区分屏；不能把其菜单操作落到背后的普通工作区。
-    if quickTerminalController.ownsKeyWindow || toolLauncherOwnsKeyWindow,
+    if quickTerminalController.ownsKeyWindow || toolLauncherOwnsKeyWindow || standaloneToolWindow != nil,
       Self.splitOnlySelectors.contains(action) || Self.activePaneSelectors.contains(action)
     { return false }
     // agent 主机终端拥有键盘时同理，查找也只会作用于背后的活动 Pane。

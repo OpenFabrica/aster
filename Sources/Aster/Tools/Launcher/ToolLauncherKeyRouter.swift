@@ -11,6 +11,8 @@ enum ToolLauncherCommand: Equatable {
   case prefillResult
   /// 开成工作区 Pane（`⌥↩`）。
   case openAsPane
+  /// 在新窗口里打开（`⇧↩`）。
+  case openInWindow
   /// 按可见顺序直接打开第 N 行（`⌘1`–`⌘9`）。
   case quickSelect(Int)
   /// 退出正在使用的工具，回到结果列表（工具打开时的 `Esc`）。
@@ -42,6 +44,7 @@ enum ToolLauncherKeyRouter {
   /// - 输入法组字时一律放行：中文输入用 `↩`、`Esc`、方向键确认或取消候选，抢走会打断输入。
   /// - `↑`/`↓`/`↩` 只在焦点位于搜索框且没有打开工具时归面板；工具打开后这些键属于工具。
   /// - `⌘↩`、`⌥↩`、`Esc` 不看焦点：它们在工具里也表示「预填」「开成 Pane」「退出工具」。
+  /// - `⇧↩` 只在焦点位于搜索框时表示「新窗口打开」：工具自己的多行输入里 `⇧↩` 是换行。
   /// - `⌘1`–`⌘9` 只在结果列表可见（没有打开工具）时快选。
   static func command(
     keyCode: UInt16,
@@ -59,6 +62,7 @@ enum ToolLauncherKeyRouter {
     case returnKey, keypadEnter:
       if flags == .command { return .prefillResult }
       if flags == .option { return .openAsPane }
+      if flags == .shift { return context.isSearchFieldFocused ? .openInWindow : nil }
       return flags.isEmpty && listHasKeyboard ? .open : nil
     case downArrow:
       return flags.isEmpty && listHasKeyboard ? .moveSelection(1) : nil

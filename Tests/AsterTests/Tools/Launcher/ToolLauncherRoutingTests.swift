@@ -34,7 +34,16 @@ func toolLauncherRoutesListKeys() {
   #expect(route(125, nil, [.function, .numericPad]) == .moveSelection(1))
   // 普通字符交给搜索框。
   #expect(route(0, "a") == nil)
-  #expect(route(36, nil, .shift) == nil)
+  #expect(route(36, nil, .shift) == .openInWindow)
+}
+
+@Test("⇧↩ 新窗口打开只在焦点位于搜索框时生效：工具自己的多行输入里 ⇧↩ 是换行")
+func toolLauncherRoutesShiftReturnOnlyFromSearchField() {
+  let searchWithTool = ToolLauncherKeyRouter.Context(isToolOpen: true, isSearchFieldFocused: true, hasMarkedText: false)
+  #expect(route(36, nil, .shift, searchWithTool) == .openInWindow)
+  let inTool = ToolLauncherKeyRouter.Context(isToolOpen: true, isSearchFieldFocused: false, hasMarkedText: false)
+  #expect(route(36, nil, .shift, inTool) == nil)
+  #expect(route(36, nil, [.shift, .command]) == nil)
 }
 
 @Test("工具打开后：↩ 与方向键归工具，Esc 先退出工具，⌘1–9 不再快选")

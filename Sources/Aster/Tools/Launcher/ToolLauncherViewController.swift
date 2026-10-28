@@ -379,12 +379,16 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
     delegate?.launcherContent(self, open: row, input: launchInput(for: row), queryText: queryText)
   }
 
-  /// 右键行的操作菜单：打开、复制结果、预填到终端、开成 Pane。
+  /// 右键行的操作菜单：打开、新窗口打开、复制结果、预填到终端、开成 Pane。
   private func showContextMenu(forRowAt index: Int) {
     guard rowViews.indices.contains(index) else { return }
     select(index)
     let menu = NSMenu()
     menu.addItem(ActionMenuItem(title: L("在工具面板打开")) { [weak self] in self?.openSelectedRow() })
+    menu.addItem(ActionMenuItem(title: L("在新窗口打开")) { [weak self] in
+      guard let self else { return }
+      self.delegate?.launcherContentDidRequestOpenInWindow(self)
+    })
     if let result = rows[index].inlineResult {
       menu.addItem(ActionMenuItem(title: L("复制结果")) { [weak self] in
         NSPasteboard.general.clearContents()
@@ -484,6 +488,7 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
       openSelectedRow()
     case .prefillResult: delegate?.launcherContentDidRequestPrefill(self)
     case .openAsPane: delegate?.launcherContentDidRequestOpenAsPane(self)
+    case .openInWindow: delegate?.launcherContentDidRequestOpenInWindow(self)
     case .exitTool: delegate?.launcherContentDidRequestExitTool(self)
     case .closePanel: delegate?.launcherContentDidRequestClose(self)
     }
@@ -500,11 +505,11 @@ final class ToolLauncherViewController: NSViewController, NSTextFieldDelegate {
   private func updateHints() {
     var hints: [String] = []
     if isToolOpen {
-      hints = [L("⌘↩ 预填到终端"), L("⌥↩ 开成 Pane"), L("esc 返回")]
+      hints = [L("⌘↩ 预填到终端"), L("⌥↩ 开成 Pane"), L("⇧↩ 新窗口"), L("esc 返回")]
     } else {
       hints.append(L("↩ 打开"))
       if selectedRow?.inlineResult != nil { hints.append(L("⌘↩ 预填结果")) }
-      hints += [L("⌥↩ 开成 Pane"), "⌘1–9", L("esc 关闭")]
+      hints += [L("⌥↩ 开成 Pane"), L("⇧↩ 新窗口"), "⌘1–9", L("esc 关闭")]
     }
     footer.hints = hints
   }
