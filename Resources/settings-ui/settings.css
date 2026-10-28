@@ -781,6 +781,13 @@ input.control[type="text"]:focus, input.control[type="number"]:focus { border-co
 .tool-permission[data-risk="medium"] .tool-risk-dot { background: #f59e0b; }
 .tool-permission-state { color: var(--text-tertiary); }
 .tool-permission[data-granted="false"] .tool-permission-state { font-weight: 550; }
+.tool-views { display: grid; gap: 6px; }
+.tool-view { display: grid; gap: 2px; }
+.tool-view-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.tool-view-title { flex: 1 1 auto; min-width: 0; color: var(--text-primary); font-size: 12px; }
+.tool-view select.control { max-width: 160px; }
+.tool-view[data-inactive] .tool-view-title { color: var(--text-secondary); }
+.tool-view-hint { color: var(--text-tertiary); font-size: 10.5px; }
 .tool-domains { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .tool-domain, .tool-path { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; overflow-wrap: anywhere; user-select: text; }
 .tool-plugin-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }

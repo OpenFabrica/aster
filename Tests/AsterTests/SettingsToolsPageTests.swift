@@ -108,3 +108,56 @@ func settingsToolsPageRendersSnapshot() async throws {
     "[...document.querySelectorAll('.search-result-section')].some(n => n.textContent.startsWith('工具')) ? 'yes' : 'no'",
     in: webView) == "yes")
 }
+
+@Test("设置页「工具」分类渲染视图控制：徽章、位置下拉、启用开关与不生效提示，操作发出对应动作")
+@MainActor
+func settingsToolsPageRendersViewControls() async throws {
+  let tools = FakeToolCenter()
+  tools.pluginSummaries = [
+    toolSummary(
+      "com.example.views", name: "视图插件",
+      views: [
+        toolViewSummary("branch", slot: .tabTop),
+        toolViewSummary("status", title: "Git 状态", kind: .panel, slot: .inspectorPanel, defaultSlot: .inspectorPanel, enabled: false, inactiveReason: .disabled),
+        toolViewSummary("future", title: "未来", slot: .windowTop, defaultSlot: .windowTop, inactiveReason: .unsupported),
+      ]),
+    toolSummary("com.example.plain", name: "没有视图"),
+  ]
+  let preferences = isolatedToolsPreferences()
+  let bridge = SettingsToolsBridge(preferences: preferences, tools: tools)
+  let controller = SettingsViewController(preferences: preferences, updateController: nil, toolsBridge: bridge)
+  controller.loadViewIfNeeded()
+  let webView = try #require(controller.settingsWebViewForTesting)
+
+  #expect(try await poll("String(document.querySelectorAll('.nav-item').length)", until: "12", in: webView) == "12")
+  _ = try await evaluate("document.querySelector('[data-section=\"tools\"]')?.click(); 'ok'", in: webView)
+  #expect(try await poll("document.querySelector('.page-title')?.textContent ?? ''", until: "工具", in: webView) == "工具")
+
+  func eval(_ script: String) async throws -> String { try await evaluate(script, in: webView) }
+  // 只有声明了视图的插件才有「视图」一栏。
+  #expect(try await eval("String(document.querySelectorAll('.tool-view').length)") == "3")
+  #expect(try await eval("String(document.querySelectorAll('[data-plugin-id=\"com.example.plain\"] .tool-view').length)") == "0")
+  #expect(try await eval("[...document.querySelectorAll('.tool-view')].map(n => n.dataset.viewId).join(',')") == "branch,status,future")
+  // 类型徽章。
+  #expect(try await eval("[...document.querySelectorAll('.tool-view .tool-badge')].map(n => n.dataset.kind).join(',')") == "bar,panel,bar")
+  // bar 只能选 tab.top / tab.bottom；当前值是 tab.top；缺省位置（tab.bottom）带「（默认）」后缀。
+  let branch = "document.querySelector('[data-view-id=\"branch\"] select')"
+  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "tab.top,tab.bottom,pane.bottom")
+  #expect(try await eval("\(branch).value") == "tab.top")
+  #expect(try await eval("[...\(branch).options].find(o => o.value === 'tab.bottom').textContent").hasSuffix("（默认）"))
+  // 声明了未实现位置的视图，下拉框补一项当前值，并带灰字提示。
+  #expect(try await eval("document.querySelector('[data-view-id=\"future\"] select').value") == "window.top")
+  #expect(try await eval("document.querySelector('[data-view-id=\"future\"] .tool-view-hint')?.textContent ?? ''") == "本版本暂不支持这个位置")
+  #expect(try await eval("String(document.querySelector('[data-view-id=\"status\"] input[type=checkbox]').checked)") == "false")
+
+  // 改位置：选回缺省位置发 null，其余发位置 id。
+  _ = try await eval("const s = \(branch); s.value = 'tab.bottom'; s.dispatchEvent(new Event('change')); 'ok'")
+  for _ in 0..<150 where tools.viewSlotCalls.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+  #expect(tools.viewSlotCalls.count == 1)
+  #expect(tools.viewSlotCalls.first?.view == "branch" && tools.viewSlotCalls.first?.slot == nil)
+  // 开关。
+  _ = try await eval("const c = document.querySelector('[data-view-id=\"status\"] input[type=checkbox]'); c.checked = true; c.dispatchEvent(new Event('change')); 'ok'")
+  for _ in 0..<150 where tools.viewEnabledCalls.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+  #expect(tools.viewEnabledCalls.count == 1)
+  #expect(tools.viewEnabledCalls.first?.view == "status" && tools.viewEnabledCalls.first?.enabled == true)
+}

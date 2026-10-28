@@ -29,7 +29,8 @@ func settingsToolsSnapshotShapeAndOrder() throws {
 
   let snapshot = bridge.snapshot()
   #expect(Set(snapshot.keys) == [
-    "launcherShortcut", "quickTerminalShortcut", "pluginsDirectory", "plugins", "issues", "developmentFolders",
+    "launcherShortcut", "quickTerminalShortcut", "pluginsDirectory", "plugins", "viewSlots", "issues",
+    "developmentFolders",
   ])
   #expect(snapshot["launcherShortcut"] as? String == "none")
   #expect(snapshot["quickTerminalShortcut"] as? String == "controlGrave")
@@ -44,7 +45,7 @@ func settingsToolsSnapshotShapeAndOrder() throws {
   let zeta = plugins[1]
   #expect(Set(zeta.keys) == [
     "id", "name", "version", "description", "source", "directory", "status", "statusReason", "enabled",
-    "permissions", "networkDomains", "featureCount", "removable",
+    "permissions", "networkDomains", "featureCount", "removable", "views",
   ])
   #expect(zeta["description"] is NSNull)
   #expect(zeta["statusReason"] is NSNull)

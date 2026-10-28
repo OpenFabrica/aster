@@ -15,7 +15,7 @@ final class SettingsToolsBridge {
   nonisolated static let actions: Set<String> = [
     "tools.setEnabled", "tools.approve", "tools.uninstall", "tools.reveal", "tools.openPluginsFolder",
     "tools.reload", "tools.installFromFolder", "tools.addDevelopmentFolder", "tools.removeDevelopmentFolder",
-    "tools.openLauncher",
+    "tools.openLauncher", "tools.setViewEnabled", "tools.setViewSlot",
   ]
   /// 工具面板全局快捷键的兼容设置键；启动器按它注册热键。
   nonisolated static let launcherShortcutKey = "tools.launcherShortcut"
@@ -103,6 +103,7 @@ final class SettingsToolsBridge {
       "quickTerminalShortcut": preferences.compatibilityString(forKey: Self.quickTerminalShortcutKey, default: "none"),
       "pluginsDirectory": tools.pluginsDirectory.path,
       "plugins": Self.displayOrder(tools.pluginSummaries).map(Self.pluginRow),
+      "viewSlots": Self.viewSlotRows(),
       "issues": tools.pluginIssues.map { ["path": $0.path, "message": $0.message] },
       "developmentFolders": tools.developmentFolders,
     ]
@@ -143,7 +144,48 @@ final class SettingsToolsBridge {
       "networkDomains": plugin.networkDomains,
       "featureCount": plugin.featureCount,
       "removable": plugin.isRemovable,
+      "views": plugin.views.map(viewRow),
     ]
+  }
+
+  /// 一个视图的快照行；`slots` 是它能改放的位置（接受该类型且本版本已实现），`inactiveReason` 为 null 表示正在生效。
+  static func viewRow(_ view: ToolViewSummary) -> [String: Any] {
+    [
+      "id": view.id,
+      "title": view.title,
+      "kind": view.kind.rawValue,
+      "slot": view.slot.rawValue,
+      "defaultSlot": view.defaultSlot.rawValue,
+      "enabled": view.isEnabled,
+      "slots": ToolViewSlot.slots(accepting: view.kind).map(\.rawValue),
+      "inactiveReason": view.inactiveReason?.rawValue ?? NSNull(),
+    ]
+  }
+
+  /// 快照顶层的挂载点一览：全部位置都给标题（未实现的位置在视图 `unsupported` 时要显示），用 `implemented` 区分。
+  static func viewSlotRows() -> [[String: Any]] {
+    ToolViewSlot.allCases.map { slot in
+      [
+        "id": slot.rawValue,
+        "title": slotTitle(slot),
+        "kinds": ToolViewKind.allCases.filter { slot.kinds.contains($0) }.map(\.rawValue),
+        "implemented": slot.isImplemented,
+      ]
+    }
+  }
+
+  /// 挂载点的界面名称。
+  static func slotTitle(_ slot: ToolViewSlot) -> String {
+    switch slot {
+    case .windowTop: L("窗口顶部")
+    case .windowBottom: L("窗口底部")
+    case .sidebarSection: L("侧栏")
+    case .tabTop: L("标签顶部")
+    case .tabBottom: L("标签底部")
+    case .paneHeader: L("Pane 顶部")
+    case .paneBottom: L("Pane 底部")
+    case .inspectorPanel: L("详情面板")
+    }
   }
 
   /// 展示顺序：用户安装的在前，其次开发中的，内置排最后；同组按名称、再按 id。
@@ -256,6 +298,14 @@ final class SettingsToolsBridge {
     case "tools.openLauncher":
       openLauncher()
       complete(true)
+    case "tools.setViewEnabled":
+      guard let (plugin, view) = requireView(in: payload) else { return complete(false) }
+      guard let enabled = Self.strictBool(payload["enabled"]) else { return invalid(complete) }
+      tools.setViewEnabled(enabled, pluginID: plugin.id, viewID: view.id)
+      pushSnapshotNow()
+      complete(true)
+    case "tools.setViewSlot":
+      setViewSlot(payload: payload, complete: complete)
     default:
       toast(L("“\(action)”尚无可用的 macOS 操作"), true)
       complete(false)
@@ -279,6 +329,40 @@ final class SettingsToolsBridge {
       return nil
     }
     return plugin
+  }
+
+  /// 取动作参数里的插件与它的视图：`view` 必须是该插件声明的视图 id；不满足时已经提示过。
+  private func requireView(in payload: [String: Any]) -> (ToolPluginSummary, ToolViewSummary)? {
+    guard let plugin = requirePlugin(in: payload) else { return nil }
+    guard let viewID = payload["view"] as? String, !viewID.isEmpty, viewID.utf8.count <= 256 else {
+      toast(L("参数无效"), true)
+      return nil
+    }
+    guard let view = plugin.views.first(where: { $0.id == viewID }) else {
+      toast(L("插件「\(plugin.name)」没有视图「\(viewID)」"), true)
+      return nil
+    }
+    return (plugin, view)
+  }
+
+  /// 改视图位置：`slot` 为 null 恢复清单缺省；否则必须是本版本已实现且接受该视图类型的位置。
+  private func setViewSlot(payload: [String: Any], complete: (Bool) -> Void) {
+    guard let (plugin, view) = requireView(in: payload) else { return complete(false) }
+    var slot: ToolViewSlot?
+    if let raw = payload["slot"], !(raw is NSNull) {
+      guard let id = raw as? String, let chosen = ToolViewSlot(rawValue: id) else {
+        toast(L("参数无效"), true)
+        return complete(false)
+      }
+      guard ToolViewSlot.slots(accepting: view.kind).contains(chosen) else {
+        toast(L("视图「\(view.title)」不能放到「\(Self.slotTitle(chosen))」"), true)
+        return complete(false)
+      }
+      slot = chosen
+    }
+    tools.setViewSlot(slot, pluginID: plugin.id, viewID: view.id)
+    pushSnapshotNow()
+    complete(true)
   }
 
   /// 卸载用户安装的插件：先原生确认，再交给工具中心。内置与开发中的插件不走这里——

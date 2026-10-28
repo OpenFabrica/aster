@@ -67,6 +67,7 @@
   function searchEntries(t) {
     return [
       { key: "tools.plugins", label: t("已安装的插件"), detail: t("启用或停用插件，确认权限，在 Finder 中显示或卸载") },
+      { key: "tools.views", label: t("视图"), detail: t("插件挂在窗口上的状态条和面板：开关，或改放到别的位置") },
       { key: "tools.openPluginsFolder", label: t("插件目录"), detail: t("安装的插件放在这里；也可以把含 aster-plugin.json 的文件夹直接拖进来，再点「重新扫描」") },
       { key: "tools.installFromFolder", label: t("从文件夹安装"), detail: t("选一个含 aster-plugin.json 的文件夹，确认权限后复制到插件目录") },
       { key: "tools.addDevelopmentFolder", label: t("开发目录"), detail: t("只登记路径、不复制文件；文件改动后自动重新加载，适合边写边试") },
@@ -101,6 +102,20 @@
   function riskLabel(risk, t) {
     const map = { high: t("高风险"), medium: t("中风险"), low: t("低风险") };
     return map[risk] ?? risk ?? "";
+  }
+
+  /// 视图类型徽章文案。
+  function viewKindLabel(kind, t) {
+    const map = { bar: t("状态条"), panel: t("面板") };
+    return map[kind] ?? kind ?? "";
+  }
+
+  /// 视图不生效时的灰字提示；正在生效返回空串。
+  function viewHint(reason, t) {
+    const map = {
+      unsupported: t("本版本暂不支持这个位置"), pluginDisabled: t("插件已停用"), disabled: "",
+    };
+    return map[reason] ?? "";
   }
 
   // MARK: - 插件卡片
@@ -155,6 +170,60 @@
     return list;
   }
 
+  /// 视图的位置选择：选项来自快照 `viewSlots`，只列本版本已实现且接受该类型的位置；
+  /// 当前位置若不在其中（清单声明了未实现的位置）补一项，避免下拉框显示成别的值。缺省位置带「（默认）」后缀。
+  function viewSlotSelect(plugin, view, slots, send, t) {
+    const select = element("select", "control tool-view-slot");
+    select.setAttribute("aria-label", t("「{name}」的位置", { name: view.title }));
+    const byId = new Map(slots.map(slot => [slot.id, slot]));
+    const ids = Array.isArray(view.slots) ? view.slots.slice() : [];
+    if (!ids.includes(view.slot)) ids.unshift(view.slot);
+    for (const id of ids) {
+      const title = byId.get(id)?.title ?? id;
+      const option = element("option", "", id === view.defaultSlot ? t("{slot}（默认）", { slot: title }) : title);
+      option.value = id;
+      select.appendChild(option);
+    }
+    select.value = view.slot;
+    // 选回缺省位置时发 null，让原生恢复「跟随清单」，清单以后改了缺省位置也能跟上。
+    select.addEventListener("change", () => send("tools.setViewSlot", {
+      id: plugin.id, view: view.id, slot: select.value === view.defaultSlot ? null : select.value,
+    }));
+    return select;
+  }
+
+  /// 视图的启用开关。
+  function viewToggle(plugin, view, send, t) {
+    const label = element("label", "toggle");
+    const input = element("input");
+    input.type = "checkbox";
+    input.checked = Boolean(view.enabled);
+    input.setAttribute("aria-label", t("启用视图「{name}」", { name: view.title }));
+    input.addEventListener("change", () => send("tools.setViewEnabled", { id: plugin.id, view: view.id, enabled: input.checked }));
+    label.append(input, element("span", "toggle-track"));
+    return label;
+  }
+
+  /// 视图列表：每行标题 + 类型徽章 + 位置下拉 + 启用开关，不生效时附一行灰字原因。
+  function viewList(plugin, views, slots, send, t) {
+    const list = element("div", "tool-views");
+    for (const view of views) {
+      const row = element("div", "tool-view");
+      row.dataset.viewId = view.id;
+      if (view.inactiveReason) row.dataset.inactive = view.inactiveReason;
+      const head = element("div", "tool-view-head");
+      const badge = element("span", "tool-badge", viewKindLabel(view.kind, t));
+      badge.dataset.kind = view.kind;
+      head.append(element("span", "tool-view-title", view.title), badge,
+        viewSlotSelect(plugin, view, slots, send, t), viewToggle(plugin, view, send, t));
+      row.appendChild(head);
+      const hint = viewHint(view.inactiveReason, t);
+      if (hint) row.appendChild(element("span", "tool-view-hint", hint));
+      list.appendChild(row);
+    }
+    return list;
+  }
+
   /// 网络域名：插件只能经原生代发访问这些主机。
   function domainList(domains) {
     const list = element("span", "tool-domains");
@@ -204,6 +273,14 @@
     if (plugin.status === "needsApproval") card.appendChild(approvalRow(plugin, send, t));
     const permissions = Array.isArray(plugin.permissions) ? plugin.permissions : [];
     if (permissions.length) card.appendChild(facet(t("权限"), permissionList(permissions, t)));
+    const views = Array.isArray(plugin.views) ? plugin.views : [];
+    if (views.length) {
+      const slots = Array.isArray(info.viewSlots) ? info.viewSlots : [];
+      const viewFacet = facet(t("视图"), viewList(plugin, views, slots, send, t));
+      // 搜索「视图」时跳到第一个有视图的插件。
+      viewFacet.dataset.settingKey = "tools.views";
+      card.appendChild(viewFacet);
+    }
     const domains = Array.isArray(plugin.networkDomains) ? plugin.networkDomains : [];
     if (domains.length) card.appendChild(facet(t("网络域名"), domainList(domains)));
     const actions = pluginActions(plugin, info, send, t);

@@ -1035,7 +1035,15 @@ window.AsterI18n = {
     "打开插件目录": "Open Plugins Folder",
     "从文件夹安装…": "Install from Folder…",
     "添加开发目录…": "Add Development Folder…",
-    "还没有登记开发目录": "No development folders yet"
+    "还没有登记开发目录": "No development folders yet",
+    "插件挂在窗口上的状态条和面板：开关，或改放到别的位置": "Status bars and panels that plugins attach to the window: turn them on or off, or move them elsewhere",
+    "状态条": "Status bar",
+    "面板": "Panel",
+    "本版本暂不支持这个位置": "This position isn’t supported in this version",
+    "插件已停用": "Plugin is disabled",
+    "「{name}」的位置": "Position of “{name}”",
+    "{slot}（默认）": "{slot} (default)",
+    "启用视图「{name}」": "Enable view “{name}”"
   },
   "ja": {
     "主机、密钥与已知主机已移到侧栏「主机」页。": "ホスト、キー、既知のホストはサイドバーの「ホスト」ページに移動しました。",
@@ -2072,7 +2080,15 @@ window.AsterI18n = {
     "打开插件目录": "プラグインフォルダを開く",
     "从文件夹安装…": "フォルダからインストール…",
     "添加开发目录…": "開発フォルダを追加…",
-    "还没有登记开发目录": "開発フォルダはまだ登録されていません"
+    "还没有登记开发目录": "開発フォルダはまだ登録されていません",
+    "插件挂在窗口上的状态条和面板：开关，或改放到别的位置": "プラグインがウィンドウに表示するステータスバーとパネル。オン／オフの切り替えや、別の位置への移動ができます",
+    "状态条": "ステータスバー",
+    "面板": "パネル",
+    "本版本暂不支持这个位置": "このバージョンではこの位置はまだ使えません",
+    "插件已停用": "プラグインは無効です",
+    "「{name}」的位置": "「{name}」の位置",
+    "{slot}（默认）": "{slot}（既定）",
+    "启用视图「{name}」": "ビュー「{name}」を有効にする"
   },
   "fr": {
     "主机、密钥与已知主机已移到侧栏「主机」页。": "Les hôtes, les clés et les hôtes connus se trouvent désormais dans la page « Hôtes » de la barre latérale.",
@@ -3109,7 +3125,15 @@ window.AsterI18n = {
     "打开插件目录": "Ouvrir le dossier des plugins",
     "从文件夹安装…": "Installer depuis un dossier…",
     "添加开发目录…": "Ajouter un dossier de développement…",
-    "还没有登记开发目录": "Aucun dossier de développement pour l’instant"
+    "还没有登记开发目录": "Aucun dossier de développement pour l’instant",
+    "插件挂在窗口上的状态条和面板：开关，或改放到别的位置": "Barres d’état et panneaux que les plugins ajoutent à la fenêtre : activez-les, désactivez-les ou déplacez-les",
+    "状态条": "Barre d’état",
+    "面板": "Panneau",
+    "本版本暂不支持这个位置": "Cet emplacement n’est pas encore pris en charge dans cette version",
+    "插件已停用": "Le plugin est désactivé",
+    "「{name}」的位置": "Emplacement de « {name} »",
+    "{slot}（默认）": "{slot} (par défaut)",
+    "启用视图「{name}」": "Activer la vue « {name} »"
   },
   "de": {
     "主机、密钥与已知主机已移到侧栏「主机」页。": "Hosts, Schlüssel und bekannte Hosts befinden sich jetzt auf der Seite „Hosts“ in der Seitenleiste.",
@@ -4146,7 +4170,15 @@ window.AsterI18n = {
     "打开插件目录": "Plugin-Ordner öffnen",
     "从文件夹安装…": "Aus Ordner installieren…",
     "添加开发目录…": "Entwicklungsordner hinzufügen…",
-    "还没有登记开发目录": "Noch keine Entwicklungsordner"
+    "还没有登记开发目录": "Noch keine Entwicklungsordner",
+    "插件挂在窗口上的状态条和面板：开关，或改放到别的位置": "Statusleisten und Panels, die Plugins im Fenster anzeigen: ein- oder ausschalten oder an eine andere Stelle verschieben",
+    "状态条": "Statusleiste",
+    "面板": "Panel",
+    "本版本暂不支持这个位置": "Diese Position wird in dieser Version noch nicht unterstützt",
+    "插件已停用": "Plugin ist deaktiviert",
+    "「{name}」的位置": "Position von „{name}“",
+    "{slot}（默认）": "{slot} (Standard)",
+    "启用视图「{name}」": "Ansicht „{name}“ aktivieren"
   },
   "zh-Hant": {
     "主机、密钥与已知主机已移到侧栏「主机」页。": "主機、金鑰與已知主機已移到側邊欄「主機」頁。",
@@ -5183,6 +5215,14 @@ window.AsterI18n = {
     "打开插件目录": "開啟外掛資料夾",
     "从文件夹安装…": "從資料夾安裝…",
     "添加开发目录…": "新增開發目錄…",
-    "还没有登记开发目录": "還沒有登記開發目錄"
+    "还没有登记开发目录": "還沒有登記開發目錄",
+    "插件挂在窗口上的状态条和面板：开关，或改放到别的位置": "外掛程式掛在視窗上的狀態列和面板：開關，或改放到別的位置",
+    "状态条": "狀態列",
+    "面板": "面板",
+    "本版本暂不支持这个位置": "本版本暫不支援這個位置",
+    "插件已停用": "外掛程式已停用",
+    "「{name}」的位置": "「{name}」的位置",
+    "{slot}（默认）": "{slot}（預設）",
+    "启用视图「{name}」": "啟用視圖「{name}」"
   }
 };
