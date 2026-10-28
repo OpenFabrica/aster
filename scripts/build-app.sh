@@ -65,17 +65,11 @@ if [[ "$APP_SHORT_VERSION" == *-dev ]]; then
   [[ -n "$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null)" ]] && GIT_REV="${GIT_REV}+"
   plutil -replace CFBundleShortVersionString -string "$APP_SHORT_VERSION-$GIT_REV" \
     "$CONTENTS_DIR/Info.plist"
-  # 开发版换成独立身份 Aster Dev（与 AsterAppIdentity.developmentBundleIdentifier 一致）：
-  # bundle ID 不同，偏好、工作区快照、Application Support、日志与控制 socket 都和正式版分开，
-  # 两个 App 可以同时运行，开发版不会恢复或改写正式版的工作区。
-  plutil -replace CFBundleIdentifier -string io.local.aster-terminal.dev "$CONTENTS_DIR/Info.plist"
-  plutil -replace CFBundleName -string "Aster Dev" "$CONTENTS_DIR/Info.plist"
-  plutil -replace CFBundleDisplayName -string "Aster Dev" "$CONTENTS_DIR/Info.plist"
-  # ssh:// 与 aster:// 链接、Finder「在 Aster 中打开」只交给正式版；.asterrecipe 仍可用
-  # 「打开方式」选开发版，但不会抢成默认程序。
-  plutil -remove CFBundleURLTypes "$CONTENTS_DIR/Info.plist"
-  plutil -remove NSServices "$CONTENTS_DIR/Info.plist"
-  plutil -replace CFBundleDocumentTypes.0.LSHandlerRank -string Alternate "$CONTENTS_DIR/Info.plist"
+  # 本地包沿用正式版身份（bundle ID、数据目录都相同），用来直接替换 /Applications 里的 Aster。
+  # 仓库里的构建号已是「下一次发版」的值；本地包退回上一个已发布的构建号，否则装上之后
+  # Sparkle 会认为下一次正式发版不比本机新，不再提示更新。
+  APP_BUNDLE_VERSION=$(plutil -extract CFBundleVersion raw "$CONTENTS_DIR/Info.plist")
+  plutil -replace CFBundleVersion -string "$((APP_BUNDLE_VERSION - 1))" "$CONTENTS_DIR/Info.plist"
 fi
 cp "$PROJECT_DIR/THIRD-PARTY-NOTICES.md" "$RESOURCES_DIR/THIRD-PARTY-NOTICES.md"
 cp -R "$PROJECT_DIR/Resources/shell-integration" "$RESOURCES_DIR/shell-integration"

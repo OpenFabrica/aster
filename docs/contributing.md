@@ -42,7 +42,7 @@
 - 每次发布的 `CFBundleVersion` 必须大于所有已发布版本，不得复用或按通道单独计数；Sparkle 依赖它判断更新。
 - 标签使用 `v<版本>`；预览版按 `0.5.0-preview.1` 形式表达并通过发布脚本的 `--preview` 指定。不要将预览后缀写进 `CFBundleVersion`，也不要套用其他项目的平台前缀标签规则。
 - **发版之间版本号一直带 `-dev`**（`0.6.7-dev`）：本地与中间构建一眼能和线上包区分。`build-app.sh` 给开发版产物再接上 git 短哈希（`0.6.7-dev-1a2b3c4`，工作区有改动加 `+`），仓库里始终只写 `-dev`。带 `-dev` 的版本永远不发布、不打标签。
-- **开发版是独立身份 Aster Dev**：`-dev` 包的 bundle ID 是 `io.local.aster-terminal.dev`，偏好、工作区快照与 `~/Library/Application Support/Aster-Dev/` 都和正式版分开，可以和正在用的正式版同时运行。新增持久化路径经 `AsterAppIdentity` 推导，不写死 `Aster/...`；见 [应用身份与单实例](developer/app-identity.md)。
+- **本地 `-dev` 包沿用正式版身份**：bundle ID 仍是 `io.local.aster-terminal`，与正式版共用偏好、工作区与数据目录，用来直接替换 `/Applications/Aster.app` 本地使用，打开前先退出正在运行的 Aster。`CFBundleVersion` 在产物里退回上一个已发布值，下次正式发版仍会被 Sparkle 提示。`swift run` 与测试宿主仍按开发版身份隔离数据；新增持久化路径经 `AsterAppIdentity` 推导，不写死 `Aster/...`；见 [应用身份与单实例](developer/app-identity.md)。
 - 单次改动不升版本号；发版由 `scripts/release.sh` 统一处理：去掉 `-dev` 得到发版号，发完自动把版本号推到下一个 `-dev`（末段数字加一）并提交推送。正常发版不需要参数，跳版本号时给 `--short`。发版前先跑 `--dry-run` 核对算出来的版本号。细节见 [软件更新](developer/software-update.md)。
 
 ## 提交信息

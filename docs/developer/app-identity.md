@@ -1,6 +1,6 @@
 # 应用身份与单实例
 
-正式版与开发版各用一套数据，可以同时运行；同一身份同时只跑一个进程。本页说明这两条规则的原因、范围与验证方式。
+正式版与开发版各用一套数据；同一身份同时只跑一个进程。本页说明这两条规则的原因、范围与验证方式。
 
 ## 为什么要分开
 
@@ -13,7 +13,7 @@
 `AsterAppIdentity`（`Sources/AsterCore/AsterAppIdentity.swift`）是唯一判定点。可执行文件解析符号链接后位于 `X.app/Contents/MacOS/` 时，读取 `X.app` 的 bundle ID：
 
 - `io.local.aster-terminal` 等其他 ID：正式版。
-- `io.local.aster-terminal.dev`：开发版，由 `scripts/build-app.sh` 在打 `-dev` 包时写入，显示名 Aster Dev。
+- `io.local.aster-terminal.dev`：开发版。`scripts/build-app.sh` 不再写入这个 ID，本地 `-dev` 包与正式版同一身份；手动把包的 bundle ID 改成它，才会以开发版身份运行。
 - 不在 App 包里（`swift run`、`.build/debug/aster-cli`、测试宿主）：开发版，碰不到正式版数据。
 
 设置页安装的 `/usr/local/bin/aster` 是指向包内 `aster-cli` 的符号链接，同样按包认身份，连到对应的控制 socket。
@@ -31,8 +31,10 @@
 
 ## 开发版不改的东西
 
+下面两条只对以 `.dev` 身份运行的进程生效；`build-app.sh` 打的本地包是正式版身份，不受影响。
+
 - Shell 启动文件：受管区块写的是包内绝对路径，只由正式版维护（`AsterResourceLocations.managesShellStartupFiles`）。开发版的 Pane 沿用正式版装好的那一段；设置里切换 Shell 集成只改设置。
-- 系统入口：开发版包去掉 `CFBundleURLTypes`（`ssh://`、`aster://`）与 `NSServices`，`.asterrecipe` 的 `LSHandlerRank` 降为 `Alternate`。链接、Finder「在 Aster 中打开」与双击 Recipe 仍只交给正式版。
+- 系统入口：手动改成 `.dev` 身份的包，应同时去掉 `CFBundleURLTypes`（`ssh://`、`aster://`）与 `NSServices`，并把 `.asterrecipe` 的 `LSHandlerRank` 降为 `Alternate`，让链接、Finder「在 Aster 中打开」与双击 Recipe 仍只交给正式版。
 
 开发版首次启动是空的：设置、主机与 Recipe 要重新配置，也可以手动把 `Aster/` 下对应文件复制到 `Aster-Dev/`，但不要复制 `Memory/`、`Sessions/` 与 `instance.lock`。通知等系统权限按 bundle ID 记录，开发版第一次使用时要再授权。
 
@@ -54,4 +56,6 @@
 plutil -p dist/Aster.app/Contents/Info.plist | grep -E 'CFBundleIdentifier|CFBundleName|CFBundleURLTypes|NSServices'
 ```
 
-真机验收：正式版保持运行，打开 `dist/Aster.app`，应出现 Aster Dev，空工作区、不发送任何 `--resume`，`~/Library/Application Support/Aster-Dev/` 被创建，正式版的快照与 `~/.zshrc` 不变。再打开一次 `dist/Aster.app`，应切回已在运行的 Aster Dev，不出现第二个进程。
+`dist/Aster.app` 的 bundle ID 应是 `io.local.aster-terminal`，版本号形如 `0.6.27-dev-<git 短哈希>`，`CFBundleVersion` 比仓库值小 1（等于上一个已发布构建号，下一次正式发版仍会被 Sparkle 提示）。
+
+真机验收：退出正在运行的 Aster，用 `dist/Aster.app` 替换 `/Applications/Aster.app` 后打开，应恢复原工作区与设置。正式版在跑时再打开 `dist/Aster.app`，应切回已在运行的实例，不出现第二个进程。
