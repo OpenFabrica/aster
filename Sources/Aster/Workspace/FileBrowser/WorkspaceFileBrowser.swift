@@ -3,6 +3,7 @@ import AsterCore
 import Combine
 
 /// 工作区文件浏览器控制器；由中央 Pane 内容按需挂载。
+/// 选中图片时下半区内嵌预览，↑/↓ 换行即换图；双击仍在右侧打开文件。
 
 @MainActor
 final class FileBrowserViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate,
@@ -14,6 +15,10 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
   private var directory: URL
   private var entries: [URL] = []
   private let table = NSTableView()
+  private let imagePreview = FileBrowserImagePreview()
+  /// 预览区占可用高度的比例；没选中图片时改用零高度约束把它收起，列表占满。
+  private var previewHeightConstraint: NSLayoutConstraint?
+  private var previewCollapsedConstraint: NSLayoutConstraint?
 
   init(runtime: WorkspacePaneRuntime, tab: TerminalTabItem, model: AppModel) {
     self.runtime = runtime
@@ -25,6 +30,9 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
   }
 
   required init?(coder: NSCoder) { nil }
+
+  /// Pane 获得焦点时应接收键盘的视图：列表拿到焦点后 ↑/↓ 才能直接切换文件。
+  var preferredKeyView: NSView { table }
 
   /// 搭建文件浏览器：顶部返回/刷新工具条，下面是当前目录的文件表格。
   override func loadView() {
@@ -61,9 +69,67 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
     let scroll = NSScrollView()
     scroll.hasVerticalScroller = true
     scroll.documentView = table
-    column.addArrangedSubview(scroll)
+    column.addArrangedSubview(makeBody(list: scroll))
     view = column
-    reload()
+    reload(selectingFirstImage: true)
+  }
+
+  /// 列表在上、图片预览在下。预览区用两条互斥的高度约束切换展开 / 收起，
+  /// 不放进 NSStackView：隐藏的子视图会被栈视图摘下，跨视图的比例约束随之失效。
+  private func makeBody(list: NSView) -> NSView {
+    let body = NSView()
+    for view in [list, imagePreview] {
+      view.translatesAutoresizingMaskIntoConstraints = false
+      body.addSubview(view)
+    }
+    let expanded = imagePreview.heightAnchor.constraint(equalTo: body.heightAnchor, multiplier: 0.62)
+    let collapsed = imagePreview.heightAnchor.constraint(equalToConstant: 0)
+    NSLayoutConstraint.activate([
+      list.topAnchor.constraint(equalTo: body.topAnchor),
+      list.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+      list.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+      list.bottomAnchor.constraint(equalTo: imagePreview.topAnchor),
+      imagePreview.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+      imagePreview.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+      imagePreview.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+      collapsed,
+    ])
+    previewHeightConstraint = expanded
+    previewCollapsedConstraint = collapsed
+    imagePreview.isHidden = true
+    return body
+  }
+
+  /// 选中行变化（点击或 ↑/↓）时刷新预览。
+  func tableViewSelectionDidChange(_ notification: Notification) {
+    updatePreview()
+  }
+
+  /// 选中的是图片就展开预览并加载，否则收起预览、列表占满。
+  private func updatePreview() {
+    let row = table.selectedRow
+    guard entries.indices.contains(row), FileBrowserImagePreview.canPreview(entries[row]) else {
+      setPreviewVisible(false)
+      imagePreview.clear()
+      return
+    }
+    setPreviewVisible(true)
+    // 先让预览区拿到展开后的尺寸，降采样才按真实大小计算。
+    view.layoutSubtreeIfNeeded()
+    imagePreview.show(entries[row])
+  }
+
+  private func setPreviewVisible(_ visible: Bool) {
+    guard imagePreview.isHidden == visible else { return }
+    imagePreview.isHidden = !visible
+    // 先停用再启用，避免两条高度约束同时生效产生冲突。
+    if visible {
+      previewCollapsedConstraint?.isActive = false
+      previewHeightConstraint?.isActive = true
+    } else {
+      previewHeightConstraint?.isActive = false
+      previewCollapsedConstraint?.isActive = true
+    }
   }
 
   func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
@@ -87,7 +153,10 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
     return cell
   }
 
-  private func reload() {
+  /// 重新读取当前目录。刷新时尽量保留原来选中的文件；
+  /// 进入新目录时（`selectingFirstImage`）默认选中第一张图片，打开图片目录就能直接看图。
+  private func reload(selectingFirstImage: Bool = false) {
+    let previous = entries.indices.contains(table.selectedRow) ? entries[table.selectedRow] : nil
     do {
       entries = try FileManager.default.contentsOfDirectory(
         at: directory,
@@ -102,13 +171,23 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
       }
     } catch { entries = [] }
     table.reloadData()
+    let target = selectingFirstImage
+      ? entries.firstIndex(where: FileBrowserImagePreview.canPreview)
+      : previous.flatMap { entries.firstIndex(of: $0) }
+    if let target {
+      table.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
+      table.scrollRowToVisible(target)
+    } else {
+      table.deselectAll(nil)
+    }
+    updatePreview()
   }
 
   private func goUp() {
     let parent = directory.deletingLastPathComponent()
     guard parent.path != directory.path else { return }
     directory = parent
-    reload()
+    reload(selectingFirstImage: true)
   }
 
   @objc private func openSelected() {
@@ -116,7 +195,7 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
     let url = entries[table.selectedRow]
     if isDirectory(url) {
       directory = url
-      reload()
+      reload(selectingFirstImage: true)
     } else {
       tab?.openFile(url)
     }
@@ -173,7 +252,7 @@ final class FileBrowserViewController: NSViewController, NSTableViewDataSource, 
   private func openURL(_ url: URL) {
     if isDirectory(url) {
       directory = url
-      reload()
+      reload(selectingFirstImage: true)
     } else {
       tab?.openFile(url)
     }

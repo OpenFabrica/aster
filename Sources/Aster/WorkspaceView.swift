@@ -1348,7 +1348,7 @@ final class WorkspaceViewController: NSViewController {
     }
   }
 
-  /// 把键盘焦点交给当前面板：终端面板交给 SwiftTerm 视图，其余面板交给容器本身。
+  /// 把键盘焦点交给当前面板：终端面板交给 SwiftTerm 视图，其余面板交给容器声明的键盘视图（没有时交给容器本身）。
   /// 交接失败时记录结构化原因——「Pane 永远无法输入」类问题只能靠这里的现场定位。
   private func focusActivePane(in tab: TerminalTabItem) {
     if let session = tab.activeRuntime?.terminalSession {
@@ -1373,7 +1373,7 @@ final class WorkspaceViewController: NSViewController {
         attributes: ["reason": "no_session_no_host"])
       return
     }
-    window.makeFirstResponder(host)
+    window.makeFirstResponder(host.preferredKeyView ?? host)
   }
 
   private func revealEditorLine(_ line: Int, paneID: UUID) {
@@ -2633,6 +2633,7 @@ final class WorkspaceViewController: NSViewController {
       addChild(controller)
       retainedObjects.append(controller)
       content = controller.view
+      host.preferredKeyView = controller.preferredKeyView
     case .web:
       let controller = WebPaneViewController(
         runtime: runtime,

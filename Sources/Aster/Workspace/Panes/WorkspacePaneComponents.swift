@@ -455,6 +455,8 @@ final class ActivePaneHostView: NSView {
   private var externalDropZone: ExternalPaneDropZone?
   private weak var contentView: NSView?
   private var contentTopConstraint: NSLayoutConstraint?
+  /// 非终端 Pane 聚焦时真正接收键盘的视图（如文件浏览器的列表）；nil 时焦点落在容器本身。
+  weak var preferredKeyView: NSView?
   /// 底部槽：`bottomAccessory`（Prompt Queue，带内边距），其下是 `agentHostDock`
   /// （agent 主机终端停靠区，贴边）。内容底边跟随它们，整条约束链每次整体重建。
   private var bottomAccessory: NSView?

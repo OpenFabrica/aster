@@ -81,10 +81,17 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     self.observedDocumentError = runtime.documentError
     super.init(nibName: nil, bundle: nil)
     classifyDocument()
-    showingPreview = runtime.descriptor.kind == .preview && presentationKind != .sourceText
+    showingPreview = initiallyShowsPreview
   }
 
   required init?(coder: NSCoder) { nil }
+
+  /// 打开时是否直接显示预览。图片、PDF、富文档和二进制没有文本内容（runtime 不加载
+  /// `documentText`），即使以 Editor 打开也只能走预览，否则源码视图只剩一个空的行号 1。
+  private var initiallyShowsPreview: Bool {
+    guard presentationKind.usesTextContent else { return true }
+    return runtime.descriptor.kind == .preview && presentationKind != .sourceText
+  }
 
   override func loadView() {
     let root = AppearanceObservingView()
@@ -214,7 +221,7 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       let previous = presentationKind
       classifyDocument()
       guard presentationKind != previous else { return }
-      showingPreview = runtime.descriptor.kind == .preview && presentationKind != .sourceText
+      showingPreview = initiallyShowsPreview
       cachedPreviewView = nil
       previewWebView = nil
       renderedPreviewText = nil
