@@ -109,113 +109,118 @@ private func makeMachineSidebarFixture() throws -> MachineSidebarFixture {
     defaults: defaults, configURL: configURL)
 }
 
-@Test("机器侧栏：Local 恒在最上，添加机器按钮真实存在且可点")
+/// 这些用例都替换全局的 `MachineFleetModel.shared`，并行会互相覆盖，所以串行执行。
 @MainActor
-func machineSidebarRendersLocalAndAddButton() async throws {
-  let fixture = try makeMachineSidebarFixture()
-  defer { fixture.tearDown() }
-  try await Task.sleep(for: .milliseconds(120))
-  fixture.window.contentView?.layoutSubtreeIfNeeded()
+@Suite("机器侧栏", .serialized)
+struct MachineSidebarAppTests {
+  @Test("机器侧栏：Local 恒在最上，添加机器按钮真实存在且可点")
+  @MainActor
+  func machineSidebarRendersLocalAndAddButton() async throws {
+    let fixture = try makeMachineSidebarFixture()
+    defer { fixture.tearDown() }
+    try await Task.sleep(for: .milliseconds(120))
+    fixture.window.contentView?.layoutSubtreeIfNeeded()
 
-  let views = machineSidebarViews(fixture.controller.view)
-  let rows = views.compactMap { $0 as? MachineRowButton }
-  #expect(rows.count == 1)
-  #expect(rows.first?.machineID == MachineProfile.localProfileID)
+    let views = machineSidebarViews(fixture.controller.view)
+    let rows = views.compactMap { $0 as? MachineRowButton }
+    #expect(rows.count == 1)
+    #expect(rows.first?.machineID == MachineProfile.localProfileID)
 
-  // 组头与添加按钮必须是真实控件，且添加按钮挂着可触发的 action。
-  #expect(views.contains { $0.identifier?.rawValue == "machine-section-header" })
-  let addButton = try #require(
-    views.compactMap { $0 as? NSButton }
-      .first { $0.identifier?.rawValue == "machine-add-button" })
-  #expect(addButton.target != nil)
-  #expect(addButton.action != nil)
-  #expect(addButton.isEnabled)
-}
-
-@Test("机器侧栏：保存的机器渲染成一行，右键菜单提供重命名/禁用/移除")
-@MainActor
-func machineSidebarRendersSavedMachineWithMenu() async throws {
-  let fixture = try makeMachineSidebarFixture()
-  defer { fixture.tearDown() }
-  guard case .added(let profile) = await fixture.fleet.addMachine(
-    label: "orb", sshTarget: "root@ubuntu@orb", sessionName: "work", confirm: { _ in true })
-  else {
-    Issue.record("前置添加失败")
-    return
-  }
-  fixture.controller.scheduleRefresh()
-  try await Task.sleep(for: .milliseconds(150))
-  fixture.window.contentView?.layoutSubtreeIfNeeded()
-
-  let rows = machineSidebarViews(fixture.controller.view).compactMap { $0 as? MachineRowButton }
-  #expect(rows.count == 2)
-  #expect(rows[0].machineID == MachineProfile.localProfileID)
-  let remote = try #require(rows.first { $0.machineID == profile.id })
-
-  // 右键菜单是真实可点路径：三项都有 target/action 与代表的机器 ID。
-  let menu = try #require(remote.menu)
-  let titles = menu.items.map(\.title)
-  #expect(titles.contains("重命名…"))
-  #expect(titles.contains("禁用"))
-  #expect(titles.contains("移除…"))
-  for item in menu.items where !item.isSeparatorItem {
-    #expect(item.target != nil, "\(item.title) 必须有可触发的目标")
-    #expect(item.representedObject as? UUID == profile.id)
+    // 组头与添加按钮必须是真实控件，且添加按钮挂着可触发的 action。
+    #expect(views.contains { $0.identifier?.rawValue == "machine-section-header" })
+    let addButton = try #require(
+      views.compactMap { $0 as? NSButton }
+        .first { $0.identifier?.rawValue == "machine-add-button" })
+    #expect(addButton.target != nil)
+    #expect(addButton.action != nil)
+    #expect(addButton.isEnabled)
   }
 
-  // 离线的机器整体灰显，明确表示这是缓存结构。
-  #expect(remote.alphaValue < 1)
-  #expect(remote.toolTip?.contains("需要处理") == true || remote.toolTip?.contains("未连接") == true)
+  @Test("机器侧栏：保存的机器渲染成一行，右键菜单提供重命名/禁用/移除")
+  @MainActor
+  func machineSidebarRendersSavedMachineWithMenu() async throws {
+    let fixture = try makeMachineSidebarFixture()
+    defer { fixture.tearDown() }
+    guard case .added(let profile) = await fixture.fleet.addMachine(
+      label: "orb", sshTarget: "root@ubuntu@orb", sessionName: "work", confirm: { _ in true })
+    else {
+      Issue.record("前置添加失败")
+      return
+    }
+    fixture.controller.scheduleRefresh()
+    try await Task.sleep(for: .milliseconds(150))
+    fixture.window.contentView?.layoutSubtreeIfNeeded()
 
-  // 在弹出层里点某台机器：切换活动机器，并关闭弹出层（切换会重建侧栏与切换器）。
-  remote.performClick(nil)
-  try await Task.sleep(for: .milliseconds(150))
-  #expect(fixture.fleet.activeMachineID == profile.id)
-  let switcher = try #require(fixture.controller.machineSwitcher)
-  #expect(switcher.accessibilityLabel()?.contains("orb") == true)
-}
+    let rows = machineSidebarViews(fixture.controller.view).compactMap { $0 as? MachineRowButton }
+    #expect(rows.count == 2)
+    #expect(rows[0].machineID == MachineProfile.localProfileID)
+    let remote = try #require(rows.first { $0.machineID == profile.id })
 
-@Test("机器侧栏：主菜单「文件 ▸ 添加机器…」与侧栏按钮指向同一个动作")
-@MainActor
-func machineSidebarMenuEntryMatchesSidebarButton() async throws {
-  let fixture = try makeMachineSidebarFixture()
-  defer { fixture.tearDown() }
-  try await Task.sleep(for: .milliseconds(120))
-  let addButton = try #require(
-    machineSidebarViews(fixture.controller.view).compactMap { $0 as? NSButton }
-      .first { $0.identifier?.rawValue == "machine-add-button" })
-  // 两条入口共用同一个 selector；主菜单项转交给当前工作区控制器。
-  #expect(addButton.action == #selector(WorkspaceViewController.presentAddMachine))
-  #expect(fixture.controller.responds(to: #selector(WorkspaceViewController.presentAddMachine)))
-}
+    // 右键菜单是真实可点路径：三项都有 target/action 与代表的机器 ID。
+    let menu = try #require(remote.menu)
+    let titles = menu.items.map(\.title)
+    #expect(titles.contains("重命名…"))
+    #expect(titles.contains("禁用"))
+    #expect(titles.contains("移除…"))
+    for item in menu.items where !item.isSeparatorItem {
+      #expect(item.target != nil, "\(item.title) 必须有可触发的目标")
+      #expect(item.representedObject as? UUID == profile.id)
+    }
 
-@Test("机器列表变化只换左下角切换器，终端与 Pane 树不重建；切换当前机器才整树刷新")
-@MainActor
-func machineFleetChangeRefreshesOnlySwitcher() async throws {
-  let fixture = try makeMachineSidebarFixture()
-  defer { fixture.tearDown() }
-  try await Task.sleep(for: .milliseconds(120))
-  fixture.window.contentView?.layoutSubtreeIfNeeded()
-  let paneHost = try #require(allViews(fixture.controller.view).first { $0 is ActivePaneHostView })
-  let oldSwitcher = try #require(fixture.controller.machineSwitcher)
+    // 离线的机器整体灰显，明确表示这是缓存结构。
+    #expect(remote.alphaValue < 1)
+    #expect(remote.toolTip?.contains("需要处理") == true || remote.toolTip?.contains("未连接") == true)
 
-  guard case .added(let profile) = await fixture.fleet.addMachine(
-    label: "orb", sshTarget: "root@ubuntu@orb", sessionName: "work", confirm: { _ in true })
-  else {
-    Issue.record("前置添加失败")
-    return
+    // 在弹出层里点某台机器：切换活动机器，并关闭弹出层（切换会重建侧栏与切换器）。
+    remote.performClick(nil)
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(fixture.fleet.activeMachineID == profile.id)
+    let switcher = try #require(fixture.controller.machineSwitcher)
+    #expect(switcher.accessibilityLabel()?.contains("orb") == true)
   }
-  try await Task.sleep(for: .milliseconds(150))
-  // Pane 容器还是原来那个、仍在窗口里：终端视图没有被拆下重装。
-  #expect(paneHost.window === fixture.window)
-  let newSwitcher = try #require(fixture.controller.machineSwitcher)
-  #expect(newSwitcher !== oldSwitcher)
-  #expect(oldSwitcher.window == nil)
-  #expect(machineSidebarViews(fixture.controller.view).compactMap { $0 as? MachineRowButton }.count == 2)
-  newSwitcher.dismissPopover()
 
-  // 当前机器换了：整组标签跟着换，整树刷新。
-  _ = fixture.fleet.selectMachine(profile.id)
-  try await Task.sleep(for: .milliseconds(150))
-  #expect(paneHost.window == nil)
+  @Test("机器侧栏：主菜单「文件 ▸ 添加机器…」与侧栏按钮指向同一个动作")
+  @MainActor
+  func machineSidebarMenuEntryMatchesSidebarButton() async throws {
+    let fixture = try makeMachineSidebarFixture()
+    defer { fixture.tearDown() }
+    try await Task.sleep(for: .milliseconds(120))
+    let addButton = try #require(
+      machineSidebarViews(fixture.controller.view).compactMap { $0 as? NSButton }
+        .first { $0.identifier?.rawValue == "machine-add-button" })
+    // 两条入口共用同一个 selector；主菜单项转交给当前工作区控制器。
+    #expect(addButton.action == #selector(WorkspaceViewController.presentAddMachine))
+    #expect(fixture.controller.responds(to: #selector(WorkspaceViewController.presentAddMachine)))
+  }
+
+  @Test("机器列表变化只换左下角切换器，终端与 Pane 树不重建；切换当前机器才整树刷新")
+  @MainActor
+  func machineFleetChangeRefreshesOnlySwitcher() async throws {
+    let fixture = try makeMachineSidebarFixture()
+    defer { fixture.tearDown() }
+    try await Task.sleep(for: .milliseconds(120))
+    fixture.window.contentView?.layoutSubtreeIfNeeded()
+    let paneHost = try #require(allViews(fixture.controller.view).first { $0 is ActivePaneHostView })
+    let oldSwitcher = try #require(fixture.controller.machineSwitcher)
+
+    guard case .added(let profile) = await fixture.fleet.addMachine(
+      label: "orb", sshTarget: "root@ubuntu@orb", sessionName: "work", confirm: { _ in true })
+    else {
+      Issue.record("前置添加失败")
+      return
+    }
+    try await Task.sleep(for: .milliseconds(150))
+    // Pane 容器还是原来那个、仍在窗口里：终端视图没有被拆下重装。
+    #expect(paneHost.window === fixture.window)
+    let newSwitcher = try #require(fixture.controller.machineSwitcher)
+    #expect(newSwitcher !== oldSwitcher)
+    #expect(oldSwitcher.window == nil)
+    #expect(machineSidebarViews(fixture.controller.view).compactMap { $0 as? MachineRowButton }.count == 2)
+    newSwitcher.dismissPopover()
+
+    // 当前机器换了：整组标签跟着换，整树刷新。
+    _ = fixture.fleet.selectMachine(profile.id)
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(paneHost.window == nil)
+  }
 }
