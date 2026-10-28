@@ -107,4 +107,75 @@ struct StickyNoteCenterTests {
     #expect(content.primaryResultText == nil)
     content.teardown()
   }
+
+  /// 带格式的正文、半透明与折叠都会保存；文字和格式都没变时不算修改。
+  @Test func richTextAndFlagsPersist() throws {
+    let center = makeCenter()
+    defer { center.hideAll() }
+    let note = center.createNote(text: "粗体", activate: false)
+    let bold = NSAttributedString(string: "粗体", attributes: [.font: NSFont.boldSystemFont(ofSize: 14)])
+    let rtf = try #require(bold.rtf(from: NSRange(location: 0, length: bold.length), documentAttributes: [:]))
+    center.noteTextDidChange(id: note.id, text: "粗体", richText: rtf)
+    let modified = try #require(center.note(id: note.id)?.modifiedAt)
+    center.noteTextDidChange(id: note.id, text: "粗体", richText: rtf)
+    #expect(center.note(id: note.id)?.modifiedAt == modified)
+    center.setTranslucent(true, id: note.id)
+    center.setCollapsed(true, id: note.id)
+    center.flush()
+    let saved = try #require(try readBack().notes.first)
+    #expect(saved.richText == rtf)
+    #expect(saved.isTranslucent)
+    #expect(saved.isCollapsed)
+  }
+}
+
+/// 便笺快捷键与 macOS「便笺」一致；格式操作作用于选区。
+@MainActor
+@Suite("StickyNoteFormatting")
+struct StickyNoteFormattingTests {
+  /// 映射一个按键。
+  private func command(_ key: String, _ modifiers: NSEvent.ModifierFlags) -> StickyNoteCommand? {
+    StickyNoteCommand.command(characters: key, modifiers: modifiers)
+  }
+
+  @Test func keysMapToStickiesCommands() {
+    #expect(command("n", .command) == .newNote)
+    #expect(command("t", .command) == .showFonts)
+    #expect(command("b", .command) == .bold)
+    #expect(command("i", .command) == .italic)
+    #expect(command("u", .command) == .underline)
+    #expect(command("=", .command) == .bigger)
+    #expect(command("+", [.command, .shift]) == .bigger)
+    #expect(command("-", .command) == .smaller)
+    #expect(command("1", .command) == .color(.yellow))
+    #expect(command("6", .command) == .color(.gray))
+    #expect(command("7", .command) == nil)
+    #expect(command("f", [.command, .option]) == .floatOnTop)
+    #expect(command("t", [.command, .option]) == .translucent)
+    // 编辑类快捷键留给正文与菜单。
+    #expect(command("c", .command) == nil)
+    #expect(command("z", [.command, .shift]) == nil)
+    #expect(command("b", []) == nil)
+  }
+
+  /// 有选区时粗体整段切换，再按一次去掉；字号在范围内增减。
+  @Test func boldTogglesAndSizeAdjustsSelection() throws {
+    let textView = NSTextView()
+    textView.isRichText = true
+    textView.textStorage?.setAttributedString(
+      NSAttributedString(string: "hello", attributes: [.font: NSFont.systemFont(ofSize: 13)]))
+    textView.setSelectedRange(NSRange(location: 0, length: 5))
+    let manager = NSFontManager.shared
+    func font() throws -> NSFont {
+      try #require(textView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+    }
+    StickyNoteFormatter.toggle(.boldFontMask, in: textView)
+    #expect(manager.traits(of: try font()).contains(.boldFontMask))
+    StickyNoteFormatter.toggle(.boldFontMask, in: textView)
+    #expect(!manager.traits(of: try font()).contains(.boldFontMask))
+    StickyNoteFormatter.adjustSize(by: 1, in: textView)
+    #expect(try font().pointSize == 14)
+    StickyNoteFormatter.adjustSize(by: -100, in: textView)
+    #expect(try font().pointSize == StickyNoteFormatter.sizeRange.lowerBound)
+  }
 }

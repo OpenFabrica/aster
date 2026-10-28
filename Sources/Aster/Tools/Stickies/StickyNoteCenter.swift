@@ -96,9 +96,15 @@ final class StickyNoteCenter {
 
   // MARK: - 窗口回调
 
-  /// 正文变了。
-  func noteTextDidChange(id: UUID, text: String) {
-    mutate(id) { $0.text = StickyNote.clampedText(text) }
+  /// 正文或格式变了。`richText` 是整篇的 RTF；没有内容时为 nil。
+  func noteTextDidChange(id: UUID, text: String, richText: Data? = nil) {
+    let clamped = StickyNote.clampedText(text)
+    let rich = richText.flatMap(StickyNote.acceptedRichText)
+    guard let current = note(id: id), current.text != clamped || current.richText != rich else { return }
+    mutate(id) {
+      $0.text = clamped
+      $0.richText = rich
+    }
   }
 
   /// 换颜色。
@@ -111,6 +117,17 @@ final class StickyNoteCenter {
   func setFloatsOnTop(_ floats: Bool, id: UUID) {
     mutate(id, touch: false) { $0.floatsOnTop = floats }
     windows[id]?.apply(floatsOnTop: floats)
+  }
+
+  /// 切换半透明。
+  func setTranslucent(_ translucent: Bool, id: UUID) {
+    mutate(id, touch: false) { $0.isTranslucent = translucent }
+    windows[id]?.apply(translucent: translucent)
+  }
+
+  /// 折叠或展开（窗口自己已经改好大小，这里只记状态）。
+  func setCollapsed(_ collapsed: Bool, id: UUID) {
+    mutate(id, touch: false) { $0.isCollapsed = collapsed }
   }
 
   /// 窗口移动或改大小后记下位置；不算修改，不改变列表顺序。

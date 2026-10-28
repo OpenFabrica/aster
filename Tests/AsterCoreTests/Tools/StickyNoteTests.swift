@@ -78,4 +78,21 @@ struct StickyNoteTests {
     #expect(clamped.utf16.count == StickyNote.maximumTextLength - 2)
     #expect(StickyNote.clampedText("short") == "short")
   }
+
+  /// 格式、半透明与折叠能往返；超过上限的格式丢掉、文字保留；旧文件没有这些字段时取默认值。
+  @Test func richTextAndWindowFlagsRoundTrip() throws {
+    let rtf = Data("{\\rtf1 hi}".utf8)
+    let note = StickyNote(text: "hi", richText: rtf, isTranslucent: true, isCollapsed: true)
+    let data = try JSONEncoder().encode(StickyNoteFile(notes: [note]))
+    let decoded = try #require(try JSONDecoder().decode(StickyNoteFile.self, from: data).notes.first)
+    #expect(decoded.richText == rtf)
+    #expect(decoded.isTranslucent)
+    #expect(decoded.isCollapsed)
+    let huge = StickyNote(text: "x", richText: Data(count: StickyNote.maximumRichTextBytes + 1))
+    #expect(huge.richText == nil)
+    #expect(huge.text == "x")
+    let legacy = try decode(#"{"notes": [{"id": "\#(UUID().uuidString)", "text": "旧"}]}"#)
+    #expect(legacy.notes.first?.richText == nil)
+    #expect(legacy.notes.first?.isCollapsed == false)
+  }
 }

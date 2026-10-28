@@ -37,9 +37,14 @@ public struct StickyNoteFrame: Equatable, Codable, Sendable {
 public struct StickyNote: Equatable, Identifiable, Sendable {
   /// 一张便笺最多保存的字符数（UTF-16 计）；粘贴超长内容时截断，防止文件无限变大。
   public static let maximumTextLength = 200_000
+  /// 带格式正文（RTF）的字节上限；超过就只存纯文本，格式丢掉，文字不丢。
+  public static let maximumRichTextBytes = 4 * 1_048_576
 
   public var id: UUID
+  /// 纯文本正文：标题、搜索与预填都用它。
   public var text: String
+  /// 带格式的正文（RTF：字体、字号、粗斜体、下划线、文字颜色）；nil 表示没有格式，按默认字体显示 `text`。
+  public var richText: Data?
   public var color: StickyNoteColor
   /// 上次窗口的位置；从没显示过时为 nil。
   public var frame: StickyNoteFrame?
@@ -47,6 +52,10 @@ public struct StickyNote: Equatable, Identifiable, Sendable {
   public var isOpen: Bool
   /// 浮在其它窗口上面。
   public var floatsOnTop: Bool
+  /// 窗口半透明。
+  public var isTranslucent: Bool
+  /// 折叠成只剩标题栏（`frame` 仍记展开时的大小）。
+  public var isCollapsed: Bool
   public var createdAt: Date
   public var modifiedAt: Date
 
@@ -54,19 +63,25 @@ public struct StickyNote: Equatable, Identifiable, Sendable {
   public init(
     id: UUID = UUID(),
     text: String = "",
+    richText: Data? = nil,
     color: StickyNoteColor = .yellow,
     frame: StickyNoteFrame? = nil,
     isOpen: Bool = true,
     floatsOnTop: Bool = false,
+    isTranslucent: Bool = false,
+    isCollapsed: Bool = false,
     createdAt: Date = Date(),
     modifiedAt: Date? = nil
   ) {
     self.id = id
     self.text = text
+    self.richText = richText.flatMap(Self.acceptedRichText)
     self.color = color
     self.frame = frame
     self.isOpen = isOpen
     self.floatsOnTop = floatsOnTop
+    self.isTranslucent = isTranslucent
+    self.isCollapsed = isCollapsed
     self.createdAt = createdAt
     self.modifiedAt = modifiedAt ?? createdAt
   }
@@ -84,6 +99,11 @@ public struct StickyNote: Equatable, Identifiable, Sendable {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return true }
     return text.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]) != nil
+  }
+
+  /// 带格式正文在上限内才保留，否则返回 nil（退回纯文本）。
+  public static func acceptedRichText(_ data: Data) -> Data? {
+    data.isEmpty || data.count > maximumRichTextBytes ? nil : data
   }
 
   /// 超长文字截到上限（不切开字素簇）。
@@ -105,7 +125,7 @@ public struct StickyNote: Equatable, Identifiable, Sendable {
 
 extension StickyNote: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, text, color, frame, isOpen, floatsOnTop, createdAt, modifiedAt
+    case id, text, richText, color, frame, isOpen, floatsOnTop, isTranslucent, isCollapsed, createdAt, modifiedAt
   }
 
   /// `id` 必须有效，否则整条丢弃；其余字段坏了用默认值。时间按 Unix 秒读写，不依赖解码器的日期策略。
@@ -113,10 +133,13 @@ extension StickyNote: Codable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     id = try container.decode(UUID.self, forKey: .id)
     text = Self.clampedText((try? container.decode(String.self, forKey: .text)) ?? "")
+    richText = (try? container.decode(Data.self, forKey: .richText)).flatMap(Self.acceptedRichText)
     color = (try? container.decode(StickyNoteColor.self, forKey: .color)) ?? .yellow
     frame = (try? container.decode(StickyNoteFrame.self, forKey: .frame)).flatMap { $0.isUsable ? $0 : nil }
     isOpen = (try? container.decode(Bool.self, forKey: .isOpen)) ?? false
     floatsOnTop = (try? container.decode(Bool.self, forKey: .floatsOnTop)) ?? false
+    isTranslucent = (try? container.decode(Bool.self, forKey: .isTranslucent)) ?? false
+    isCollapsed = (try? container.decode(Bool.self, forKey: .isCollapsed)) ?? false
     let created = (try? container.decode(Double.self, forKey: .createdAt)).flatMap(Self.date(unixSeconds:))
     let modified = (try? container.decode(Double.self, forKey: .modifiedAt)).flatMap(Self.date(unixSeconds:))
     createdAt = created ?? modified ?? Date(timeIntervalSince1970: 0)
@@ -127,10 +150,13 @@ extension StickyNote: Codable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(id, forKey: .id)
     try container.encode(text, forKey: .text)
+    try container.encodeIfPresent(richText, forKey: .richText)
     try container.encode(color, forKey: .color)
     try container.encodeIfPresent(frame, forKey: .frame)
     try container.encode(isOpen, forKey: .isOpen)
     try container.encode(floatsOnTop, forKey: .floatsOnTop)
+    try container.encode(isTranslucent, forKey: .isTranslucent)
+    try container.encode(isCollapsed, forKey: .isCollapsed)
     try container.encode(createdAt.timeIntervalSince1970, forKey: .createdAt)
     try container.encode(modifiedAt.timeIntervalSince1970, forKey: .modifiedAt)
   }

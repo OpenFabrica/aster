@@ -495,7 +495,18 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
   位置从最近一张开着的便笺错开，没有时放在鼠标所在屏幕右上角。改字更新 `modifiedAt`，移动、换开关不算修改。
 - 窗口（`StickyNoteWindowController`）：`.titled + .fullSizeContentView`，隐藏标题文字与缩放 / 最小化按钮，
   顶部 24pt 略深的色带可拖动。纸面取 macOS「便笺」六色，固定 `.aqua` 外观。右键菜单在系统编辑菜单前加：新建、
-  颜色、浮在最前面（`.floating` 层级）、删除（有内容先确认）；窗口里 `⌘N` 新建便笺。纯文本，`allowsUndo`。
+  字体、颜色、浮在最前面（`.floating` 层级）、半透明（`alphaValue` 0.75）、折叠、删除（有内容先确认）。
+- 快捷键对齐 macOS「便笺」，由 `StickyNoteWindow.performKeyEquivalent` 先于菜单处理（否则 `⌘N`/`⌘T`/`⌘1` 会落到
+  新建窗口、新建标签、切换标签）：`⌘N` 新建、`⌘T` 字体面板、`⌘B`/`⌘I` 切换粗斜体、`⌘U` 下划线、`⌘+`/`⌘=` 与 `⌘-`
+  字号 ±1（8–96）、`⌘1`–`⌘6` 颜色、`⌥⌘F` 浮在最前面、`⌥⌘T` 半透明。映射是纯函数 `StickyNoteCommand.command`。
+  粗斜体按选区开头的字体决定加或去，整段一致；没有选区时改输入属性。格式操作经 `shouldChangeText`/`didChangeText`，
+  可撤销，也会触发保存。
+- 折叠：双击标题栏由系统调到 `zoom`/`performZoom`（偏好为最小化时是 `performMiniaturize`，`⌘M` 同），窗口改为折叠 /
+  展开，高度收成实际标题栏高度，标题栏里显示第一行；折叠时不可改大小，记位置按展开高度记。
+- 正文是富文本（`isRichText`、`usesFontPanel`，不收图片）：保存纯文本 `text`（标题、搜索、预填用）与整篇 RTF
+  `richText`；RTF 超过 4 MiB 只存纯文本。没有 `richText` 的旧便笺按默认字体显示纯文本。
+- 列表的选中行用浅色圆角底（`NSTableRowView.drawSelection`），不用系统强调蓝；表格 `acceptsFirstMouse`，
+  便笺窗口拿着键盘时第一下点击工具面板里的列表也能选中。
 - 存储：`<AppSupport>/sticky-notes.json`（`StickyNoteStore`），`{version: 1, notes: [...]}`，时间写 Unix 秒。
   读取上限 32 MiB；坏文件改名 `.bad` 留底后从空开始。解码容错（AsterCore `StickyNote`）：`id` 无效的记录丢弃、
   重复 `id` 留第一条、坏字段用默认值、无效位置按没有位置处理；单张便笺正文上限 200,000 个 UTF-16 单元（不切开

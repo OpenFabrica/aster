@@ -18,7 +18,7 @@ final class StickiesToolContent: NSObject, BuiltinToolContent, NSTableViewDataSo
   private let actions: BuiltinToolActions
   private let center: StickyNoteCenter
   private let root = BuiltinToolRootView()
-  private let tableView = NSTableView()
+  private let tableView = StickyNoteListTableView()
   private let scrollView = NSScrollView()
   private let emptyLabel = makeLabel("", size: 12, color: AsterTheme.secondaryInk)
   private var deleteButton: NSButton?
@@ -104,6 +104,12 @@ final class StickiesToolContent: NSObject, BuiltinToolContent, NSTableViewDataSo
       ?? StickyNoteListCell(identifier: identifier)
     cell.configure(note: rows[row])
     return cell
+  }
+
+  /// 选中行用浅色底，不用系统的强调蓝：行里的文字颜色是写死的，蓝底上看不清。
+  func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+    tableView.makeView(withIdentifier: StickyNoteListRowView.identifier, owner: self) as? StickyNoteListRowView
+      ?? StickyNoteListRowView()
   }
 
   func tableViewSelectionDidChange(_ notification: Notification) {
@@ -202,6 +208,36 @@ final class StickiesToolContent: NSObject, BuiltinToolContent, NSTableViewDataSo
     guard primary != lastPrimary else { return }
     lastPrimary = primary
     actions.resultDidChange()
+  }
+}
+
+/// 便笺列表：面板不在前台时第一下点击也能选中行。工具面板是非激活浮窗，便笺窗口拿着键盘时，
+/// 默认第一下点击只用来把面板设为 key，行选不上。
+@MainActor
+private final class StickyNoteListTableView: NSTableView {
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// 列表行的底：选中时淡淡的强调色圆角块；内容始终按普通背景着色，文字颜色不变。
+@MainActor
+private final class StickyNoteListRowView: NSTableRowView {
+  static let identifier = NSUserInterfaceItemIdentifier("StickyNoteListRow")
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    identifier = Self.identifier
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { nil }
+
+  override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+  /// 圆角浅色块，四周留 4pt；只填行内，不越界。
+  override func drawSelection(in dirtyRect: NSRect) {
+    let rect = bounds.insetBy(dx: 4, dy: 2)
+    NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
+    NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
   }
 }
 
