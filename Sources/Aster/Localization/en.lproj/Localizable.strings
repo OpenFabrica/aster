@@ -2831,3 +2831,5 @@
 "插件「%@」没有可以打开的面板「%@」" = "Plugin “%@” has no panel “%@” that can be opened";
 "插件「%@」里没有可用的功能「%@」" = "Plugin “%@” has no available feature “%@”";
 "↩ 执行：%@" = "↩ Runs: %@";
+"当前 Pane 底部" = "Bottom of Focused Pane";
+"在当前终端 Pane 底部显示当前仓库的分支、领先 / 落后提交数和未提交改动数，点击可复制分支名或预填 git 命令" = "Shows the current repository’s branch, ahead/behind counts, and uncommitted changes at the bottom of the focused terminal pane; click to copy the branch name or pre-fill a git command";

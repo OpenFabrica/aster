@@ -175,7 +175,7 @@ v1 范围：
 | `aster.regex` | 六个标志、高亮、编号与命名分组；匹配在 Web Worker 里跑，1 s 超时 terminate | —（只靠关键词） | `clipboard.write` |
 | `aster.diff` | Myers 行级 diff（线性空间）、折叠相同行、行内高亮、忽略空白/大小写、复制 unified diff；> 5000 行截断 | — | `clipboard.write` |
 | `aster.color` | HEX 3/4/6/8、rgb(a)/hsl(a)（含 CSS4 空格写法）、裸 `r, g, b`、颜色名；WCAG 对比度 | `#` + 3/4/6/8 位、不带 `#` 且含字母的 6 位、`rgb(`/`hsl(` 开头 | `clipboard.write` |
-| `aster.gitbar` | 示例：`tab.bottom` 状态条，显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
+| `aster.gitbar` | 示例：`activePane.bottom` 状态条（跟着当前 Pane 走），显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
 | `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
 - 输入分配：JWT 与颜色的 `enter`/`query` 都填输入框；正则的 `enter` 填测试文本（单行 `/…/flags` 填进正则），
@@ -439,6 +439,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 | `window.bottom` | bar | 窗口级 | 整个窗口最底，全宽（底部标签栏布局时在标签栏下面） | 已实现 |
 | `sidebar.section` | bar（纵向列表）/ panel | 窗口级 | 竖排标签栏里，标签列表之后、留白之前；只在竖排且标签栏可见时挂载 | 已实现 |
 | `pane.bottom` | bar | 单个终端 Pane（cwd、远端、Agent 都取该 Pane 自己的） | 每个终端 Pane 底部，内容与 Prompt Queue 之间 | 已实现 |
+| `activePane.bottom` | bar | 当前标签（cwd = 活动 Pane，同 `tab.*`） | 只挂在当前聚焦的终端 Pane 底部，焦点换到哪个 Pane 就搬到哪个 | 已实现 |
 | `pane.header` | bar（只放图标，≤ 3 项） | 单个 Pane | Pane 顶部悬停带 | 后续（P3） |
 
 未实现的位置（目前只有 `pane.header`）清单里**可以声明**（向前兼容，不会因此拒绝插件），但视图不挂载、不跑脚本；
@@ -480,6 +481,16 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
   侧栏 80–400，其它 120–800），只改高度约束、不重载；`ToolPanelSessionHost` 经 `onHeightRequest` 回调宿主，声明不变时沿用该高度。
   Inspector 页签仍忽略高度请求。会话走 `ToolPanelSessionCache`，整树重建只借用。
 - **重建**：侧栏视图从无到有 / 从有到无时整树重建一次（`mountedSlots` 含 `.sidebarSection`），个数变化只改区块。
+
+`activePane.bottom` 的规则：
+
+- **每个窗口一条**，宿主长期持有，挂在选中标签活动终端 Pane 的 `ActivePaneHostView` 底部链里（`setActivePaneBar(_:)`）。
+  活动 Pane 底部自上而下：内容 → `pane.bottom` 条 → `activePane.bottom` 条 → Prompt Queue → 停靠区。
+- **焦点切换只搬条**：`activePaneChanged` 时 `installExtensionActivePaneBar()` 把同一实例从旧宿主摘下、装到新宿主，只重建这两个
+  宿主的约束链，不整树重建。焦点在文件 / 工具 / 网页 Pane 时条摘下，回到终端 Pane 再挂上。只有视图有无变化（启用 / 停用）
+  才整树重建一次。
+- **上下文、调度与动作同 `tab.*`**：活动 Pane 的 cwd / 分支 / Agent，一个 feed，按 `refresh.on` 触发；`terminal` 动作写到活动 Pane。
+  条高 20–26，缺省 24。可见性：窗口可见、且条挂在窗口里；焦点移到非终端 Pane 且窗口里没有别的条时调度暂停。
 
 `pane.bottom` 的规则：
 
@@ -622,7 +633,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 ### 内置示例：`aster.gitbar`
 
-`Resources/tools-builtin/aster.gitbar/`：没有功能、没有网页，只贡献一个 `tab.bottom` 的 bar `branch`（权限 `exec`、
+`Resources/tools-builtin/aster.gitbar/`：没有功能、没有网页，只贡献一个 `activePane.bottom` 的 bar `branch`（用户可在设置页改回 `tab.bottom`）（权限 `exec`、
 `clipboard.write`、`terminal.insert`；每 30 s 加 `cwd` / `branch` / `activePane` 触发）。`bin/gitbar.sh` 是 POSIX sh 脚本，
 不依赖 jq / python：
 
@@ -648,7 +659,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
                 "enabled": true, "permissions": [{ "id": "exec", "risk": "high", "title": "…", "granted": true }],
                 "networkDomains": ["…"], "featureCount": 2, "removable": true,
                 "views": [{ "id": "branch", "title": "Git 分支", "kind": "bar|panel", "slot": "tab.bottom", "defaultSlot": "tab.bottom",
-                            "enabled": true, "slots": ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom"], "inactiveReason": "null|disabled|pluginDisabled|unsupported|layout" }] }],
+                            "enabled": true, "slots": ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom", "activePane.bottom"], "inactiveReason": "null|disabled|pluginDisabled|unsupported|layout" }] }],
   "viewSlots": [{ "id": "tab.bottom", "title": "标签底部", "kinds": ["bar"], "implemented": true }],
   "issues": [{ "path": "…", "message": "…" }],
   "developmentFolders": ["…"]

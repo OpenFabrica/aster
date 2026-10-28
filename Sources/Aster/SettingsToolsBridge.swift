@@ -208,6 +208,7 @@ final class SettingsToolsBridge {
     case .tabBottom: L("标签底部")
     case .paneHeader: L("Pane 顶部")
     case .paneBottom: L("Pane 底部")
+    case .activePaneBottom: L("当前 Pane 底部")
     case .inspectorPanel: L("详情面板")
     }
   }

@@ -142,7 +142,7 @@ func settingsToolsPageRendersViewControls() async throws {
   #expect(try await eval("[...document.querySelectorAll('.tool-view .tool-badge')].map(n => n.dataset.kind).join(',')") == "bar,panel,bar")
   // bar 可选所有已实现的 bar 位置；当前值是 tab.top；缺省位置（tab.bottom）带「（默认）」后缀。
   let branch = "document.querySelector('[data-view-id=\"branch\"] select')"
-  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "window.top,window.bottom,sidebar.section,tab.top,tab.bottom,pane.bottom")
+  #expect(try await eval("[...\(branch).options].map(o => o.value).join(',')") == "window.top,window.bottom,sidebar.section,tab.top,tab.bottom,pane.bottom,activePane.bottom")
   #expect(try await eval("\(branch).value") == "tab.top")
   #expect(try await eval("[...\(branch).options].find(o => o.value === 'tab.bottom').textContent").hasSuffix("（默认）"))
   // 声明了未实现位置的视图，下拉框补一项当前值，并带灰字提示。

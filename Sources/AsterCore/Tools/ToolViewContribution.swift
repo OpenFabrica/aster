@@ -27,6 +27,8 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
   case tabBottom = "tab.bottom"
   case paneHeader = "pane.header"
   case paneBottom = "pane.bottom"
+  /// 只挂在当前聚焦的终端 Pane 底部，焦点换到哪个 Pane 条就移到哪个 Pane；上下文同 `tab.*`（活动 Pane）。
+  case activePaneBottom = "activePane.bottom"
   case inspectorPanel = "inspector.panel"
 
   /// 这个挂载点接受的视图类型。
@@ -34,7 +36,7 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
     switch self {
     case .inspectorPanel: [.panel]
     case .sidebarSection: [.bar, .panel]
-    case .windowTop, .windowBottom, .tabTop, .tabBottom, .paneHeader, .paneBottom: [.bar]
+    case .windowTop, .windowBottom, .tabTop, .tabBottom, .paneHeader, .paneBottom, .activePaneBottom: [.bar]
     }
   }
 
@@ -42,7 +44,7 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
   public var scope: ToolViewContextScope {
     switch self {
     case .windowTop, .windowBottom, .sidebarSection: .window
-    case .tabTop, .tabBottom, .inspectorPanel: .tab
+    case .tabTop, .tabBottom, .activePaneBottom, .inspectorPanel: .tab
     case .paneHeader, .paneBottom: .pane
     }
   }
@@ -52,7 +54,7 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
     switch self {
     case .tabTop, .tabBottom, .windowBottom: 22...28
     case .windowTop: 28...28
-    case .paneBottom: 20...26
+    case .paneBottom, .activePaneBottom: 20...26
     case .paneHeader: 14...14
     case .sidebarSection: 24...24
     case .inspectorPanel: nil
@@ -64,7 +66,7 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
     switch self {
     case .tabTop, .tabBottom, .windowBottom: 26
     case .windowTop: 28
-    case .paneBottom, .sidebarSection: 24
+    case .paneBottom, .activePaneBottom, .sidebarSection: 24
     case .paneHeader: 14
     case .inspectorPanel: nil
     }
@@ -74,7 +76,8 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
   /// 设置页显示「本版本暂不支持这个位置」。
   public var isImplemented: Bool {
     switch self {
-    case .windowTop, .windowBottom, .sidebarSection, .tabTop, .tabBottom, .paneBottom, .inspectorPanel: true
+    case .windowTop, .windowBottom, .sidebarSection, .tabTop, .tabBottom, .paneBottom, .activePaneBottom, .inspectorPanel:
+      true
     case .paneHeader: false
     }
   }

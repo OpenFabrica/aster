@@ -1,5 +1,6 @@
 // 界面扩展挂到真实工作区：tab.bottom 条跨整树重建是同一实例、贴在 Pane 区下面；tab.top 条成为 contentHeader；
-// 停用视图后条被撤下；详情面板拿到窗口的插件面板提供方；pane.bottom 每个终端 Pane 一条、用该 Pane 自己的目录。
+// 停用视图后条被撤下；详情面板拿到窗口的插件面板提供方；pane.bottom 每个终端 Pane 一条、用该 Pane 自己的目录；
+// activePane.bottom 只有一条，跟着焦点在终端 Pane 之间搬动。
 import AppKit
 import AsterCore
 import Testing
@@ -221,6 +222,131 @@ struct WorkspaceExtensionMountTests {
     #expect(!contextB.isRemote)
     let keyB = ToolBarScheduler.paneFeedKey(entryID: entry.id, paneID: b.id)
     #expect(fixture.host.scheduler.feed(id: keyB)?.context.workingDirectory == b.workingDirectory)
+  }
+
+  @Test("tab.bottom 跟随活动 Pane：切到另一个 Pane 后上下文换成它的目录与 Pane id")
+  func tabBottomFollowsActivePaneSwitch() throws {
+    let entry = makeToolViewEntry(slot: .tabBottom, triggers: [.cwd, .activePane])
+    let (layout, a, b, _) = try makePaneLayout()
+    let fixture = try makeFixture(entries: [entry], layout: layout)
+    defer { fixture.close() }
+    let tab = try #require(fixture.workspace.model.selectedTab)
+    tab.setActivePane(a.id)
+    #expect(fixture.host.scheduler.feed(id: entry.id)?.context.workingDirectory == a.workingDirectory)
+    tab.setActivePane(b.id)
+    #expect(fixture.host.scheduler.feed(id: entry.id)?.context.paneID == b.id.uuidString)
+    #expect(fixture.host.scheduler.feed(id: entry.id)?.context.workingDirectory == b.workingDirectory)
+  }
+
+  // MARK: - activePane.bottom
+
+  @Test("activePane.bottom：只挂在活动终端 Pane 底部，贴底、与 Pane 同宽；整树重建后挂到新宿主")
+  func activePaneBarMountsUnderFocusedTerminalPane() async throws {
+    let entry = makeToolViewEntry(slot: .activePaneBottom)
+    let (layout, a, b, files) = try makePaneLayout()
+    let fixture = try makeFixture(entries: [entry], layout: layout)
+    defer { fixture.close() }
+    let root = try #require(fixture.window.contentView)
+    let tab = try #require(fixture.workspace.model.selectedTab)
+    tab.setActivePane(a.id)
+    let bar = try #require(fixture.host.existingBar(for: .activePaneBottom))
+    let hostA = try #require(paneHost(a.id, in: root))
+    #expect(hostA.installedActivePaneBar === bar)
+    #expect(paneHost(b.id, in: root)?.installedActivePaneBar == nil)
+    #expect(paneHost(files.id, in: root)?.installedActivePaneBar == nil)
+    #expect(mountedBar(.tabBottom, in: root) == nil)
+
+    show(bar, id: entry.id)
+    root.layoutSubtreeIfNeeded()
+    #expect(abs(bar.frame.height - InterfaceScale.length(24)) < 0.5)
+    #expect(abs(bar.frame.minY - hostA.bounds.minY) < 0.5)
+    #expect(abs(bar.frame.width - hostA.bounds.width) < 0.5)
+
+    fixture.workspace.scheduleRefresh()
+    await pollUntil { paneHost(a.id, in: root).map { $0 !== hostA } ?? false }
+    let newHostA = try #require(paneHost(a.id, in: root))
+    #expect(newHostA !== hostA)
+    #expect(newHostA.installedActivePaneBar === bar)
+    #expect(fixture.host.existingBar(for: .activePaneBottom) === bar)
+  }
+
+  @Test("activePane.bottom：焦点换 Pane 时同一条搬到新 Pane 下面，不整树重建，上下文换成新 Pane")
+  func activePaneBarMovesWithFocusWithoutRebuild() async throws {
+    let entry = makeToolViewEntry(slot: .activePaneBottom, triggers: [.cwd, .activePane])
+    let (layout, a, b, _) = try makePaneLayout()
+    let fixture = try makeFixture(entries: [entry], layout: layout)
+    defer { fixture.close() }
+    let root = try #require(fixture.window.contentView)
+    let tab = try #require(fixture.workspace.model.selectedTab)
+    tab.setActivePane(a.id)
+    // 先排空装窗时排下的整树刷新，之后宿主实例变化才只可能来自焦点切换。
+    await pollUntil(timeout: .milliseconds(150)) { false }
+    let bar = try #require(fixture.host.existingBar(for: .activePaneBottom))
+    let hostA = try #require(paneHost(a.id, in: root))
+    let hostB = try #require(paneHost(b.id, in: root))
+    #expect(hostA.installedActivePaneBar === bar)
+
+    tab.setActivePane(b.id)
+    #expect(hostB.installedActivePaneBar === bar)
+    #expect(hostA.installedActivePaneBar == nil)
+    #expect(fixture.host.scheduler.feed(id: entry.id)?.context.workingDirectory == b.workingDirectory)
+    // 等过几轮主队列：若焦点切换排了整树重建，Pane 宿主会被换成新实例。
+    await pollUntil(timeout: .milliseconds(150)) { false }
+    #expect(paneHost(a.id, in: root) === hostA)
+    #expect(paneHost(b.id, in: root) === hostB)
+    #expect(hostB.installedActivePaneBar === bar)
+    #expect(fixture.host.existingBar(for: .activePaneBottom) === bar)
+
+    tab.setActivePane(a.id)
+    #expect(hostA.installedActivePaneBar === bar)
+    #expect(hostB.installedActivePaneBar == nil)
+  }
+
+  @Test("activePane.bottom：活动 Pane 不是终端（文件 Pane）时条不挂，回到终端 Pane 再挂上")
+  func activePaneBarSkipsNonTerminalPane() throws {
+    let entry = makeToolViewEntry(slot: .activePaneBottom)
+    let (layout, a, b, files) = try makePaneLayout()
+    let fixture = try makeFixture(entries: [entry], layout: layout)
+    defer { fixture.close() }
+    let root = try #require(fixture.window.contentView)
+    let tab = try #require(fixture.workspace.model.selectedTab)
+    tab.setActivePane(a.id)
+    let bar = try #require(fixture.host.existingBar(for: .activePaneBottom))
+
+    tab.setActivePane(files.id)
+    #expect(bar.superview == nil)
+    for paneID in [a.id, b.id, files.id] {
+      #expect(paneHost(paneID, in: root)?.installedActivePaneBar == nil)
+    }
+
+    tab.setActivePane(b.id)
+    #expect(paneHost(b.id, in: root)?.installedActivePaneBar === bar)
+  }
+
+  @Test("activePane.bottom 与 pane.bottom 同时启用：活动 Pane 底部两条都在，pane.bottom 在上")
+  func activePaneBarCoexistsWithPaneBottomBar() throws {
+    let paneEntry = makeToolViewEntry(viewID: "pane", slot: .paneBottom)
+    let activeEntry = makeToolViewEntry(viewID: "active", slot: .activePaneBottom)
+    let (layout, a, b, _) = try makePaneLayout()
+    let fixture = try makeFixture(entries: [paneEntry, activeEntry], layout: layout)
+    defer { fixture.close() }
+    let root = try #require(fixture.window.contentView)
+    let tab = try #require(fixture.workspace.model.selectedTab)
+    tab.setActivePane(a.id)
+    let hostA = try #require(paneHost(a.id, in: root))
+    let paneBar = try #require(fixture.host.existingPaneBar(for: a.id))
+    let activeBar = try #require(fixture.host.existingBar(for: .activePaneBottom))
+    #expect(hostA.installedExtensionBar === paneBar)
+    #expect(hostA.installedActivePaneBar === activeBar)
+    #expect(paneHost(b.id, in: root)?.installedExtensionBar != nil)
+    #expect(paneHost(b.id, in: root)?.installedActivePaneBar == nil)
+
+    show(paneBar, id: ToolBarScheduler.paneFeedKey(entryID: paneEntry.id, paneID: a.id))
+    show(activeBar, id: activeEntry.id)
+    root.layoutSubtreeIfNeeded()
+    // 非翻转坐标：pane.bottom 条的下边贴着活动 Pane 条的上边，活动 Pane 条贴 Pane 底。
+    #expect(abs(paneBar.frame.minY - activeBar.frame.maxY) < 0.5)
+    #expect(abs(activeBar.frame.minY - hostA.bounds.minY) < 0.5)
   }
 
   @Test("窗口没上屏时不跑脚本：调度器保持不可见")

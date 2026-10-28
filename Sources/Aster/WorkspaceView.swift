@@ -1019,6 +1019,7 @@ final class WorkspaceViewController: NSViewController {
       installAgentHostDock(for: paneID, refocusIfLost: false)
       installExtensionPaneBar(for: paneID)
     }
+    installExtensionActivePaneBar()
     extensionHost.workspaceDidRefresh()
 
     if let tab = model.selectedTab, model.isComposerPresented,
@@ -1147,6 +1148,7 @@ final class WorkspaceViewController: NSViewController {
         .sink { [weak self, weak tab] _ in
           guard let self, let tab, tab.id == self.model.selectedTabID else { return }
           self.updatePaneActivationOverlays(in: tab)
+          self.installExtensionActivePaneBar()
           self.focusActivePane(in: tab)
           // 标签行的 Agent 图标 / 动画与标题胶囊都跟随活动 Pane：左 codex 右 claude 的
           // 分屏在切换焦点时必须换图标，否则一直显示字典序先命中的那个。
@@ -2834,6 +2836,21 @@ final class WorkspaceViewController: NSViewController {
   /// 条自带必需的高度约束（没有项目时归零），这里不另给高度。
   private func installExtensionPaneBar(for paneID: UUID) {
     paneHosts[paneID]?.setExtensionBar(extensionHost.paneBar(for: paneID))
+  }
+
+  /// 插件 activePane.bottom 条：扩展宿主持有的同一实例挂到选中标签的活动终端 Pane 底部。焦点切换时只调这里，
+  /// 把条从旧 Pane 宿主摘下、装到新 Pane 宿主，不整树重建；活动 Pane 不是终端或没有可挂载视图时撤下。
+  private func installExtensionActivePaneBar() {
+    let target = extensionHost.activePaneBarPaneID().flatMap { paneHosts[$0] }
+    // 先清掉其它宿主：`setActivePaneBar(nil)` 对没挂过条的宿主直接返回，实际只重建旧宿主那一条约束链。
+    for host in paneHosts.values where host !== target { host.setActivePaneBar(nil) }
+    if let target {
+      if target.installedActivePaneBar == nil { target.setActivePaneBar(extensionHost.bar(for: .activePaneBottom)) }
+    } else {
+      // 条可能还留在整树重建前被丢弃的旧宿主里，摘下后它不再算「挂在窗口里」。
+      extensionHost.existingBar(for: .activePaneBottom)?.removeFromSuperview()
+    }
+    extensionHost.barMountDidChange()
   }
 
   /// 局部挂载 Prompt Queue。队列条作为 Pane 的底部附件占据布局空间（不是覆盖层），

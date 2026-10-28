@@ -289,11 +289,16 @@ a Git status bar at the bottom of the terminal. Add `contributes.views` to the m
 | `window.top` | Status bar | One full row at the very top of the window, in the same row as the traffic lights. When it is present, it owns that row and the path title moves back into the content area. | Available |
 | `window.bottom` | Status bar | One full row at the very bottom of the window (below the tab bar in the bottom tab-bar layout) | Available |
 | `sidebar.section` | Status bar (vertical list) / Panel | In the vertical tab bar, below the tab list. One block per view, titled with the view `title`. Shown only while the vertical tab bar is visible. | Available |
+| `activePane.bottom` | Status bar | Only at the bottom of the focused terminal pane. When the focus moves to another pane, the bar moves with it. The context is the same as for `tab.*`. | Available |
 | `pane.header` | — | Top of a pane | A later version; you can already write it in the manifest, but it is not shown |
 
 `pane.bottom` is shown only on terminal panes (not on tool or file panes). Only the panes of the current tab run the
 script. When you switch to another tab, they pause, and they run once when you come back. Moving the focus to another
 pane does not run the script again. A `terminal` action on the bar writes to the pane that the bar is in.
+
+There is only one `activePane.bottom` bar per window. While a file, tool, or web pane has the focus, the bar is hidden;
+it comes back when a terminal pane has the focus again. You can use it together with `pane.bottom`; the `pane.bottom` bar
+is above it.
 
 `window.top`, `window.bottom`, and `sidebar.section` take their context from the active pane of the current tab, like
 `tab.*`. `window.top` is always 28 pt and stays even when it has no items (the traffic lights are on its left). Drag its
@@ -320,7 +325,7 @@ position that accepts its kind and is available in this version.
         "id": "branch",
         "title": "Git 分支",
         "kind": "bar",
-        "slot": "tab.bottom",
+        "slot": "activePane.bottom",
         "source": { "type": "script", "command": ["bin/gitbar.sh"], "timeout": 5 },
         "refresh": { "interval": 30, "on": ["cwd", "branch", "activePane"] }
       }

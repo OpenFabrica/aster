@@ -40,7 +40,7 @@ func snapshotIncludesViewRowsAndSlots() throws {
   #expect(branch["enabled"] as? Bool == true)
   #expect(branch["inactiveReason"] is NSNull)
   // 可选位置只含本版本已实现且接受该类型的挂载点。
-  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom"])
+  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom", "activePane.bottom"])
   #expect(views[1]["slots"] as? [String] == ["sidebar.section", "inspector.panel"])
   #expect(views[2]["inactiveReason"] as? String == "unsupported")
 

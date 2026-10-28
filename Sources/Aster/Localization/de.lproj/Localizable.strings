@@ -2829,3 +2829,5 @@
 "插件「%@」没有可以打开的面板「%@」" = "Plugin „%@“ hat kein öffnbares Panel „%@“";
 "插件「%@」里没有可用的功能「%@」" = "Plugin „%@“ hat keine verfügbare Funktion „%@“";
 "↩ 执行：%@" = "↩ Führt aus: %@";
+"当前 Pane 底部" = "Unten im aktiven Bereich";
+"在当前终端 Pane 底部显示当前仓库的分支、领先 / 落后提交数和未提交改动数，点击可复制分支名或预填 git 命令" = "Zeigt unten im aktiven Terminalbereich Branch, Vorsprung/Rückstand und nicht committete Änderungen des aktuellen Repositorys an; per Klick Branch-Namen kopieren oder einen git-Befehl vorausfüllen";

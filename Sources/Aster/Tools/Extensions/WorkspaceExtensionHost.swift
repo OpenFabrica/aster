@@ -25,8 +25,9 @@ extension ToolCenter: ToolViewCatalog {}
 final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 本版本由宿主挂 bar 的标签范围位置（`pane.bottom` 每 Pane 一条，见 `paneBar(for:)`；
   /// `inspector.panel` 由详情面板经 `ToolPanelProviding` 取用）。
-  /// `window.*` 的上下文与标签范围相同（窗口选中标签），共用调度器的 `context`。
-  static let mountedBarSlots: [ToolViewSlot] = [.windowTop, .windowBottom, .tabTop, .tabBottom]
+  /// `window.*` 与 `activePane.bottom` 的上下文与标签范围相同（窗口选中标签的活动 Pane），共用调度器的 `context`；
+  /// `activePane.bottom` 只有一条，由工作区挂到活动终端 Pane 底部，见 `activePaneBarPaneID()`。
+  static let mountedBarSlots: [ToolViewSlot] = [.windowTop, .windowBottom, .tabTop, .tabBottom, .activePaneBottom]
 
   /// 挂了 bar 的位置集合变了（从无到有或从有到无）：工作区需要整树重建一次把条插进去或撤掉。
   var onMountedSlotsChanged: (() -> Void)?
@@ -131,8 +132,22 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     !isTornDown && mountedSlots.contains(slot) && bars[slot] != nil
   }
 
-  /// 已建好的 bar（测试用）。
+  /// 已建好的 bar（测试用；工作区也用它把 activePane.bottom 条从视图树摘下）。
   func existingBar(for slot: ToolViewSlot) -> ToolBarView? { bars[slot] }
+
+  /// activePane.bottom 条该挂到哪个 Pane：选中标签的活动 Pane，且是终端 Pane（文件、工具、网页 Pane 不挂）；
+  /// 没有可挂载视图时为 nil。
+  func activePaneBarPaneID() -> UUID? {
+    guard hasBar(for: .activePaneBottom), let model, let paneID = model.selectedTab?.activePaneID,
+      ToolPaneBars.terminalTab(of: paneID, model: model) != nil
+    else { return nil }
+    return paneID
+  }
+
+  /// 工作区局部改了条的挂载（焦点切换搬 activePane.bottom 条）：重算可见性，条不在窗口里时暂停调度。
+  func barMountDidChange() {
+    updateVisibility()
+  }
 
   /// 某个 Pane 已建好的 pane.bottom 条（测试用）。
   func existingPaneBar(for paneID: UUID) -> ToolBarView? { paneBars.existingBar(for: paneID) }

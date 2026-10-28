@@ -284,10 +284,14 @@ await aster.openURL("https://example.com"); // 先弹确认，返回用户是否
 | `window.top` | 状态条 | 窗口最上面一整行，和红绿灯同一行；有它时红绿灯那一行归它，路径标题回到内容区 | 可用 |
 | `window.bottom` | 状态条 | 窗口最下面一整行（底部标签栏布局时在标签栏下面） | 可用 |
 | `sidebar.section` | 状态条（竖排列表）/ 面板 | 竖排标签栏里、标签列表下面，每个视图一块，标题是视图的 `title`；只在竖排标签栏可见时显示 | 可用 |
+| `activePane.bottom` | 状态条 | 只在当前聚焦的终端 Pane 底部，焦点换到哪个 Pane 就跟到哪个；上下文和 `tab.*` 一样 | 可用 |
 | `pane.header` | — | Pane 顶部 | 后续版本；现在可以写进清单，但不会显示 |
 
 `pane.bottom` 只挂在终端 Pane 上（工具、文件 Pane 不挂），只有当前标签里的 Pane 会运行脚本；切到别的标签时暂停，
 切回来补跑一次。切换焦点到别的 Pane 不会让它重跑；条上的 `terminal` 动作写到这条所在的 Pane。
+
+`activePane.bottom` 每个窗口只有一条：焦点在文件、工具或网页 Pane 上时先收起，回到终端 Pane 再出现；和 `pane.bottom`
+可以同时用，`pane.bottom` 在上面。
 
 `window.top`、`window.bottom` 与 `sidebar.section` 都按当前标签的活动 Pane 取上下文，和 `tab.*` 一样。`window.top` 固定 28pt，
 没有项目时也保留（红绿灯在它左边）；空白处可以拖动窗口、双击缩放。`sidebar.section` 的状态条是竖排列表，每项一行，
@@ -311,7 +315,7 @@ await aster.openURL("https://example.com"); // 先弹确认，返回用户是否
         "id": "branch",
         "title": "Git 分支",
         "kind": "bar",
-        "slot": "tab.bottom",
+        "slot": "activePane.bottom",
         "source": { "type": "script", "command": ["bin/gitbar.sh"], "timeout": 5 },
         "refresh": { "interval": 30, "on": ["cwd", "branch", "activePane"] }
       }

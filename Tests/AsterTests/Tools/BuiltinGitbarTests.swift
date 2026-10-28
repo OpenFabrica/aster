@@ -80,7 +80,7 @@ func gitbarManifestValidatesAsBuiltin() throws {
   #expect(manifest.features.isEmpty)
   #expect(manifest.permissions.contains(.exec))
   let view = try #require(manifest.view(id: "branch"))
-  #expect(view.kind == .bar && view.slot == .tabBottom)
+  #expect(view.kind == .bar && view.slot == .activePaneBottom)
   #expect(view.source?.command == ["bin/gitbar.sh"])
   #expect(view.resolvedRefresh.resolvedInterval == 30)
   #expect(view.resolvedRefresh.resolvedTriggers == [.cwd, .branch, .activePane])
