@@ -502,9 +502,16 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
   字体、颜色、浮在最前面（`.floating` 层级）、半透明（`alphaValue` 0.75）、折叠、删除（有内容先确认）。
 - 快捷键对齐 macOS「便笺」，由 `StickyNoteWindow.performKeyEquivalent` 先于菜单处理（否则 `⌘N`/`⌘T`/`⌘1` 会落到
   新建窗口、新建标签、切换标签）：`⌘N` 新建、`⌘T` 字体面板、`⌘B`/`⌘I` 切换粗斜体、`⌘U` 下划线、`⌘+`/`⌘=` 与 `⌘-`
-  字号 ±1（8–96）、`⌘1`–`⌘6` 颜色、`⌥⌘F` 浮在最前面、`⌥⌘T` 半透明。映射是纯函数 `StickyNoteCommand.command`。
+  字号 ±1（8–96）、`⌘1`–`⌘6` 颜色、`⌥⌘F` 浮在最前面、`⌥⌘T` 半透明、`⌘↩` 发送到当前 Pane（Aster 自加）。
+  映射是纯函数 `StickyNoteCommand.command`。
   粗斜体按选区开头的字体决定加或去，整段一致；没有选区时改输入属性。格式操作经 `shouldChangeText`/`didChangeText`，
   可撤销，也会触发保存。
+- 发送到当前 Pane：`⌘↩`、标题栏右侧纸飞机按钮或右键菜单第一项。有选区发选区，没有发全文，去掉首尾空白
+  （`StickyNoteCommand.textToSend`）。目标是 `StickyNoteCenter.workspaceProvider`：AppDelegate 注入，按
+  `NSApp.orderedWindows` 取最前面的工作区窗口（便笺拿着键盘时 key window 不是工作区），再取它选中标签的活动终端
+  （`AppModel.toolTerminalOrigin()`）。写入走 `ToolTerminalOrigin.submit` → `TerminalSession.submitComposerText`，
+  与 Composer 相同：bracketed paste 一次写入多行，再单独发 Return；粘贴保护、只读与 Vi 模式门禁照常生效。不切走焦点，
+  便于连续发送；结果（已发送 / 失败原因）在便笺标题栏显示几秒，失败时响一声。
 - 折叠：双击标题栏由系统调到 `zoom`/`performZoom`（偏好为最小化时是 `performMiniaturize`，`⌘M` 同），窗口改为折叠 /
   展开，高度收成实际标题栏高度，标题栏里显示第一行；折叠时不可改大小，记位置按展开高度记。
 - 正文是富文本（`isRichText`、`usesFontPanel`，不收图片）：保存纯文本 `text`（标题、搜索、预填用）与整篇 RTF

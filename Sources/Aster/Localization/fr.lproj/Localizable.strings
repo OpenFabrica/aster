@@ -2775,5 +2775,10 @@
 "粗体" = "Gras";
 "显示字体" = "Afficher les polices";
 "折叠便笺" = "Réduire la note";
+"发送到当前 Pane 并执行" = "Envoyer au volet actuel et exécuter";
+"发送到当前 Pane 并执行（⌘↩）" = "Envoyer au volet actuel et exécuter (⌘↩)";
+"已发送" = "Envoyé";
+"没有可发送的文字" = "Aucun texte à envoyer";
+"没有可以发送的终端：请先在工作区里选中一个终端 Pane" = "Aucun terminal où envoyer : sélectionnez d’abord un volet de terminal dans l’espace de travail";
 "变大" = "Plus grand";
 "变小" = "Plus petit";

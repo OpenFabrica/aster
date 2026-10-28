@@ -2777,5 +2777,10 @@
 "粗体" = "Bold";
 "显示字体" = "Show Fonts";
 "折叠便笺" = "Collapse Note";
+"发送到当前 Pane 并执行" = "Send to Current Pane and Run";
+"发送到当前 Pane 并执行（⌘↩）" = "Send to Current Pane and Run (⌘↩)";
+"已发送" = "Sent";
+"没有可发送的文字" = "Nothing to send";
+"没有可以发送的终端：请先在工作区里选中一个终端 Pane" = "No terminal to send to: select a terminal pane in a workspace first";
 "变大" = "Bigger";
 "变小" = "Smaller";

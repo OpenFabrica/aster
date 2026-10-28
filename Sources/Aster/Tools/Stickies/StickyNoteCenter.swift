@@ -18,6 +18,10 @@ final class StickyNoteCenter {
   private var windows: [UUID: StickyNoteWindowController] = [:]
   private let changeSubject = PassthroughSubject<Void, Never>()
 
+  /// 「发送到当前 Pane」的目标工作区，App 启动时注入。便笺窗口拿着键盘时 key window 不是工作区，
+  /// 所以由 App 按窗口前后顺序找最前面的工作区窗口；没有注入（测试）时发送会提示没有终端。
+  var workspaceProvider: (() -> AppModel?)?
+
   /// 绑定存储；不会自动打开窗口，启动时调用 `restoreOpenNotes()`。
   init(store: StickyNoteStore) {
     self.store = store

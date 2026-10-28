@@ -25,6 +25,8 @@ enum StickyNoteCommand: Equatable {
   case floatOnTop
   /// 半透明（`⌥⌘T`）。
   case translucent
+  /// 发送到工作区当前 Pane 并回车执行（`⌘↩`）。macOS「便笺」没有，Aster 自己加的。
+  case sendToTerminal
 
   /// 把按键翻译成命令；不是便笺的快捷键时返回 nil，交给菜单与正文照常处理。
   /// `⌘+` 在美式键盘上是 `⇧⌘=`，`⌘=` 也算放大，和系统的「放大」一致。
@@ -34,6 +36,7 @@ enum StickyNoteCommand: Equatable {
     switch flags {
     case .command:
       switch key {
+      case "\r", "\u{3}": return .sendToTerminal
       case "n": return .newNote
       case "t": return .showFonts
       case "b": return .bold
@@ -73,7 +76,17 @@ enum StickyNoteCommand: Equatable {
     case .color(let color): (String((StickyNoteColor.allCases.firstIndex(of: color) ?? 0) + 1), .command)
     case .floatOnTop: ("f", [.command, .option])
     case .translucent: ("t", [.command, .option])
+    case .sendToTerminal: ("\r", .command)
     }
+  }
+
+  /// 要发送的文字：有选区发选区，没有发全文；去掉首尾空白，什么都不剩时返回 nil。
+  static func textToSend(_ string: String, selectedRange: NSRange) -> String? {
+    let full = string as NSString
+    let range = NSIntersectionRange(selectedRange, NSRange(location: 0, length: full.length))
+    let source = range.length > 0 ? full.substring(with: range) : string
+    let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }
 

@@ -397,6 +397,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     ToolCenter.shared.start()
     toolLauncher.refresh()
     // 上次开着的便笺放回桌面，不抢工作区的焦点。
+    StickyNoteCenter.shared.workspaceProvider = { [weak self] in self?.frontmostWorkspaceModel }
     StickyNoteCenter.shared.restoreOpenNotes()
     NotificationCenter.default.publisher(for: .asterShowToolLauncher)
       .sink { [weak self] notification in
@@ -958,6 +959,15 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
 
   private var activeWorkspaceModel: AppModel {
     activeWorkspaceViewController?.model ?? model
+  }
+
+  /// 前后顺序里最前面的工作区窗口的模型。便笺等独立窗口拿着键盘时，key window 不是工作区，
+  /// 这里按 `orderedWindows` 找用户最近用过的那个工作区，而不是退回主窗口。
+  private var frontmostWorkspaceModel: AppModel {
+    for window in NSApplication.shared.orderedWindows {
+      if let controller = window.contentViewController as? WorkspaceViewController { return controller.model }
+    }
+    return model
   }
 
   @objc private func newWindow(_ sender: Any?) {

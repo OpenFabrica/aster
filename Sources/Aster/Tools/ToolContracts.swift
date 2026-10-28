@@ -57,6 +57,14 @@ final class ToolTerminalOrigin {
     return session.promptWriteBlocker ?? L("无法粘贴到这个终端")
   }
 
+  /// 写入并回车执行（便笺的「发送到当前 Pane」）：走 Composer 同一条路，bracketed paste 一次写入多行，
+  /// 再单独发 Return；粘贴保护与只读门禁照常生效。失败时返回给用户看的原因。
+  func submit(_ text: String) -> String? {
+    guard let session else { return L("来源终端已经关闭") }
+    if session.submitComposerText(text) { return nil }
+    return session.promptWriteBlocker ?? L("无法粘贴到这个终端")
+  }
+
   /// 来源 Pane 当前选中的文字。
   var selectedText: String? { session?.selectedTextForAgentContext }
 }

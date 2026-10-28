@@ -152,10 +152,26 @@ struct StickyNoteFormattingTests {
     #expect(command("7", .command) == nil)
     #expect(command("f", [.command, .option]) == .floatOnTop)
     #expect(command("t", [.command, .option]) == .translucent)
+    #expect(command("\r", .command) == .sendToTerminal)
+    #expect(command("\u{3}", .command) == .sendToTerminal)
+    // 不带 ⌘ 的回车留给正文换行。
+    #expect(command("\r", []) == nil)
     // 编辑类快捷键留给正文与菜单。
     #expect(command("c", .command) == nil)
     #expect(command("z", [.command, .shift]) == nil)
     #expect(command("b", []) == nil)
+  }
+
+  /// 发送的文字：有选区发选区，没有发全文；去掉首尾空白，空的不发。
+  @Test func textToSendPrefersSelectionAndTrims() {
+    let text = "第一行\n  第二行  \n"
+    #expect(StickyNoteCommand.textToSend(text, selectedRange: NSRange(location: 0, length: 0)) == "第一行\n  第二行")
+    #expect(StickyNoteCommand.textToSend(text, selectedRange: NSRange(location: 4, length: 7)) == "第二行")
+    #expect(StickyNoteCommand.textToSend(" \n\t", selectedRange: NSRange(location: 0, length: 0)) == nil)
+    // 只选中空白时不退回全文，免得误发整张便笺。
+    #expect(StickyNoteCommand.textToSend(text, selectedRange: NSRange(location: 3, length: 1)) == nil)
+    // 越界选区按文本长度截断。
+    #expect(StickyNoteCommand.textToSend("abc", selectedRange: NSRange(location: 1, length: 99)) == "bc")
   }
 
   /// 有选区时粗体整段切换，再按一次去掉；字号在范围内增减。

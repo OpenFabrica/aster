@@ -22,6 +22,12 @@ final class StickyNoteWindowController: NSWindowController, NSWindowDelegate, NS
   private let titlebarStrip = StickyNoteFillView()
   /// 折叠后显示在标题栏里的第一行文字。
   private let collapsedTitle = makeLabel("", size: 11, weight: .medium, color: NSColor(white: 0.2, alpha: 1))
+  /// 标题栏右侧的「发送到当前 Pane 并执行」按钮。
+  private let sendButton = NSButton()
+  /// 发送后的短提示（已发送 / 失败原因），显示在标题栏里，几秒后消失。
+  private let noticeLabel = makeLabel("", size: 11, weight: .medium, color: NSColor(white: 0.2, alpha: 1))
+  /// 提示的代次：新提示出现后，旧提示的定时隐藏不再生效。
+  private var noticeGeneration = 0
   /// 标题栏高度：按窗口实际的标题栏算，色带正好盖住它，折叠后窗口就是这么高。
   private let titlebarHeight: CGFloat
   /// 折叠前的窗口高度；展开时恢复，记位置时也按它记。
@@ -88,7 +94,16 @@ final class StickyNoteWindowController: NSWindowController, NSWindowDelegate, NS
     textView.setAccessibilityLabel(L("便笺"))
     collapsedTitle.lineBreakMode = .byTruncatingTail
     collapsedTitle.isHidden = true
-    for view in [titlebarStrip, scroll, collapsedTitle] {
+    noticeLabel.lineBreakMode = .byTruncatingTail
+    noticeLabel.isHidden = true
+    sendButton.bezelStyle = .accessoryBarAction
+    sendButton.isBordered = false
+    sendButton.image = NSImage(systemSymbolName: "paperplane", accessibilityDescription: L("发送到当前 Pane 并执行"))
+    sendButton.contentTintColor = NSColor(white: 0.25, alpha: 1)
+    sendButton.toolTip = L("发送到当前 Pane 并执行（⌘↩）")
+    sendButton.target = self
+    sendButton.action = #selector(sendButtonClicked)
+    for view in [titlebarStrip, scroll, collapsedTitle, noticeLabel, sendButton] {
       view.translatesAutoresizingMaskIntoConstraints = false
       root.addSubview(view)
     }
@@ -99,8 +114,13 @@ final class StickyNoteWindowController: NSWindowController, NSWindowDelegate, NS
       titlebarStrip.heightAnchor.constraint(equalToConstant: titlebarHeight),
       // 左边让开关闭按钮。
       collapsedTitle.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 30),
-      collapsedTitle.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -10),
+      collapsedTitle.trailingAnchor.constraint(lessThanOrEqualTo: sendButton.leadingAnchor, constant: -6),
       collapsedTitle.centerYAnchor.constraint(equalTo: titlebarStrip.centerYAnchor),
+      noticeLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 30),
+      noticeLabel.trailingAnchor.constraint(lessThanOrEqualTo: sendButton.leadingAnchor, constant: -6),
+      noticeLabel.centerYAnchor.constraint(equalTo: titlebarStrip.centerYAnchor),
+      sendButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+      sendButton.centerYAnchor.constraint(equalTo: titlebarStrip.centerYAnchor),
       scroll.topAnchor.constraint(equalTo: titlebarStrip.bottomAnchor),
       scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
       scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -207,7 +227,7 @@ final class StickyNoteWindowController: NSWindowController, NSWindowDelegate, NS
       window.minSize = NSSize(width: 160, height: 100)
     }
     scroll.isHidden = collapsed
-    collapsedTitle.isHidden = !collapsed
+    collapsedTitle.isHidden = !collapsed || !noticeLabel.isHidden
     let target = NSRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height)
     let animated = animate && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && window.isVisible
     window.setFrame(target, display: true, animate: animated)
@@ -232,6 +252,47 @@ final class StickyNoteWindowController: NSWindowController, NSWindowDelegate, NS
     case .color(let color): center.setColor(color, id: noteID)
     case .floatOnTop: center.setFloatsOnTop(!note.floatsOnTop, id: noteID)
     case .translucent: center.setTranslucent(!note.isTranslucent, id: noteID)
+    case .sendToTerminal: sendToTerminal()
+    }
+  }
+
+  // MARK: - 发送到终端
+
+  /// 标题栏按钮。
+  @objc private func sendButtonClicked() { sendToTerminal() }
+
+  /// 把选中的文字（没有选区时整张便笺）发到最前面工作区的当前 Pane，并回车执行。
+  /// 不切走焦点：便笺留在前面，方便一条接一条地发。
+  private func sendToTerminal() {
+    guard let text = StickyNoteCommand.textToSend(textView.string, selectedRange: textView.selectedRange()) else {
+      showNotice(L("没有可发送的文字"), isError: true)
+      return
+    }
+    guard let origin = center?.workspaceProvider?()?.toolTerminalOrigin() else {
+      showNotice(L("没有可以发送的终端：请先在工作区里选中一个终端 Pane"), isError: true)
+      return
+    }
+    if let failure = origin.submit(text) {
+      showNotice(failure, isError: true)
+    } else {
+      showNotice(L("已发送"), isError: false)
+    }
+  }
+
+  /// 在标题栏显示几秒短提示；出错时同时响一声。折叠时暂时盖住第一行标题。
+  private func showNotice(_ text: String, isError: Bool) {
+    if isError { NSSound.beep() }
+    noticeGeneration += 1
+    let generation = noticeGeneration
+    noticeLabel.stringValue = text
+    noticeLabel.textColor = isError ? NSColor(srgbRed: 0.7, green: 0.1, blue: 0.1, alpha: 1) : NSColor(white: 0.2, alpha: 1)
+    noticeLabel.toolTip = text
+    noticeLabel.isHidden = false
+    collapsedTitle.isHidden = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + (isError ? 4 : 2)) { [weak self] in
+      guard let self, generation == noticeGeneration else { return }
+      noticeLabel.isHidden = true
+      collapsedTitle.isHidden = expandedHeight == nil
     }
   }
 
@@ -272,6 +333,7 @@ final class StickyNoteWindowController: NSWindowController, NSWindowDelegate, NS
     let collapseItem = ActionMenuItem(title: L("折叠便笺")) { [weak self] in self?.toggleCollapsed() }
     let deleteItem = ActionMenuItem(title: L("删除便笺…")) { [weak self] in self?.confirmDelete() }
     return [
+      menuItem(L("发送到当前 Pane 并执行"), .sendToTerminal), .separator(),
       menuItem(L("新建便笺"), .newNote), .separator(), fontItem, colorItem, .separator(), floatItem, translucentItem,
       collapseItem, .separator(), deleteItem,
     ]

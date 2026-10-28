@@ -2775,5 +2775,10 @@
 "粗体" = "Fett";
 "显示字体" = "Schriften einblenden";
 "折叠便笺" = "Notiz einklappen";
+"发送到当前 Pane 并执行" = "An aktuellen Bereich senden und ausführen";
+"发送到当前 Pane 并执行（⌘↩）" = "An aktuellen Bereich senden und ausführen (⌘↩)";
+"已发送" = "Gesendet";
+"没有可发送的文字" = "Kein Text zum Senden";
+"没有可以发送的终端：请先在工作区里选中一个终端 Pane" = "Kein Terminal zum Senden: Wähle zuerst einen Terminalbereich im Arbeitsbereich aus";
 "变大" = "Größer";
 "变小" = "Kleiner";
