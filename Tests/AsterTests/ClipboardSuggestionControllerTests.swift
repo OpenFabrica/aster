@@ -75,8 +75,10 @@ func clipboardSuggestionDoesNotOverrideCandidateSelection() throws {
   #expect(!controller.currentResult.candidates.contains { $0.kind == .clipboard })
   #expect(!controller.handle(.enter))
   #expect(sent.isEmpty)
+  // 未选中的 Return 交给 Shell 并收起面板；重新查询后再验证显式选择路径。
+  controller.refreshNow()
   #expect(controller.handle(.down))
   #expect(controller.handle(.enter))
-  #expect(String(decoding: sent, as: UTF8.self) == "eckout")
+  #expect(sent == Array(repeating: UInt8(127), count: 2) + Array("checkout ".utf8))
   #expect(!sent.contains(0x0D) && !sent.contains(0x0A))
 }
