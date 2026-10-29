@@ -6,6 +6,7 @@ const history_budget = @import("history_budget.zig");
 const Startup = @import("pty_startup.zig").Startup;
 const validID = @import("operation_request.zig").validID;
 const pty = @import("pty.zig");
+const tty = @cImport(@cInclude("sys/ioctl.h"));
 
 /// Prepared launch values. The RPC adapter resolves executables and merges the
 /// execution machine's environment; this boundary never invokes a shell wrapper.
@@ -548,19 +549,21 @@ pub const Pool = struct {
 
     /// Adopts an externally-owned PTY master FD into the pool as a new terminal
     /// entry. Used by the new service during live handoff to take over terminals
-    /// without forking new processes. The session/VT state starts fresh.
-    pub fn adoptTerminal(self: *Pool, id: [36]u8, master_fd: std.posix.fd_t, pid: std.posix.pid_t, cwd_path: []const u8, history_excluded: bool) !void {
+    /// without forking new processes.
+    ///
+    /// VT 的尺寸取自 PTY 自身（`TIOCGWINSZ`，旧服务最后一次 resize 写进去的值），与程序
+    /// 看到的一致；`seed` 是旧服务的画面快照，在首次读取 PTY 之前写入 VT，`unsent` 是旧服务
+    /// 还没写进 PTY 的输入。没有快照时 VT 从空白开始。
+    pub fn adoptTerminal(self: *Pool, id: [36]u8, master_fd: std.posix.fd_t, pid: std.posix.pid_t, cwd_path: []const u8, history_excluded: bool, seed: ?[]const u8, unsent: []const u8) !void {
         if (self.entries.items.len >= self.limits.maximum_terminals) return error.PoolFull;
         const cwd_z = try self.allocator.allocSentinel(u8, cwd_path.len, 0);
         errdefer self.allocator.free(cwd_z);
         @memcpy(cwd_z, cwd_path);
-        // Prepare a fresh VT session and adopt the existing process/PTY pair.
-        // Uses the standard prepare+adoptProcess path so VT state is initialized
-        // cleanly; the terminal content rebuilds from PTY output naturally.
-        const session = try Session.prepare(self.allocator, .{ .rows = 24, .columns = 80 });
+        const session = try Session.prepare(self.allocator, ptyGeometry(master_fd));
         errdefer session.destroy();
         var process = pty.Process{ .pid = pid, .master = master_fd };
         session.adoptProcess(&process);
+        if (seed) |bytes| try session.seedState(bytes, unsent) else if (unsent.len != 0) try session.seedState(&.{}, unsent);
         session.client_colors = self.client_colors;
         session.scope_cleanup = false; // 接管终端非本进程子进程，禁用 scope 清理
         session.adopted = true;
@@ -579,6 +582,20 @@ pub const Pool = struct {
         });
     }
 };
+
+/// PTY 当前窗口尺寸；读不到或不合法时退回 24x80（与新建终端的默认值相同）。
+fn ptyGeometry(master_fd: std.posix.fd_t) Geometry {
+    const fallback: Geometry = .{ .rows = 24, .columns = 80 };
+    var size: tty.winsize = std.mem.zeroes(tty.winsize);
+    if (tty.ioctl(master_fd, tty.TIOCGWINSZ, &size) != 0) return fallback;
+    const geometry: Geometry = .{ .rows = size.ws_row, .columns = size.ws_col, .pixel_width = size.ws_xpixel, .pixel_height = size.ws_ypixel };
+    geometry.validate() catch {
+        const text_only: Geometry = .{ .rows = size.ws_row, .columns = size.ws_col };
+        text_only.validate() catch return fallback;
+        return text_only;
+    };
+    return geometry;
+}
 
 fn marshal(allocator: std.mem.Allocator, values: []const []const u8) ![:null]?[*:0]const u8 {
     const result = try allocator.allocSentinel(?[*:0]const u8, values.len, null);

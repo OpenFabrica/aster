@@ -536,6 +536,23 @@ pub const Session = struct {
         return try @import("display_snapshot.zig").capture(self.allocator, &self.terminal, maximum);
     }
 
+    /// 实时交接接收端：用旧服务的画面快照重建 VT，再接上旧服务还没写进 PTY 的输入。
+    ///
+    /// 快照是生成的状态（以 RIS 开头），不含查询；万一产生应答也丢弃——程序早已收到过旧服务
+    /// 的应答，再写一遍会变成它的输入。必须在首次读取 PTY 之前调用，否则 RIS 会抹掉新输出。
+    pub fn seedState(self: *Session, snapshot: []const u8, unsent: []const u8) !void {
+        self.terminal.write(snapshot);
+        self.responses.used = 0;
+        self.responses.overflow = false;
+        if (unsent.len != 0) try self.enqueueInput(unsent);
+        try self.enforceHistoryLimit();
+    }
+
+    /// 实时交接发送端：已排队、尚未写进 PTY 的输入。
+    pub fn unsentInput(self: *const Session) []const u8 {
+        return self.pending_input.items[self.input_offset..];
+    }
+
     /// Change server-side history position without sending bytes to the PTY.
     /// Caller must validate the writer lease before entering this method.
     pub fn scroll(self: *Session, rows: i32) !void {

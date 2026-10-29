@@ -70,6 +70,10 @@ pub const Control = struct {
     stop_requested: bool = false,
     /// Set by server.handoff handler; main loop reads and clears to trigger performHandoff.
     handoff_requested: bool = false,
+    /// `server.handoff` 可选参数 `binary`：交接给哪份二进制。为空时主循环退回
+    /// `ASTER_SESSION_BINARY` 或自身可执行文件路径。App 搬过安装位置时两者可能不同。
+    handoff_binary: [std.fs.max_path_bytes]u8 = undefined,
+    handoff_binary_len: usize = 0,
     handler: ?Handler = null,
     registry: ?RegistryHandler = null,
     advertised_capabilities: []const []const u8 = &capabilities,
@@ -144,6 +148,12 @@ pub const Control = struct {
             .@"server.handoff" => {
                 if (self.handler == null)
                     return try failure(allocator, request, "capability_not_available", "This install does not support live handoff.", .never);
+                if (request.params.object.get("binary")) |value| {
+                    if (value != .string or !validHandoffBinary(value.string))
+                        return try failure(allocator, request, "invalid_request", "binary must be an absolute path to an executable owned by this user.", .never);
+                    @memcpy(self.handoff_binary[0..value.string.len], value.string);
+                    self.handoff_binary_len = value.string.len;
+                } else self.handoff_binary_len = 0;
                 const response = try self.success(allocator, request, .{ .accepted = true });
                 self.handoff_requested = true;
                 return response;
@@ -153,6 +163,12 @@ pub const Control = struct {
                 return try failure(allocator, request, "missing_capability", "The required capability is unavailable.", .never);
             },
         }
+    }
+
+    /// 本次交接指定的二进制；没有指定时返回 null。
+    pub fn handoffBinary(self: *const Control) ?[]const u8 {
+        if (self.handoff_binary_len == 0) return null;
+        return self.handoff_binary[0..self.handoff_binary_len];
     }
 
     fn success(self: *const Control, allocator: std.mem.Allocator, request: Request, result: anytype) ![]u8 {
@@ -347,4 +363,14 @@ test "terminal dispatch preserves original connection generation for deferred wo
     defer std.testing.allocator.free(bytes);
     try std.testing.expectEqual(@as(?[]u8, null), try control.respondForConnection(std.testing.allocator, bytes, 29));
     try std.testing.expectEqual(@as(u64, 29), domain.generation);
+}
+
+/// 交接目标二进制必须是绝对路径、普通可执行文件，且属于当前用户或 root：新服务会接管
+/// 全部 PTY，不能让任意路径上的程序拿到它们。
+fn validHandoffBinary(path: []const u8) bool {
+    if (path.len == 0 or path.len >= std.fs.max_path_bytes or path[0] != '/') return false;
+    const stat = std.fs.cwd().statFile(path) catch return false;
+    if (stat.kind != .file or stat.mode & 0o111 == 0) return false;
+    const posix_stat = std.posix.fstatat(std.posix.AT.FDCWD, path, 0) catch return false;
+    return posix_stat.uid == std.posix.geteuid() or posix_stat.uid == 0;
 }

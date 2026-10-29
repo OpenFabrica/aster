@@ -30,13 +30,18 @@ pub fn main() !void {
         if (@import("build_options").with_vt and std.mem.eql(u8, arg, "server")) {
             const action = args.next() orelse return error.MissingServerAction;
             @import("service_control.zig").build_id = @import("build_options").build_id;
-            if (!std.mem.eql(u8, action, "serve") and !std.mem.eql(u8, action, "status") and !std.mem.eql(u8, action, "start") and !std.mem.eql(u8, action, "stop")) return error.UnsupportedServerAction;
+            if (!std.mem.eql(u8, action, "serve") and !std.mem.eql(u8, action, "status") and !std.mem.eql(u8, action, "start") and !std.mem.eql(u8, action, "stop") and !std.mem.eql(u8, action, "upgrade")) return error.UnsupportedServerAction;
             const parent_path = args.next() orelse return error.MissingStateParent;
             const name = args.next() orelse return error.MissingStateName;
             // Parse optional --takeover-fd for live handoff (P8.4).
             var takeover_fd: ?std.posix.fd_t = null;
+            // `server upgrade --force`：构建号相同也交接（测试与手动重新交接用）。
+            var force_upgrade = false;
             if (args.next()) |extra| {
-                if (std.mem.eql(u8, extra, "--takeover-fd")) {
+                if (std.mem.eql(u8, action, "upgrade") and std.mem.eql(u8, extra, "--force")) {
+                    force_upgrade = true;
+                    if (args.next() != null) return error.UnexpectedArgument;
+                } else if (std.mem.eql(u8, extra, "--takeover-fd")) {
                     const fd_str = args.next() orelse return error.MissingTakeoverFD;
                     takeover_fd = std.fmt.parseInt(std.posix.fd_t, fd_str, 10) catch return error.InvalidTakeoverFD;
                     if (args.next() != null) return error.UnexpectedArgument;
@@ -44,6 +49,20 @@ pub fn main() !void {
             }
             if (std.mem.eql(u8, action, "start")) {
                 const result = @import("service_launch.zig").start(allocator, parent_path, name) catch |err| {
+                    const encoded = try std.json.Stringify.valueAlloc(allocator, .{ .type = "client_error", .code = @errorName(err) }, .{});
+                    defer allocator.free(encoded);
+                    try std.fs.File.stdout().writeAll(encoded);
+                    try std.fs.File.stdout().writeAll("\n");
+                    std.process.exit(1);
+                };
+                defer allocator.free(result);
+                try std.fs.File.stdout().writeAll(result);
+                try std.fs.File.stdout().writeAll("\n");
+                return;
+            }
+            // 实时交接：把运行中的旧服务换成本二进制，终端进程不中断（service_upgrade.zig）。
+            if (std.mem.eql(u8, action, "upgrade")) {
+                const result = @import("service_upgrade.zig").run(allocator, parent_path, name, if (force_upgrade) "" else @import("build_options").build_id) catch |err| {
                     const encoded = try std.json.Stringify.valueAlloc(allocator, .{ .type = "client_error", .code = @errorName(err) }, .{});
                     defer allocator.free(encoded);
                     try std.fs.File.stdout().writeAll(encoded);
@@ -227,7 +246,7 @@ pub fn main() !void {
     }
     try std.fs.File.stderr().writeAll("usage: aster-session --version\n");
     if (@import("build_options").with_vt) {
-        try std.fs.File.stderr().writeAll("P1 service commands:\n  aster-session server serve <existing-state-parent> <name>\n  aster-session server status <existing-state-parent> <name>\n  aster-session server start <existing-state-parent> <name>\n  aster-session server stop <existing-state-parent> <name>\nP1 terminal commands:\n  aster-session terminal create <state-parent> <name> <cwd> <program> [args...]\n  aster-session terminal list <state-parent> <name>\n  aster-session terminal terminate <state-parent> <name> <terminal-id>\n  aster-session terminal attach <state-parent> <name> <terminal-id> [--takeover]\n  aster-session terminal observe <state-parent> <name> <terminal-id>\n  Ctrl+B q: detach; Ctrl+B Ctrl+B: literal Ctrl+B\nP4 registry and workspace commands:\n  aster-session session list <state-parent>\n  aster-session session create <state-parent> <name>\n  aster-session session attach|stop|delete <state-parent> <name-or-id>\n  aster-session session snapshot <state-parent> <name>\n  aster-session workspace list <state-parent> <name>\n  aster-session workspace create <state-parent> <name> --expected-revision <n> --title <t> --cwd <abs> -- <argv...>\n  aster-session workspace update <state-parent> <name> --workspace <id> --expected-revision <n> --title <t>\n  aster-session workspace close <state-parent> <name> --workspace <id> --expected-revision <n>\n  aster-session tab create <state-parent> <name> --workspace <id> --expected-revision <n> --title <t> --cwd <abs> -- <argv...>\n  aster-session tab update <state-parent> <name> --tab <id> --expected-revision <n> --title <t>\n  aster-session tab close <state-parent> <name> --tab <id> --expected-revision <n>\n  aster-session pane split <state-parent> <name> --pane <id> --direction <left|right|up|down> --expected-revision <n> --cwd <abs> -- <argv...>\n  aster-session pane update <state-parent> <name> --pane <id> --expected-revision <n> --title <t>\n  aster-session pane close <state-parent> <name> --pane <id> --expected-revision <n>\nP7 TUI client:\n  aster-session ui <state-parent> <name> [--observe]\n  Ctrl+B q: detach; Ctrl+B n/p: next/prev tab; Ctrl+B o: next pane; Ctrl+B ?: help\nP4 event stream:\n  aster-session event subscribe <state-parent> <name>\nP0 integration only:\n  aster-session probe-serve <private-socket> <cwd> <executable> [args...]\n  aster-session probe-bridge <private-socket>\n");
+        try std.fs.File.stderr().writeAll("P1 service commands:\n  aster-session server serve <existing-state-parent> <name>\n  aster-session server status <existing-state-parent> <name>\n  aster-session server start <existing-state-parent> <name>\n  aster-session server stop <existing-state-parent> <name>\n  aster-session server upgrade <existing-state-parent> <name> [--force]\nP1 terminal commands:\n  aster-session terminal create <state-parent> <name> <cwd> <program> [args...]\n  aster-session terminal list <state-parent> <name>\n  aster-session terminal terminate <state-parent> <name> <terminal-id>\n  aster-session terminal attach <state-parent> <name> <terminal-id> [--takeover]\n  aster-session terminal observe <state-parent> <name> <terminal-id>\n  Ctrl+B q: detach; Ctrl+B Ctrl+B: literal Ctrl+B\nP4 registry and workspace commands:\n  aster-session session list <state-parent>\n  aster-session session create <state-parent> <name>\n  aster-session session attach|stop|delete <state-parent> <name-or-id>\n  aster-session session snapshot <state-parent> <name>\n  aster-session workspace list <state-parent> <name>\n  aster-session workspace create <state-parent> <name> --expected-revision <n> --title <t> --cwd <abs> -- <argv...>\n  aster-session workspace update <state-parent> <name> --workspace <id> --expected-revision <n> --title <t>\n  aster-session workspace close <state-parent> <name> --workspace <id> --expected-revision <n>\n  aster-session tab create <state-parent> <name> --workspace <id> --expected-revision <n> --title <t> --cwd <abs> -- <argv...>\n  aster-session tab update <state-parent> <name> --tab <id> --expected-revision <n> --title <t>\n  aster-session tab close <state-parent> <name> --tab <id> --expected-revision <n>\n  aster-session pane split <state-parent> <name> --pane <id> --direction <left|right|up|down> --expected-revision <n> --cwd <abs> -- <argv...>\n  aster-session pane update <state-parent> <name> --pane <id> --expected-revision <n> --title <t>\n  aster-session pane close <state-parent> <name> --pane <id> --expected-revision <n>\nP7 TUI client:\n  aster-session ui <state-parent> <name> [--observe]\n  Ctrl+B q: detach; Ctrl+B n/p: next/prev tab; Ctrl+B o: next pane; Ctrl+B ?: help\nP4 event stream:\n  aster-session event subscribe <state-parent> <name>\nP0 integration only:\n  aster-session probe-serve <private-socket> <cwd> <executable> [args...]\n  aster-session probe-bridge <private-socket>\n");
     }
     std.process.exit(2);
 }

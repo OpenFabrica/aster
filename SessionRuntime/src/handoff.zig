@@ -6,6 +6,7 @@
 const std = @import("std");
 const ids = @import("service_identity.zig");
 const Pool = @import("terminal_pool.zig").Pool;
+const Session = @import("session.zig").Session;
 const AgentStore = @import("agent_store.zig").Store;
 const workspace_store = @import("workspace_store.zig");
 const c = @cImport({
@@ -14,6 +15,7 @@ const c = @cImport({
     @cInclude("unistd.h");
     @cInclude("signal.h");
     @cInclude("sys/wait.h");
+    @cInclude("sys/ioctl.h");
 });
 
 /// Maximum time (ns) the old service waits for takeover confirmation.
@@ -24,6 +26,13 @@ const max_state_bytes: usize = 16 * 1024 * 1024;
 
 /// Maximum number of PTY FDs transferred in one SCM_RIGHTS message.
 const max_fds: usize = 64;
+
+/// 单个终端画面快照上限。历史配额是每终端 16 MiB，格式化后的转义序列会比它大一些。
+pub const max_snapshot_bytes: usize = 64 * 1024 * 1024;
+
+/// 当前发送的信封版本。v1 只有 JSON；v2 在 JSON 之后按终端顺序附带
+/// `u32 快照长度 + 快照 + u32 输入长度 + 未写入输入`，接收端据此重建 VT。
+pub const envelope_version: u32 = 2;
 
 // ─── Wire types ────────────────────────────────────────────────────────────
 
@@ -37,7 +46,7 @@ pub const TerminalEntry = struct {
 
 /// Complete state envelope serialized as JSON.
 pub const StateEnvelope = struct {
-    version: u32 = 1,
+    version: u32 = envelope_version,
     epoch: []const u8,
     terminals: []const TerminalEntry,
     layout_json: ?[]const u8 = null,
@@ -129,8 +138,64 @@ pub fn sendState(
         written += n;
     }
 
+    // v2：按 entries 顺序附带画面快照与未写入输入，接收端在首次读 PTY 之前重建 VT。
+    for (pool.entries.items) |*entry| {
+        if (entry.session.process.master < 0) continue;
+        const session = entry.session;
+        const snapshot = captureForHandoff(session);
+        defer if (snapshot.len != 0) session.allocator.free(snapshot);
+        try writeBlob(socket_fd, snapshot);
+        try writeBlob(socket_fd, session.unsentInput());
+    }
+
     // Return owned FD list so caller can recover them on failure.
     return try allocator.dupe(std.posix.fd_t, fds.items);
+}
+
+/// 与客户端附加相同的完整快照（双屏幕、历史、模式、光标；有图片时含图形）。带图片但还没有
+/// 像素几何时退回纯文本快照；仍然失败只返回空，接收端从空白 VT 开始，不让交接整体失败。
+fn captureForHandoff(session: *Session) []u8 {
+    if (session.snapshotForClient(max_snapshot_bytes) catch null) |bytes| return bytes;
+    return @import("display_snapshot.zig").capture(session.allocator, &session.terminal, max_snapshot_bytes) catch &.{};
+}
+
+/// 写一段 `u32 大端长度 + 字节`。
+fn writeBlob(socket_fd: std.posix.fd_t, bytes: []const u8) !void {
+    var header: [4]u8 = undefined;
+    std.mem.writeInt(u32, &header, @intCast(bytes.len), .big);
+    try writeAllFd(socket_fd, &header);
+    try writeAllFd(socket_fd, bytes);
+}
+
+fn writeAllFd(socket_fd: std.posix.fd_t, bytes: []const u8) !void {
+    var written: usize = 0;
+    while (written < bytes.len) {
+        const n = std.posix.write(socket_fd, bytes[written..]) catch return error.HandoffWriteFailed;
+        if (n == 0) return error.HandoffWriteFailed;
+        written += n;
+    }
+}
+
+/// 读满 `buffer`；对端提前关闭视为失败。
+fn readExact(socket_fd: std.posix.fd_t, buffer: []u8) !void {
+    var total: usize = 0;
+    while (total < buffer.len) {
+        const n = std.posix.read(socket_fd, buffer[total..]) catch return error.HandoffReadFailed;
+        if (n == 0) return error.HandoffReadFailed;
+        total += n;
+    }
+}
+
+/// 读一段 `u32 大端长度 + 字节`，长度超过 `limit` 即判协议错误。
+fn readBlob(allocator: std.mem.Allocator, socket_fd: std.posix.fd_t, limit: usize) ![]u8 {
+    var header: [4]u8 = undefined;
+    try readExact(socket_fd, &header);
+    const length = std.mem.readInt(u32, &header, .big);
+    if (length > limit) return error.HandoffStateTooLarge;
+    const bytes = try allocator.alloc(u8, length);
+    errdefer allocator.free(bytes);
+    try readExact(socket_fd, bytes);
+    return bytes;
 }
 
 /// Waits for takeover confirmation from the new service. Returns true if
@@ -162,12 +227,32 @@ pub const ReceivedState = struct {
     allocator: std.mem.Allocator,
     envelope: std.json.Parsed(StateEnvelope),
     fds: []std.posix.fd_t,
+    /// v2 起每个终端的画面快照（可能为空）；v1 发送端没有，长度为 0。
+    snapshots: [][]u8 = &.{},
+    /// v2 起每个终端尚未写进 PTY 的输入；v1 发送端没有，长度为 0。
+    inputs: [][]u8 = &.{},
 
     /// Releases all resources. Caller must have adopted or closed FDs first.
     pub fn deinit(self: *ReceivedState) void {
+        for (self.snapshots) |bytes| self.allocator.free(bytes);
+        if (self.snapshots.len != 0) self.allocator.free(self.snapshots);
+        for (self.inputs) |bytes| self.allocator.free(bytes);
+        if (self.inputs.len != 0) self.allocator.free(self.inputs);
         self.allocator.free(self.fds);
         self.envelope.deinit();
         self.* = undefined;
+    }
+
+    /// 第 `index` 个终端随信封带来的快照；v1 发送端或快照为空时返回 null。
+    pub fn snapshot(self: *const ReceivedState, index: usize) ?[]const u8 {
+        if (index >= self.snapshots.len or self.snapshots[index].len == 0) return null;
+        return self.snapshots[index];
+    }
+
+    /// 第 `index` 个终端尚未写进 PTY 的输入；v1 发送端返回空。
+    pub fn input(self: *const ReceivedState, index: usize) []const u8 {
+        if (index >= self.inputs.len) return &.{};
+        return self.inputs[index];
     }
 };
 
@@ -196,16 +281,12 @@ pub fn receiveState(allocator: std.mem.Allocator, socket_fd: std.posix.fd_t) !Re
     // Read the JSON body.
     const json_buf = try allocator.alloc(u8, json_len);
     defer allocator.free(json_buf);
-    var total: usize = 0;
-    while (total < json_len) {
-        const n = std.posix.read(socket_fd, json_buf[total..]) catch return error.HandoffReadFailed;
-        if (n == 0) return error.HandoffReadFailed;
-        total += n;
-    }
+    try readExact(socket_fd, json_buf);
 
-    // Parse envelope.
+    // Parse envelope. 未知字段放过：新版发送端可以加字段而不让旧接收端整体失败。
     const parsed = std.json.parseFromSlice(StateEnvelope, allocator, json_buf[0..json_len], .{
         .allocate = .alloc_always,
+        .ignore_unknown_fields = true,
     }) catch return error.HandoffStateInvalid;
     errdefer parsed.deinit();
 
@@ -216,11 +297,27 @@ pub fn receiveState(allocator: std.mem.Allocator, socket_fd: std.posix.fd_t) !Re
         fd_slice[i] = fds_buf[i];
     }
 
-    return .{
-        .allocator = allocator,
-        .envelope = parsed,
-        .fds = fd_slice,
-    };
+    var state: ReceivedState = .{ .allocator = allocator, .envelope = parsed, .fds = fd_slice };
+    if (parsed.value.version >= 2) {
+        const count = parsed.value.terminals.len;
+        state.snapshots = try allocator.alloc([]u8, count);
+        @memset(state.snapshots, &.{});
+        errdefer {
+            for (state.snapshots) |bytes| allocator.free(bytes);
+            allocator.free(state.snapshots);
+        }
+        state.inputs = try allocator.alloc([]u8, count);
+        @memset(state.inputs, &.{});
+        errdefer {
+            for (state.inputs) |bytes| allocator.free(bytes);
+            allocator.free(state.inputs);
+        }
+        for (0..count) |index| {
+            state.snapshots[index] = try readBlob(allocator, socket_fd, max_snapshot_bytes);
+            state.inputs[index] = try readBlob(allocator, socket_fd, @import("session.zig").Session.input_limit);
+        }
+    }
+    return state;
 }
 
 /// Sends takeover confirmation to the old service.
@@ -364,6 +461,34 @@ pub fn performHandoff(
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+/// 让这些 PTY 的前台程序整屏重画一次：先把行数临时减一，等程序收到 SIGWINCH，再改回原值。
+///
+/// 只用于 v1 种子：种子在请求交接之前抓取，旧服务在那之后读走的输出不在种子里。TUI 与
+/// Shell 在尺寸变化时都会完整重画，最终画面回到正确状态。只改行数不改列数，避免 Codex
+/// 这类内联界面按新宽度重排、重复打印历史。尺寸相同的 TIOCSWINSZ 不会发信号，所以必须真改一次。
+pub fn nudgeRedraw(fds: []const std.posix.fd_t) void {
+    if (fds.len == 0) return;
+    var originals: [max_fds]c.winsize = undefined;
+    var changed: [max_fds]bool = [_]bool{false} ** max_fds;
+    for (fds, 0..) |fd, index| {
+        if (index >= max_fds) break;
+        var size: c.winsize = std.mem.zeroes(c.winsize);
+        if (c.ioctl(fd, c.TIOCGWINSZ, &size) != 0 or size.ws_row < 2) continue;
+        originals[index] = size;
+        var shrunk = size;
+        shrunk.ws_row -= 1;
+        // 像素高度按比例缩，保持「像素 ≥ 行数」的几何约束。
+        if (size.ws_ypixel != 0) shrunk.ws_ypixel = @intCast(@as(u32, size.ws_ypixel) * shrunk.ws_row / size.ws_row);
+        changed[index] = c.ioctl(fd, c.TIOCSWINSZ, &shrunk) == 0;
+    }
+    // 给程序处理第一次 SIGWINCH 的时间；太短会被合并成一次「尺寸没变」。
+    std.Thread.sleep(150 * std.time.ns_per_ms);
+    for (fds, 0..) |fd, index| {
+        if (index >= max_fds or !changed[index]) continue;
+        _ = c.ioctl(fd, c.TIOCSWINSZ, &originals[index]);
+    }
+}
+
 /// Serializes the agent store to JSON for the handoff envelope.
 fn serializeAgents(allocator: std.mem.Allocator, agents: *AgentStore) !?[]u8 {
     if (agents.entries.items.len == 0) return null;
@@ -406,7 +531,7 @@ test "state envelope round-trips through JSON" {
     });
     defer parsed.deinit();
 
-    try std.testing.expectEqual(@as(u32, 1), parsed.value.version);
+    try std.testing.expectEqual(envelope_version, parsed.value.version);
     try std.testing.expectEqual(@as(usize, 1), parsed.value.terminals.len);
     try std.testing.expectEqual(@as(i32, 42), parsed.value.terminals[0].pid);
     try std.testing.expectEqualStrings("/tmp", parsed.value.terminals[0].cwd);

@@ -17,7 +17,7 @@ const Geometry = struct { rows: u16, columns: u16, pixelWidth: u16 = 0, pixelHei
 const Lease = struct { leaseID: ID, leaseEpoch: u64 };
 const Response = replies.Response(std.json.Value);
 
-const Client = struct {
+pub const Client = struct {
     allocator: std.mem.Allocator,
     stream: std.net.Stream,
     client_id: ID,
@@ -32,7 +32,7 @@ const Client = struct {
     event_sequence: u64 = 0,
     event_revision: ?u64 = null,
 
-    fn connect(a: std.mem.Allocator, parent: std.fs.Dir, name: []const u8, client_id: ID) !Client {
+    pub fn connect(a: std.mem.Allocator, parent: std.fs.Dir, name: []const u8, client_id: ID) !Client {
         var deadline = try transport.Deadline.init(5000);
         const stream = try transport.connect(parent, name, &deadline);
         errdefer stream.close();
@@ -43,7 +43,7 @@ const Client = struct {
         try parsed.value.negotiateRequired(&.{ "terminal_control", "surface_interest", "health_check" });
         return .{ .allocator = a, .stream = stream, .client_id = client_id, .server = try identity(parsed.value.serverID), .epoch = try identity(parsed.value.serverEpoch), .session = try identity(parsed.value.sessionID) };
     }
-    fn rpc(self: *Client, operation: @import("operation_kind.zig").Operation, params: anytype) !std.json.Parsed(Response) {
+    pub fn rpc(self: *Client, operation: @import("operation_kind.zig").Operation, params: anytype) !std.json.Parsed(Response) {
         const a = self.allocator;
         const encoded_params = if (@typeInfo(@TypeOf(params)) == .@"struct" and @typeInfo(@TypeOf(params)).@"struct".fields.len == 0) try a.dupe(u8, "{}") else try std.json.Stringify.valueAlloc(a, params, .{});
         defer a.free(encoded_params);
@@ -584,6 +584,48 @@ fn logExit(terminal_id: []const u8, reason: []const u8) void {
     const text = std.fmt.bufPrint(&buffer, "terminal attach {s} exited: {s}\n", .{ terminal_id, reason }) catch return;
     appendExitLog(text);
 }
+/// 以只读观察者身份取一个终端的完整画面快照（与客户端附加时收到的第一份快照相同）。
+///
+/// 实时交接用：`server upgrade` 在请求交接前抓下旧服务的画面，供不会随信封发送快照的
+/// v1 旧服务补 VT 状态。只读观察不占写租约，也不改终端尺寸。
+pub fn captureSnapshot(a: std.mem.Allocator, parent: std.fs.Dir, name: []const u8, terminal_id: []const u8) ![]u8 {
+    var owner = try Client.connect(a, parent, name, ids.uuidText(ids.newUUID()));
+    defer owner.stream.close();
+    owner.terminal_id = try identity(terminal_id);
+    const observed = try owner.rpc(.@"terminal.observe", .{ .terminalID = terminal_id });
+    defer observed.deinit();
+    const attachment = try identity(try string(observed.value.result, "attachmentID"));
+    defer {
+        if (owner.rpc(.@"terminal.release", .{ .attachmentID = &attachment })) |reply| reply.deinit() else |_| {}
+    }
+    const geometry = try sourceGeometry(&owner, terminal_id);
+    var surface = try Surface.init(a, parent, name, &owner, attachment, terminal_id, geometry);
+    defer surface.deinit();
+    var clock = try std.time.Timer.start();
+    var buffer: [65536]u8 = undefined;
+    while (clock.read() < 10 * std.time.ns_per_s) {
+        var fds = [_]std.posix.pollfd{.{ .fd = surface.client.stream.handle, .events = std.posix.POLL.IN, .revents = 0 }};
+        _ = try std.posix.poll(&fds, 100);
+        if (fds[0].revents == 0) continue;
+        const count = try surface.client.stream.read(&buffer);
+        if (count == 0) return error.SnapshotStreamClosed;
+        var offset: usize = 0;
+        while (offset < count) {
+            var consumed: usize = 0;
+            const message = try surface.decoder.feed(buffer[offset..count], &consumed);
+            offset += consumed;
+            const frame = message orelse continue;
+            const complete = (try surface.receiver.frame(frame, 0)) orelse continue;
+            // 订阅后的第一份完整事务一定是快照；之后的增量不需要。
+            const delta = surface.receiver.delta;
+            const copy = if (delta) null else try a.dupe(u8, complete);
+            surface.receiver.release();
+            if (copy) |bytes| return bytes;
+        }
+    }
+    return error.SnapshotTimeout;
+}
+
 fn resize(owner: *Client, terminal_id: []const u8, geometry: Geometry) !void {
     const reply = try owner.rpc(.@"terminal.control", .{ .terminalID = terminal_id, .action = "resize", .geometry = geometry });
     defer reply.deinit();

@@ -16,6 +16,7 @@ const Request = @import("operation_request.zig").Request;
 const ids = @import("service_identity.zig");
 const Report = @import("startup_report.zig").Writer;
 const handoff = @import("handoff.zig");
+const handoff_seed = @import("handoff_seed.zig");
 const c = @cImport({
     @cInclude("bridge_signals.h");
     @cInclude("signal.h");
@@ -141,11 +142,11 @@ fn runInitialized(allocator: std.mem.Allocator, instance: *Instance, name: []con
         // exit if the new service confirms takeover.
         if (reactor.control.handoff_requested) {
             reactor.control.handoff_requested = false;
-            const binary_path = std.posix.getenv("ASTER_SESSION_BINARY") orelse blk: {
-                // Default: re-exec ourselves from /proc/self/exe (Linux) or argv[0].
-                var self_buf: [std.fs.max_path_bytes]u8 = undefined;
-                break :blk std.fs.selfExePath(&self_buf) catch null;
-            };
+            // 缓冲区必须活过整个交接：以前它定义在块内，返回的切片指向已失效的栈内存。
+            var self_buf: [std.fs.max_path_bytes]u8 = undefined;
+            // 优先用请求里指定的二进制，其次环境变量，最后是自身路径（App 替换后即新版）。
+            const binary_path = reactor.control.handoffBinary() orelse std.posix.getenv("ASTER_SESSION_BINARY") orelse
+                (std.fs.selfExePath(&self_buf) catch null);
             if (binary_path) |bp| {
                 const parent_path = instance.parent.realpathAlloc(allocator, ".") catch null;
                 defer if (parent_path) |pp| allocator.free(pp);
@@ -221,25 +222,29 @@ pub fn runTakeover(allocator: std.mem.Allocator, parent: std.fs.Dir, name: []con
     // Generate new epoch for this incarnation.
     const new_epoch = ids.newUUID();
 
-    // Do NOT confirm yet: the old service must keep serving until we have
-    // acquired the lock and adopted terminals. Confirmation moves into
-    // runWithAdoptedState after lock + pool setup succeed.
-    try runWithAdoptedState(allocator, parent, name, new_epoch, &received, takeover_fd);
+    // 收到 PTY 就立刻确认，之后才去拿服务锁。旧服务持有锁、阻塞在等确认上，只有收到确认
+    // 才会排空并退出、释放锁；以前先拿锁再确认，两边互等到 5 秒超时，旧服务杀掉新服务后
+    // 继续运行，交接从未成功过。确认写失败时直接退出：旧服务超时后收回自己那份 FD，
+    // 终端不受影响，也不会出现两个服务同时读一个 PTY。
+    try handoff.sendConfirmation(takeover_fd, true, new_epoch);
+    std.posix.close(takeover_fd);
+    try runWithAdoptedState(allocator, parent, name, new_epoch, &received);
 }
 
 /// Starts the service loop with terminals adopted from a live handoff.
 /// Mirrors runInitialized but pre-populates the pool and agent store from
 /// the received handoff state before entering the main loop.
-fn runWithAdoptedState(allocator: std.mem.Allocator, parent: std.fs.Dir, name: []const u8, new_epoch: [16]u8, received: *handoff.ReceivedState, takeover_fd: ?std.posix.fd_t) !void {
+fn runWithAdoptedState(allocator: std.mem.Allocator, parent: std.fs.Dir, name: []const u8, new_epoch: [16]u8, received: *handoff.ReceivedState) !void {
     const wake = c.session_bridge_signals_start();
     if (wake < 0) return error.ServiceSignalSetupFailed;
     defer c.session_bridge_signals_stop();
-    // The old service still holds the lock while cleaning up. Retry with
-    // a short backoff until it releases (typically <100ms).
+    // The old service still holds the lock while it drains its replies and
+    // exits after our confirmation (≈250ms). Retry with a short backoff; the
+    // generous bound only matters on a heavily loaded machine.
     var instance: Instance = undefined;
     {
         var attempt: u32 = 0;
-        while (attempt < 50) : (attempt += 1) {
+        while (attempt < 300) : (attempt += 1) {
             instance = Instance.open(parent, name) catch |err| {
                 if (err == error.AlreadyRunning) {
                     std.Thread.sleep(100 * std.time.ns_per_ms);
@@ -266,28 +271,31 @@ fn runWithAdoptedState(allocator: std.mem.Allocator, parent: std.fs.Dir, name: [
     var colors: @import("client_colors.zig").Source = .{ .dir = instance.parent };
     pool.client_colors = &colors;
 
-    // Adopt terminals from the old service: each PTY FD + PID pair becomes
-    // a pool entry with the same terminalID. VT state rebuilds from PTY output.
+    // Adopt terminals from the old service: each PTY FD + PID pair becomes a
+    // pool entry with the same terminalID. VT 状态优先用信封里的快照（v2 发送端）；
+    // v1 发送端没有快照，改用 `server upgrade` 事先抓好的种子文件，并在接管后促使
+    // 前台程序重画一次，补上抓种子到旧服务停止读取之间那一小段输出。
     const envelope = received.envelope.value;
-    for (received.fds, envelope.terminals) |fd, terminal| {
+    var redraw: std.ArrayList(std.posix.fd_t) = .empty;
+    defer redraw.deinit(allocator);
+    for (received.fds, envelope.terminals, 0..) |fd, terminal, index| {
+        if (terminal.id.len != 36) continue;
         var id_buf: [36]u8 = undefined;
         @memcpy(&id_buf, terminal.id[0..36]);
-        pool.adoptTerminal(id_buf, fd, terminal.pid, terminal.cwd, terminal.history_excluded) catch |err| {
+        var seed_file: ?[]u8 = null;
+        defer if (seed_file) |bytes| allocator.free(bytes);
+        const seed = received.snapshot(index) orelse blk: {
+            seed_file = handoff_seed.read(allocator, instance.state.dir, envelope.epoch, terminal.id) catch null;
+            break :blk seed_file;
+        };
+        pool.adoptTerminal(id_buf, fd, terminal.pid, terminal.cwd, terminal.history_excluded, seed, received.input(index)) catch |err| {
             std.log.err("adoptTerminal failed for {s}: {}", .{ terminal.id, err });
             continue;
         };
+        if (seed_file != null) redraw.append(allocator, fd) catch {};
     }
-
-    // All terminals adopted and lock acquired. NOW confirm takeover to old
-    // service so it closes its FD copies and exits. If we crash before this
-    // point, the old service times out (5s) and continues serving — no data
-    // loss, no double-ownership.
-    if (takeover_fd) |tfd| {
-        handoff.sendConfirmation(tfd, true, new_epoch) catch |err| {
-            std.log.err("handoff confirmation failed: {}", .{err});
-        };
-        std.posix.close(tfd);
-    }
+    handoff_seed.clear(instance.state.dir);
+    handoff.nudgeRedraw(redraw.items);
 
     var store = Store.init(allocator);
     defer store.deinit();
@@ -376,10 +384,11 @@ fn runWithAdoptedState(allocator: std.mem.Allocator, parent: std.fs.Dir, name: [
         reactor.control.revision = store.revision;
         if (reactor.control.handoff_requested) {
             reactor.control.handoff_requested = false;
-            const binary_path = std.posix.getenv("ASTER_SESSION_BINARY") orelse blk: {
-                var self_buf: [std.fs.max_path_bytes]u8 = undefined;
-                break :blk std.fs.selfExePath(&self_buf) catch null;
-            };
+            // 缓冲区必须活过整个交接：以前它定义在块内，返回的切片指向已失效的栈内存。
+            var self_buf: [std.fs.max_path_bytes]u8 = undefined;
+            // 优先用请求里指定的二进制，其次环境变量，最后是自身路径（App 替换后即新版）。
+            const binary_path = reactor.control.handoffBinary() orelse std.posix.getenv("ASTER_SESSION_BINARY") orelse
+                (std.fs.selfExePath(&self_buf) catch null);
             if (binary_path) |bp| {
                 const parent_path = instance.parent.realpathAlloc(allocator, ".") catch null;
                 defer if (parent_path) |pp| allocator.free(pp);
