@@ -250,7 +250,7 @@ final class HostEditorPanelController: NSViewController, NSTextFieldDelegate, NS
       section.addRow(button)
       return button
     }
-    _ = button(L("添加为远程机器…"), "desktopcomputer", .addMachine)
+    _ = button(L("添加为远程开发机器…"), "desktopcomputer", .addMachine)
     let forget = button(L("忘记保存的口令…"), "key", .forgetPassword)
     forget.isHidden = true
     forgetPasswordButton = forget

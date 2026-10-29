@@ -66,7 +66,7 @@ extension AppModel {
   ) -> Bool {
     // 远端机器上的标签是服务端结构的投影，本地插一个服务端不认识的 Pane 会让两边结构分叉。
     guard remoteStructureHandler == nil else {
-      notice = L("远端机器上的工作区暂不支持工具 Pane")
+      notice = L("远程开发机器上的工作区暂不支持工具 Pane")
       return false
     }
     guard let tab = selectedTab else { return false }
@@ -128,7 +128,7 @@ extension AppModel {
         ? path : nil
     } ?? FileManager.default.homeDirectoryForCurrentUser.path
     if !runCommandInNewTab(line, workingDirectory: directory) {
-      notice = L("当前窗口在远端机器上，请先切回本机再运行工具命令")
+      notice = L("当前窗口在远程开发机器上，请先切回本机再运行工具命令")
     }
   }
 }

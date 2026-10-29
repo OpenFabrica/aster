@@ -592,7 +592,7 @@ final class OpenQuicklyOverlayViewController: NSViewController, NSSearchFieldDel
     switch kind {
     case .window: L("窗口")
     case .workspace: L("工作区")
-    case .machine: L("机器")
+    case .machine: L("远程开发机器")
     case .host: L("主机")
     case .opened: L("标签页")
     case .current: L("当前")

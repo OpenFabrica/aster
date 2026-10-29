@@ -113,7 +113,7 @@ private func makeMachineSidebarFixture() throws -> MachineSidebarFixture {
 @MainActor
 @Suite("机器侧栏", .serialized)
 struct MachineSidebarAppTests {
-  @Test("机器侧栏：Local 恒在最上，添加机器按钮真实存在且可点")
+  @Test("机器侧栏：Local 恒在最上，添加远程开发机器按钮真实存在且可点")
   @MainActor
   func machineSidebarRendersLocalAndAddButton() async throws {
     let fixture = try makeMachineSidebarFixture()
@@ -179,7 +179,7 @@ struct MachineSidebarAppTests {
     #expect(switcher.accessibilityLabel()?.contains("orb") == true)
   }
 
-  @Test("机器侧栏：主菜单「文件 ▸ 添加机器…」与侧栏按钮指向同一个动作")
+  @Test("机器侧栏：主菜单「文件 ▸ 添加远程开发机器…」与侧栏按钮指向同一个动作")
   @MainActor
   func machineSidebarMenuEntryMatchesSidebarButton() async throws {
     let fixture = try makeMachineSidebarFixture()

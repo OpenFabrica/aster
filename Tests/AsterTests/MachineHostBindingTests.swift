@@ -63,7 +63,7 @@ private func makeBindingFleet(
 }
 
 @MainActor
-@Test("添加机器绑定主机：target 取主机连接串，配置与行都带 hostID")
+@Test("添加远程开发机器绑定主机：target 取主机连接串，配置与行都带 hostID")
 func machineHostBindingAddMachineStoresHostID() async throws {
   let hostID = UUID()
   let services = RecordingFleetServices()
@@ -91,7 +91,7 @@ func machineHostBindingAddMachineStoresHostID() async throws {
 }
 
 @MainActor
-@Test("添加机器绑定主机：主机无法解析时直接失败，不做任何网络动作")
+@Test("添加远程开发机器绑定主机：主机无法解析时直接失败，不做任何网络动作")
 func machineHostBindingAddMachineFailsForUnknownHost() async throws {
   let services = RecordingFleetServices()
   let (fleet, url) = makeBindingFleet(services: services) { id in

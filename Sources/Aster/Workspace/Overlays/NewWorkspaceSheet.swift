@@ -70,7 +70,7 @@ enum NewWorkspaceForm {
     // 已禁用的机器建不了工作区（选中机器会被拒绝），不列出来。
     let usable = machines.filter(\.enabled)
     if !usable.isEmpty {
-      entries += [.separator, .header(L("机器"))]
+      entries += [.separator, .header(L("远程开发机器"))]
       entries += usable.map {
         .choice(.machine($0.id), title: "\($0.label)（\(MachineRowButton.stateText($0.state))）")
       }

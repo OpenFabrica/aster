@@ -13,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SLUGS = {
   "Aster 能做什么": "index", "What Aster Does": "index",
   "开始使用": "getting-started", "Getting Started": "getting-started",
-  "远程机器": "remote-machines", "Remote Machines": "remote-machines",
+  "远程开发机器": "remote-machines", "Remote Development Machines": "remote-machines",
   "诊断日志与反馈": "diagnostics", "Diagnostic Logs and Feedback": "diagnostics",
   "标签与三种布局": "tabs-and-layouts", "Tabs and Three Layouts": "tabs-and-layouts",
   "常用目录": "frequent-directories", "Frequent Directories": "frequent-directories",

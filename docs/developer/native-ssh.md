@@ -1,6 +1,6 @@
 # 原生 SSH 引擎与已保存主机
 
-远程机器、原生 SSH 标签和详情面板的受管旁路，默认都走 Aster 自带的 `aster-ssh`（Rust + russh），不再 exec `/usr/bin/ssh`。口令和私钥 passphrase 可以存进 macOS 钥匙串。设计参考 tty7（<https://github.com/l0ng-ai/tty7>，Apache-2.0，revision 458c923）：守护进程持有连接、主机配置对象、钥匙串按 endpoint 保存、认证弹窗排队。
+远程开发机器、原生 SSH 标签和详情面板的受管旁路，默认都走 Aster 自带的 `aster-ssh`（Rust + russh），不再 exec `/usr/bin/ssh`。口令和私钥 passphrase 可以存进 macOS 钥匙串。设计参考 tty7（<https://github.com/l0ng-ai/tty7>，Apache-2.0，revision 458c923）：守护进程持有连接、主机配置对象、钥匙串按 endpoint 保存、认证弹窗排队。
 
 契约全文见 [`SshRuntime/PROTOCOL.md`](../../SshRuntime/PROTOCOL.md)。本页讲结构、真值归属和失败语义。
 
@@ -189,8 +189,8 @@ flowchart LR
 ## 主机连接的右侧详情
 
 打开原生 SSH 标签时自动展开右侧 Inspector。`TerminalSession.remoteInspectionContext` 从持久化的
-`NativeSSHPaneSpec` 投影 `.nativeSSH(spec, label)`，无需先手敲 `ssh` 或配置成远程机器。Info 与 Files
-复用远程机器的监控与文件控制器，旁路通过 broker 的非交互 exec 复用连接；没有 OSC 7 时先浏览
+`NativeSSHPaneSpec` 投影 `.nativeSSH(spec, label)`，无需先手敲 `ssh` 或配置成远程开发机器。Info 与 Files
+复用远程开发机器的监控与文件控制器，旁路通过 broker 的非交互 exec 复用连接；没有 OSC 7 时先浏览
 远端登录目录，收到目录上报后跟随远端路径。具体状态与边界见 [详情面板](details-panel-domain.md#远端模式服务器文件与服务器监控)。
 
 ## 主机标签
@@ -212,7 +212,7 @@ flowchart LR
 - 视图：`WorkspaceViewController.hostsPageController` 懒建并跨整树 `refresh()` 复用，搜索词、钻取的分组和滚动位置不丢；显示时终端视图不在树里，`refresh()` 不回焦终端，详情面板按钮隐藏。代码在 `Sources/Aster/Workspace/HostsPage/`，侧栏行在 `Workspace/Sidebar/HostsSidebarRowView.swift`（行自己订阅主机目录原地更新数量）。
 - 规则：搜索、分组、标签筛选、排序与回车意图都在 `HostBrowserCatalog`（AsterCore，纯函数）。顶层不过滤时只列分组和未分组主机；过滤时平铺所有分组的匹配主机，分组只留名称命中的。回车顺序：名称或连接串完全相同的已保存主机 → 像地址的输入走 `QuickConnectTarget` 临时连接 → 只剩一台可见主机。「最近使用」排序用 `HostUsageLedger.lastUsedByID`。
 - 分组：分组没有实体，平时由主机的 `group` 字段推出；为了让空分组存在，`hosts.json` 根对象多一个可选的 `groups: [String]`（`SSHHostSnapshot.groups`，用户明确「新建」或「重命名」过的分组名）。旧文件没有这个键按空数组处理，分组为空时不写这个键，文件与旧版本完全一样，不升版本号；导入组名不能出现在里面（规范化时丢弃）。新建 / 重命名 / 删除的规则在 `SSHHostGrouping`（AsterCore 纯函数：重命名把组内主机一起改并把新名写进声明列表，删除把组内主机变成未分组；导入组三个动作都拒绝，因为导入按 `group == importedGroup && name == alias` 去重），落盘经 `SSHHostDirectory.createGroup / renameGroup / deleteGroup` 整份写快照。页面动作、表单与确认框在 `HostsPageGroupActions.swift`；分组卡片的铅笔是重命名，右键菜单含在此分组新建主机与删除；`HostBrowserCatalog.listing(hosts:groups:query:)` 把声明的分组合并成 0 台的卡片。钻在分组里时 `reload` 用 `SSHHostGrouping.existingGroups` 判断分组还在不在，声明的空分组可以停留。
-- 远程机器标注：`makeHostCard` 用 `HostsPageEditorServices.machines()` 找 `hostID == 该主机` 的 `MachineProfile`，有则 `HostsPageCardContent.badge = 「远程机器」`（卡片标题右侧的强调色小标签，identifier `<card>-badge`），工具提示列出机器名；`machinesChanged`（生产订阅 `MachineFleetModel.shared.objectWillChange`，测试为空）触发重画。删除这类主机时 `confirmAndDeleteHost` 把「哪些远程机器会连不上」放在正文最前面；主机与分组的全部删除入口（卡片菜单、编辑面板、分组菜单）都经确认框，没有直接删除的路径。
+- 远程开发机器标注：`makeHostCard` 用 `HostsPageEditorServices.machines()` 找 `hostID == 该主机` 的 `MachineProfile`，有则 `HostsPageCardContent.badge = 「远程开发机器」`（卡片标题右侧的强调色小标签，identifier `<card>-badge`），工具提示列出机器名；`machinesChanged`（生产订阅 `MachineFleetModel.shared.objectWillChange`，测试为空）触发重画。删除这类主机时 `confirmAndDeleteHost` 把「哪些远程开发机器会连不上」放在正文最前面；主机与分组的全部删除入口（卡片菜单、编辑面板、分组菜单）都经确认框，没有直接删除的路径。
 - 点击：主机卡片 `opensOnDoubleClick = true`，`HostsPageCardView.mouseUp` 只在 `clickCount >= 2` 时触发连接（单击误触开 SSH 标签代价太高，与详情面板 Git / Files 的双击规则一致）；分组卡片仍单击进入。辅助功能「按下」不分单双击。
 - 真值与动作：主机只从 `SSHHostDirectory` 读；复制用 `SSHHostProfile.duplicated(name:)`，删除用 `SSHHostRemoval.remove`（口令清理规则只有这一份），导入用 `SSHHostDirectory.mergeSSHConfig`，连接走 `openNativeSSH(hostID:)` / `openNativeSSH(target:)`，编辑、新建与默认设置都在页内的编辑面板（见下一节）。
 - 系统信息与图标：`SSHHostSystemProbe`（AsterCore）生成一段只读 POSIX sh 脚本（`uname`、`/etc/os-release`、`sw_vers`、`nproc`/`hw.ncpu`、`/proc/cpuinfo`/`machdep.cpu.brand_string`、`/proc/meminfo`/`hw.memsize`、`df -kP /`），输出以 `ASTER_HOST_FACTS_V1` 标记开头、`end` 结尾、`key=value` 一行一个；`parse` 容忍 MOTD 在标记之前，归类成 `SSHHostOSFamily`（macOS / linux / bsd / windows / other，各自对应一个 SF Symbol）。SF Symbols 没有发行版标志，所以 `SSHHostSystemFacts.brand` 按 os-release 的 `ID` 认出有自绘标志的发行版（`SSHHostOSBrand`，目前只有 `ubuntu`），App 侧 `HostOSBrandIcon.swift` 用矢量路径画白色标志并给出品牌底色（Ubuntu 橙 `#E95420`），不引入图片资源；不在表里的发行版仍用大类图标。结果 `SSHHostSystemFacts` 按主机 ID 存在 `host-facts.json`（`SSHHostFactsStore`，与 hosts.json 同目录但分开：它是可丢弃的采集结果，损坏按空处理）。App 侧 `SSHHostFactsDirectory` 是唯一入口：`SSHBrokerSupervisor.shared` 的 `link.state` 回调在 `connected` 且带 `hostID` 时调用 `handleLinkState`，信息缺失或超过 24 小时才采；主机页右键「刷新系统信息」强制采。采集经 `RemoteSessionTransport.sshArguments(remoteCommand:)` 做一次非交互 exec（原生引擎用 `--host-id --no-prompt` 走 broker 共享连接，OpenSSH 回退用合并默认项后的 target），阻塞的 `RemoteSSHProcessRunner.run` 放在 detached task 里，20 秒超时；绝不往用户的 Pane 里敲命令。主机页订阅 `$facts` / `$inFlight` 重画卡片（图标、副标题摘要、工具提示详情、「正在采集」），主机列表变化时 `prune` 掉已删主机的信息。
@@ -228,8 +228,8 @@ flowchart LR
   - `SSHHostDraft`（AsterCore）：表单草稿。`init(profile:)` 把主机拆成文本与选项，`makeProfile()` 按网页表单同样的规则组装（空文本存 nil 表示继承；转发规则只写端口时绑定补 `127.0.0.1`、目标补 `localhost`；动态转发目标固定为 `{"", 0}`），格式问题收集成 `SSHHostDraftError`。保险库密钥按原顺序保留，勾选追加末尾，找不到的 ID 原样带回。
   - `SSHHostEditRules`（AsterCore）：`sanitized` 是保存前的边界清理（空列表与空白归一成 nil，超量条目、控制字符拒绝），网页 payload 与面板共用；`jumpCandidates` 沿跳板链（含默认项跳板）标出会成环的候选；`SSHHostInheritedValues` 计算占位符用的继承值，`SSHHostBuiltinDefaults` 是内置缺省值（与解析器的兜底一致）。
   - `SSHHostEditing`（App，`Sources/Aster/SSH/`）：`save`（清理 → `SSHHostStore.validate` + 解析器查环 → `upsert`；`requireExisting` 防止编辑期间被删的主机被保存加回来）、`duplicate`、`forgetPassword`、`deletionImpact`、`friendlyReason`、`describe` 与 `~/.ssh/config` 的建档和打开。主机页的所有保存、复制与删除路径都经这里。
-  - 视图在 `Sources/Aster/Workspace/HostsPage/Editor/`：`HostEditorPanelController`（标题带、滚动表单、操作区、底栏；Esc 关闭，回车保存）、`HostEditorForm`（+`Sections`，控件与草稿互转）、`HostEditorForwardsView`、`HostEditorVaultKeysView`、`HostEditorControls`（填充底色的输入框、下拉、按钮与可折叠分区，全部动态色）。开合与宿主回调在 `HostsPageViewController+Editor.swift`，删除确认、忘记口令、添加为机器与编辑 `~/.ssh/config` 在 `HostsPageHostActions.swift`。
-- 依赖：`HostsPageEditorServices` 注入保险库密钥、钥匙串、机器列表、「添加机器」流程与文本编辑器；测试用临时 hosts.json 与内存钥匙串。
+  - 视图在 `Sources/Aster/Workspace/HostsPage/Editor/`：`HostEditorPanelController`（标题带、滚动表单、操作区、底栏；Esc 关闭，回车保存）、`HostEditorForm`（+`Sections`，控件与草稿互转）、`HostEditorForwardsView`、`HostEditorVaultKeysView`、`HostEditorControls`（填充底色的输入框、下拉、按钮与可折叠分区，全部动态色）。开合与宿主回调在 `HostsPageViewController+Editor.swift`，删除确认、忘记口令、添加为远程开发机器与编辑 `~/.ssh/config` 在 `HostsPageHostActions.swift`。
+- 依赖：`HostsPageEditorServices` 注入保险库密钥、钥匙串、机器列表、「添加远程开发机器」流程与文本编辑器；测试用临时 hosts.json 与内存钥匙串。
 - 线程：口令是否存在（决定是否显示「忘记保存的口令…」、删除确认里的口令去留）在后台查钥匙串；结果回到主线程时面板若已换成别的主机就丢弃。
 - 未保存修改：面板记住打开时的草稿，切换到另一台主机或在面板里「创建副本」前若有修改，先确认是否放弃。
 

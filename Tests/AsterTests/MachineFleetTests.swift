@@ -210,7 +210,7 @@ struct MachineFleetTests {
 
   // MARK: - P4.3 添加机器
 
-  @Test("添加机器：成功保存配置；Local 恒在最上并显示绑定的命名会话")
+  @Test("添加远程开发机器：成功保存配置；Local 恒在最上并显示绑定的命名会话")
   func addMachineSavesProfile() async throws {
     let (fleet, url, _) = makeFleet()
     defer { cleanUp(fleet, url) }
@@ -231,7 +231,7 @@ struct MachineFleetTests {
     #expect(reread == .loaded([profile]))
   }
 
-  @Test("添加机器：需要安装时用户取消，磁盘上不留下任何配置")
+  @Test("添加远程开发机器：需要安装时用户取消，磁盘上不留下任何配置")
   func addMachineCancelledLeavesNothing() async throws {
     let services = FakeServices()
     services.setupOutcome = .installationRequired(report: MachineFleetFixtures.report, reason: "远端没有二进制")
@@ -256,7 +256,7 @@ struct MachineFleetTests {
     #expect(fleet.rows.count == 1)
   }
 
-  @Test("添加机器：需要安装时装完再走一遍设置事务，只有 .ready 才保存配置")
+  @Test("添加远程开发机器：需要安装时装完再走一遍设置事务，只有 .ready 才保存配置")
   func addMachineInstallsThenSaves() async throws {
     let services = FakeServices()
     services.setupQueue = [
@@ -288,7 +288,7 @@ struct MachineFleetTests {
     #expect(try MachineProfileStore(fileURL: url).load() == .loaded([profile]))
   }
 
-  @Test("添加机器：本机没有该平台的产物时直接失败，不弹确认、不做任何远端写动作")
+  @Test("添加远程开发机器：本机没有该平台的产物时直接失败，不弹确认、不做任何远端写动作")
   func addMachineWithoutArtifactFails() async throws {
     let services = FakeServices()
     services.setupOutcome = .installationRequired(report: MachineFleetFixtures.report, reason: "远端没有二进制")
@@ -539,7 +539,7 @@ struct MachineFleetTests {
     #expect(!MachineRowButton.toolTip(local).contains("Agent"))
   }
 
-  @Test("添加机器：设置事务失败不保存配置")
+  @Test("添加远程开发机器：设置事务失败不保存配置")
   func addMachineFailureLeavesNothing() async throws {
     let services = FakeServices()
     services.setupError = RemoteSetupFailure(
@@ -553,7 +553,7 @@ struct MachineFleetTests {
     #expect(!FileManager.default.fileExists(atPath: url.path))
   }
 
-  @Test("添加机器：标签或会话名为空时在任何网络动作之前就拒绝")
+  @Test("添加远程开发机器：标签或会话名为空时在任何网络动作之前就拒绝")
   func addMachineRejectsEmptyInput() async throws {
     let (fleet, url, _) = makeFleet()
     defer { cleanUp(fleet, url) }

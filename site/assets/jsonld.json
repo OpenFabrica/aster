@@ -52,7 +52,7 @@
         "File Pane 预览源码、Markdown、图片、PDF、diff、hex 与 Agent transcript",
         "Claude Code、Codex 等 Agent 会话自动获得标题、运行状态与完成通知",
         "本机自动补全：内置 714 份 Fig 命令规格，补全与学习只在本机进行",
-        "远程机器与原生 SSH 标签，口令只存 macOS 钥匙串",
+        "远程开发机器与原生 SSH 标签，口令只存 macOS 钥匙串",
         "24 套内置主题，带实时终端预览",
         ".asterrecipe 工作区导入导出与启动会话恢复",
         "Sparkle 2 自动更新，安装前同时校验 EdDSA 签名与 macOS 公证",
@@ -96,7 +96,7 @@
           "name": "Aster 支持远程服务器和 SSH 吗？",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "支持。你可以在“设置 ▸ 主机”保存 SSH 主机并直接打开原生 SSH 标签，口令只存在 macOS 钥匙串；也可以把 Linux 服务器等添加为远程机器，终端运行在远端的后台会话服务里，关掉 Aster 或断网后进程和布局仍然保留。"
+            "text": "支持。你可以在“设置 ▸ 主机”保存 SSH 主机并直接打开原生 SSH 标签，口令只存在 macOS 钥匙串；也可以把 Linux 服务器等添加为远程开发机器，终端运行在远端的后台会话服务里，关掉 Aster 或断网后进程和布局仍然保留。"
           }
         },
         {

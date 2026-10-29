@@ -67,7 +67,7 @@ enum WorkspaceGroupActions {
     case let registry as NamedWorkspaceRegistryError:
       message = NamedWorkspaceDirectory.message(for: .registry(registry))
     case WorkspaceGroupError.remoteMachineActive:
-      message = L("当前显示的是远端机器。请先切回本机，再新建本机工作区。")
+      message = L("当前显示的是远程开发机器。请先切回本机，再新建本机工作区。")
     default:
       message = WorkspaceSheetPresenter.describe(error)
     }

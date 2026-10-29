@@ -46,7 +46,7 @@ extension HostsPageViewController {
     // 被远程开发机器引用的主机打上标注，工具提示列出机器名。
     let machines = editorServices.machines().filter { $0.hostID == id }.map(\.label)
     var toolTip = host.connectString
-    if !machines.isEmpty { toolTip += "\n" + L("远程机器：\(machines.joined(separator: "、"))") }
+    if !machines.isEmpty { toolTip += "\n" + L("远程开发机器：\(machines.joined(separator: "、"))") }
     if let facts { toolTip += "\n" + facts.details }
     let content = HostsPageCardContent(
       identifier: "hosts-page-host-\(id.uuidString)",
@@ -54,7 +54,7 @@ extension HostsPageViewController {
       subtitle: subtitle,
       symbol: facts?.family.symbolName ?? SSHHostOSFamily.other.symbolName,
       brand: facts?.brand,
-      badge: machines.isEmpty ? nil : L("远程机器"),
+      badge: machines.isEmpty ? nil : L("远程开发机器"),
       trailingDetail: host.connectString,
       toolTip: toolTip)
     return HostsPageCardView(
@@ -75,7 +75,7 @@ extension HostsPageViewController {
     menu.addItem(.separator())
     menu.addItem(ActionMenuItem(title: L("创建副本")) { [weak self] in self?.duplicateHost(id) })
     menu.addItem(ActionMenuItem(title: L("复制 SSH 命令")) { [weak self] in self?.model.copySSHCommand(hostID: id) })
-    menu.addItem(ActionMenuItem(title: L("添加为远程机器…")) { [weak self] in self?.deferred { $0.addHostAsMachine(id) } })
+    menu.addItem(ActionMenuItem(title: L("添加为远程开发机器…")) { [weak self] in self?.deferred { $0.addHostAsMachine(id) } })
     menu.addItem(ActionMenuItem(title: L("刷新系统信息")) { [weak self] in self?.refreshFacts(id) })
     menu.addItem(.separator())
     menu.addItem(

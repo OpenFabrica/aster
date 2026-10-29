@@ -593,7 +593,7 @@
 "切换 Composer" = "Composer ein-/ausblenden";
 "切换 Prompt 队列" = "Prompt-Warteschlange ein-/ausblenden";
 "切换到工作区" = "Zum Arbeitsbereich wechseln";
-"切换到机器" = "Zum Rechner wechseln";
+"切换到远程开发机器" = "Zum Remote-Entwicklungsrechner wechseln";
 "切换到窗口" = "Zum Fenster wechseln";
 "切换只读模式" = "Nur-Lesen-Modus umschalten";
 "切换工作区" = "Arbeitsbereich wechseln";
@@ -1016,14 +1016,14 @@
 "当前主题" = "Aktuelles Design";
 "当前工作区" = "Aktueller Arbeitsbereich";
 "当前工作区没有可接收聊天内容的 Claude Code 或 Codex。" = "Kein Claude Code oder Codex im aktuellen Arbeitsbereich kann Chat-Inhalte empfangen.";
-"当前显示的是远端机器。请先切回本机，再新建本机工作区。" = "Es wird ein entfernter Rechner angezeigt. Wechseln Sie zurück zu diesem Mac, bevor Sie einen lokalen Arbeitsbereich anlegen.";
+"当前显示的是远程开发机器。请先切回本机，再新建本机工作区。" = "Es wird ein entfernter Rechner angezeigt. Wechseln Sie zurück zu diesem Mac, bevor Sie einen lokalen Arbeitsbereich anlegen.";
 "当前构建不可用" = "In diesem Build nicht verfügbar";
 "当前标签" = "Aktueller Tab";
 "当前标签没有可接收聊天上下文的终端。" = "Kein Terminal im aktuellen Tab kann Chat-Kontext empfangen.";
 "当前状态：%@" = "Aktueller Status: %@";
 "当前目录不在 Git 仓库中。" = "Das aktuelle Verzeichnis befindet sich nicht in einem Git-Repository.";
 "当前窗口" = "Aktuelles Fenster";
-"当前窗口在远端机器上，请先切回本机再打开 SSH 标签。" = "Das aktuelle Fenster befindet sich auf einem Remote-Rechner. Wechseln Sie zuerst zum lokalen Rechner zurück, bevor Sie einen SSH-Tab öffnen.";
+"当前窗口在远程开发机器上，请先切回本机再打开 SSH 标签。" = "Das aktuelle Fenster befindet sich auf einem Remote-Entwicklungsrechner. Wechseln Sie zuerst zum lokalen Rechner zurück, bevor Sie einen SSH-Tab öffnen.";
 "当前系统不支持画中画" = "Bild-in-Bild wird auf diesem System nicht unterstützt";
 "当前终端" = "Aktuelles Terminal";
 "当前终端 Pane 已关闭。" = "Der aktuelle Terminalbereich wurde geschlossen.";
@@ -1521,11 +1521,11 @@
 "深链指定的 Pane 不存在。" = "Der vom Deeplink angegebene Bereich existiert nicht.";
 "深链指定的标签不存在。" = "Der vom Deeplink angegebene Tab existiert nicht.";
 "添加" = "Hinzufügen";
-"添加为机器…" = "Als Rechner hinzufügen…";
+"添加为远程开发机器…" = "Als Remote-Entwicklungsrechner hinzufügen…";
 "添加主机…" = "Host hinzufügen…";
 "添加打开方式" = "Öffnungsmethode hinzufügen";
-"添加机器" = "Rechner hinzufügen";
-"添加机器…" = "Rechner hinzufügen…";
+"添加远程开发机器" = "Remote-Entwicklungsrechner hinzufügen";
+"添加远程开发机器…" = "Remote-Entwicklungsrechner hinzufügen…";
 "清屏" = "Bildschirm löschen";
 "清空" = "Leeren";
 "清空全部 Session Memory 记录？" = "Alle Session-Memory-Aufzeichnungen löschen?";
@@ -1605,7 +1605,7 @@
 "移到行首" = "An Zeilenanfang bewegen";
 "移除" = "Entfernen";
 "移除…" = "Entfernen…";
-"移除机器「%@」？" = "Rechner „%@“ entfernen?";
+"移除远程开发机器「%@」？" = "Remote-Entwicklungsrechner „%@“ entfernen?";
 "程序已协商 bracketed paste 时跳过危险内容确认" = "Bestätigung für gefährliche Inhalte überspringen, wenn das Programm Bracketed Paste ausgehandelt hat";
 "稍后" = "Später";
 "稳定显示" = "Stabile Anzeige";
@@ -1850,7 +1850,7 @@
 "这个分组还没有主机。点「新建主机」会直接加到这一组；也可以在编辑主机时填这个分组名。" = "Diese Gruppe hat noch keine Hosts. „Neuer Host“ fügt direkt einen hinzu; Sie können den Gruppennamen auch beim Bearbeiten eines Hosts eintragen.";
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "Dieser Arbeitsbereich ist noch geöffnet. Schließen Sie zuerst sein Fenster und löschen Sie ihn dann.";
 "这台主机已被删除，无法连接。" = "Dieser Host wurde gelöscht; keine Verbindung möglich.";
-"这台主机是远程机器“%@”的连接目标，删除后这些机器无法再连接。" = "Dieser Host ist das Verbindungsziel des Remote-Rechners „%@“; nach dem Löschen können diese Rechner nicht mehr verbinden.";
+"这台主机是远程开发机器“%@”的连接目标，删除后这些机器无法再连接。" = "Dieser Host ist das Verbindungsziel des Remote-Entwicklungsrechners „%@“; nach dem Löschen können diese Rechner nicht mehr verbinden.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "Dies ist die erste Verbindung zu diesem Host. Gleichen Sie den Fingerabdruck unten mit dem Serveradministrator ab und verbinden Sie sich nur, wenn er übereinstimmt.\n\nAlgorithmus: %@\nFingerabdruck: %@";
 "这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "Dieser Befehl verwendet Optionen wie %@; wird nur die Adresse gesichert, wird mit einer anderen Konfiguration verbunden. Legen Sie auf der Seite „Hosts“ in der Seitenleiste einen neuen Host an und tragen Sie diese Optionen ein.";
 "进入" = "Öffnen";
@@ -1864,8 +1864,8 @@
 "进程（按 CPU）" = "Prozesse (nach CPU)";
 "进程（按内存）" = "Prozesse (nach Speicher)";
 "进行中" = "In Bearbeitung";
-"远程机器" = "Remote-Rechner";
-"远程机器：%@" = "Remote-Rechner: %@";
+"远程开发机器" = "Remote-Entwicklungsrechner";
+"远程开发机器：%@" = "Remote-Entwicklungsrechner: %@";
 "远端" = "Remote";
 "远端 %@ 的协议主版本 %@ 与客户端 %@ 不兼容，需要显式替换；后台不会停止它。" = "Die Protokoll-Hauptversion %@ von Remote %1$@ ist mit dem Client %3$@ inkompatibel; ein explizites Ersetzen ist erforderlich. Er wird im Hintergrund nicht gestoppt.";
 "远端 %@/%@ 上没有可用的 aster-session，需要显式安装。" = "Kein verwendbares aster-session auf Remote %@/%@; eine explizite Installation ist erforderlich.";
@@ -1892,7 +1892,6 @@
 "远端服务缺少必需能力：%@。" = "Dem Remote-Dienst fehlen erforderliche Fähigkeiten: %@.";
 "远端未报告 $HOME，无法安装 Agent 集成。" = "Der Remote hat $HOME nicht gemeldet; Agent-Integration kann nicht installiert werden.";
 "远端未报告 $HOME，无法推导状态目录；请设置 ASTER_SESSION_STATE_DIR 后重试。" = "Der Remote hat $HOME nicht gemeldet; das Statusverzeichnis kann nicht abgeleitet werden. Bitte setzen Sie ASTER_SESSION_STATE_DIR und versuchen Sie es erneut.";
-"远端机器" = "Remote-Rechner";
 "远端目录不可读" = "Der Remote-Ordner kann nicht gelesen werden";
 "远端目录不存在" = "Der Remote-Ordner existiert nicht";
 "远端终端冷恢复失败：%@" = "Kaltwiederherstellung des Remote-Terminals fehlgeschlagen: %@";
@@ -1976,7 +1975,7 @@
 "重命名密钥" = "Schlüssel umbenennen";
 "重命名工作区" = "Arbeitsbereich umbenennen";
 "重命名工作区…" = "Arbeitsbereich umbenennen…";
-"重命名机器" = "Rechner umbenennen";
+"重命名远程开发机器" = "Remote-Entwicklungsrechner umbenennen";
 "重命名标签页" = "Tab umbenennen";
 "重命名标签页…" = "Tab umbenennen…";
 "重命名远端工作区" = "Remote-Arbeitsbereich umbenennen";
@@ -2212,7 +2211,6 @@
 "校验主机密钥" = "Hostschlüssel prüfen";
 "每行一个；可用 ~、%h（主机）、%r（用户）" = "Eine pro Zeile; ~, %h (Host) und %r (Benutzer) werden unterstützt";
 "每行一个；留空使用默认值 %@" = "Eine pro Zeile; leer lassen, um den Standard %@ zu verwenden";
-"添加为远程机器…" = "Als Remote-Maschine hinzufügen…";
 "用它作跳板的主机（%@），删除后不再经过跳板：" = "Hosts, die ihn als Jump-Host verwenden (%@); nach dem Löschen läuft die Verbindung nicht mehr darüber:";
 "用逗号分隔，最多 16 个" = "Durch Kommas getrennt; höchstens 16";
 "留空的字段继承「默认」项。" = "Leere Felder übernehmen den Wert aus „Standard“.";
@@ -2537,7 +2535,7 @@
 "开成 Pane" = "Als Bereich öffnen";
 "当前 Pane 不是终端，无法预填" = "Der aktuelle Bereich ist kein Terminal und kann nicht vorausgefüllt werden";
 "当前构建不能发送系统通知" = "Dieser Build kann keine Systemmitteilungen senden";
-"当前窗口在远端机器上，请先切回本机再运行工具命令" = "Dieses Fenster befindet sich auf einem entfernten Rechner. Wechseln Sie zurück zu Lokal, um Werkzeugbefehle auszuführen.";
+"当前窗口在远程开发机器上，请先切回本机再运行工具命令" = "Dieses Fenster befindet sich auf einem entfernten Rechner. Wechseln Sie zurück zu Lokal, um Werkzeugbefehle auszuführen.";
 "必须在 %@ 到 %@ 之间" = "Muss zwischen %@ und %@ liegen";
 "必须在 1 到 60 秒之间" = "Muss zwischen 1 und 60 Sekunden liegen";
 "必须是插件目录内的相对路径" = "Muss ein relativer Pfad im Plugin-Ordner sein";
@@ -2718,7 +2716,7 @@
 "这个组合已被工具面板使用，请为 Quick Terminal 换一个" = "Diese Kombination wird bereits vom Werkzeugpanel verwendet. Wählen Sie für Quick Terminal eine andere";
 "进程名" = "Prozess";
 "进程已经退出" = "Der Prozess wurde bereits beendet";
-"远端机器上的工作区暂不支持工具 Pane" = "Werkzeugbereiche werden in Arbeitsbereichen auf entfernten Rechnern noch nicht unterstützt";
+"远程开发机器上的工作区暂不支持工具 Pane" = "Werkzeugbereiche werden in Arbeitsbereichen auf entfernten Rechnern noch nicht unterstützt";
 "退出码 %@" = "Exit-Code %@";
 "退出码 %@：%@" = "Exit-Code %@: %@";
 "选择插件的开发目录" = "Entwicklungsordner des Plugins wählen";

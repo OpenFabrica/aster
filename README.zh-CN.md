@@ -9,7 +9,7 @@
 
 新建标签后，用 `⌘D` 或 `⇧⌘D` 分屏，再用 `⌘O` 打开文件。工作区可保存为
 `.asterrecipe`，并在下次启动时恢复。Claude Code、Codex 等 Agent 会话支持标题、运行状态
-与完成通知；远程工作可使用原生 SSH 标签或基于服务器会话服务的远程机器工作区。
+与完成通知；远程工作可使用原生 SSH 标签或基于服务器会话服务的远程开发机器工作区。
 
 ![Aster 终端与 Markdown 预览并排的真实窗口](site/assets/shots/workspace.png)
 

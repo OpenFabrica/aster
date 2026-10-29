@@ -157,7 +157,7 @@ func hostsPageRendersFiltersAndDrillsIntoGroups() throws {
   #expect(card.content.subtitle.hasPrefix("ssh, "))
   let menu = page.makeHostMenu(try fixture.host("monite").id)
   #expect(menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-    == [L("连接"), L("编辑主机…"), L("创建副本"), L("复制 SSH 命令"), L("添加为远程机器…"), L("刷新系统信息"), L("删除主机…")])
+    == [L("连接"), L("编辑主机…"), L("创建副本"), L("复制 SSH 命令"), L("添加为远程开发机器…"), L("刷新系统信息"), L("删除主机…")])
 }
 
 @Test("侧栏「主机」在「工作区」上方；点开后内容区换成主机页，选中标签即回到终端",
@@ -361,9 +361,9 @@ func hostsPageShowsCollectedSystemFacts() async throws {
   #expect(fixture.facts.facts[host.id] == facts)
 }
 
-@Test("主机页：被远程开发机器引用的主机带「远程机器」标注，工具提示列出机器名")
+@Test("主机页：被远程开发机器引用的主机带「远程开发机器」标注，工具提示列出机器名")
 @MainActor
-func hostsPageMarksRemoteMachineHosts() throws {
+func hostsPageMarksRemoteMachineHosts() async throws {
   let fixture = try HostsPageFixture()
   defer { try? FileManager.default.removeItem(at: fixture.root) }
   let suite = "HostsPage.\(UUID().uuidString)"
@@ -372,14 +372,43 @@ func hostsPageMarksRemoteMachineHosts() throws {
   let host = try fixture.host("deploy-server")
   var services = HostsPageEditorServices.live()
   services.machines = { [MachineProfile(label: "构建机", hostID: host.id)] }
+  let model = AppModel(defaults: defaults)
   let page = HostsPageViewController(
-    model: AppModel(defaults: defaults), directory: fixture.directory, factsDirectory: fixture.facts,
+    model: model, directory: fixture.directory, factsDirectory: fixture.facts,
     usageLedger: { HostUsageLedger() }, localUser: "tester", editorServices: services)
   page.loadViewIfNeeded()
   let cards = page.hostsGrid.items.compactMap { $0 as? HostsPageCardView }
   let marked = try #require(cards.first { $0.content.identifier == "hosts-page-host-\(host.id.uuidString)" })
-  #expect(marked.content.badge == L("远程机器"))
+  #expect(marked.content.badge == L("远程开发机器"))
   #expect(marked.content.toolTip?.contains("构建机") == true)
   #expect(hostsPageView("hosts-page-host-\(host.id.uuidString)-badge", in: marked) != nil)
   #expect(cards.filter { $0.content.badge != nil }.count == 1)
+
+  // 沿用主机页证据开关，检查较长产品名称在真实窗口中的卡片布局，不抢键盘焦点。
+  if let directory = ProcessInfo.processInfo.environment["ASTER_HOSTS_PAGE_EVIDENCE_DIR"] {
+    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+      styleMask: [.titled], backing: .buffered, defer: false)
+    let hub = HostsHubViewController(model: model, hostsPage: page, factories: [:])
+    window.appearance = NSAppearance(named: .aqua)
+    window.contentViewController = hub
+    defer { window.orderOut(nil); window.contentViewController = nil }
+    window.orderFront(nil)
+    for width in [1000.0, 700.0] {
+      window.setContentSize(NSSize(width: width, height: 700))
+      window.contentView?.layoutSubtreeIfNeeded()
+      try await Task.sleep(for: .milliseconds(150))
+      let capture = Process()
+      capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+      capture.arguments = [
+        "-x", "-o", "-l", String(window.windowNumber),
+        URL(fileURLWithPath: directory)
+          .appendingPathComponent("remote-development-machine-\(Int(width)).png").path,
+      ]
+      try capture.run()
+      capture.waitUntilExit()
+      #expect(capture.terminationStatus == 0)
+    }
+  }
 }

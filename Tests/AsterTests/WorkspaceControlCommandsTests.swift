@@ -221,7 +221,7 @@ func workspaceControlListShape() async throws {
     return nil
   })
   for key in ["machineID", "machineLabel", "cached", "workspaces"] {
-    #expect(machine[key] != nil, "远端机器行缺少 \(key)")
+    #expect(machine[key] != nil, "远程开发机器行缺少 \(key)")
   }
   let group = try #require(result["groups"].flatMap { value -> JSONValue? in
     if case .array(let rows) = value { return rows.first }
@@ -232,7 +232,7 @@ func workspaceControlListShape() async throws {
   }
 }
 
-@Test("workspace.list：窗口正显示远端机器时，它的工作区照常列出，但不标选中、不给标签数")
+@Test("workspace.list：窗口正显示远程开发机器时，它的工作区照常列出，但不标选中、不给标签数")
 @MainActor
 func workspaceControlListGroupsOfRemoteActiveWindow() async throws {
   let fixture = WorkspaceControlFixture()

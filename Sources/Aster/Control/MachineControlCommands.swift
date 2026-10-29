@@ -152,7 +152,7 @@ extension AsterControlDispatcher {
       case .cancelled:
         throw AsterControlError(
           code: .invalidRequest,
-          message: "该机器需要安装或替换远端服务；请在 App 的「文件 ▸ 添加机器…」里确认后再试。")
+          message: "该机器需要安装或替换远端服务；请在 App 的「文件 ▸ 添加远程开发机器…」里确认后再试。")
       case .failed(let message):
         throw AsterControlError(code: .invalidRequest, message: message)
       }

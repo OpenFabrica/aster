@@ -227,7 +227,7 @@ extension AppModel {
       coordinator.beginActivation(machineProfileID: MachineProfile.localProfileID)
     }
     guard remoteStructureHandler == nil else {
-      notice = L("当前窗口在远端机器上，请先切回本机再打开 SSH 标签。")
+      notice = L("当前窗口在远程开发机器上，请先切回本机再打开 SSH 标签。")
       return false
     }
     return true

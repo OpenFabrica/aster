@@ -139,7 +139,7 @@ socket（目录 `0700`、socket `0600`，`accept` 后用 `getpeereid` 校验对�
 **结构方法**（`pane.split` / `pane.close` / `tab.*`，实现在 `Control/LayoutControlCommands.swift`）：
 不弹关闭确认——调用方是脚本或 Agent，模态弹窗会挂住控制连接；放行只看 IPC 写门禁，被关闭的终端里有
 敏感会话时还要敏感会话开关。未保存文档的保存提示保留，用户取消时返回 `write_rejected`。结果统一为
-`{ok, window_id, tab_id?, pane_id?, closed_tab?}`：新建类带回新 ID，关闭类带回被关对象的 ID。远端机器的
+`{ok, window_id, tab_id?, pane_id?, closed_tab?}`：新建类带回新 ID，关闭类带回被关对象的 ID。远程开发机器的
 结构变更是服务端事务，请求返回时新 ID 还不存在，`pane.split` / `tab.new` 只带 `window_id`，调用方用
 `pane.created` 事件或 `session.snapshot` 取结果。`tab` 字段接受标签短 ID，也接受标签里任意 pane 的 selector。
 CLI 侧 `pane close` / `tab close` 必须显式给目标或 `--current`，不靠 `ASTER_PANE_ID` 兜底。

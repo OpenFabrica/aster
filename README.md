@@ -12,7 +12,7 @@ requires macOS 14 or later and an Apple silicon Mac.
 
 Start with a tab, split it with `⌘D` or `⇧⌘D`, then open a file with `⌘O`.
 Save a reusable layout as an `.asterrecipe`, or restore your workspace on launch.
-For remote work, open a native SSH tab or use a remote machine workspace backed
+For remote work, open a native SSH tab or use a remote development machine workspace backed
 by the server-side session service. See the [user guide](https://aster.foo/docs/en/) for setup.
 
 ![Aster with a Ghostty terminal beside a Markdown preview](site/assets/shots/workspace.png)

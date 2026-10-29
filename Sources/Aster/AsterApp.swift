@@ -1753,7 +1753,7 @@ final class AsterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
     switchMenu.delegate = self
     switchMachine.submenu = switchMenu
     submenu.addItem(switchMachine)
-    submenu.addItem(menuItem(L("添加机器…"), #selector(addRemoteMachine(_:)), "", modifiers: []))
+    submenu.addItem(menuItem(L("添加远程开发机器…"), #selector(addRemoteMachine(_:)), "", modifiers: []))
     // 更新当前活动远端机器的服务。与侧栏右键菜单同一事务；主菜单入口保证侧栏折叠或
     // 用键盘/辅助功能操作时也能到达。Local 活动时由 validateMenuItem 置灰。
     submenu.addItem(

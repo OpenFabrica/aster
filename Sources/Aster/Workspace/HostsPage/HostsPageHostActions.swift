@@ -77,7 +77,7 @@ extension HostsPageViewController {
       let machineNote: String? =
         impact.machines.isEmpty
         ? nil
-        : L("这台主机是远程机器“\(impact.machines.joined(separator: "、"))”的连接目标，删除后这些机器无法再连接。")
+        : L("这台主机是远程开发机器“\(impact.machines.joined(separator: "、"))”的连接目标，删除后这些机器无法再连接。")
       let passwordNote: String? =
         hasPassword
         ? (impact.credentialSharedWith.isEmpty

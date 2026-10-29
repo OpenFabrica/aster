@@ -17,7 +17,7 @@ Aster is an open-source, native macOS terminal workspace for macOS 14 and later.
 - 界面语言：简体中文、繁体中文、英语、日语、法语、德语，共六种。
 - 终端：完整 VT100/xterm、ANSI 真彩色、鼠标、超链接，以及 vim、top、fzf 等全屏 TUI。
 - 工作区：多标签（垂直、顶部、底部三种布局），任意方向递归分屏，混排终端、文件浏览器、编辑器与预览。
-- 远程机器与 SSH：可以把 Linux 服务器等添加为远程机器，终端运行在远端后台会话服务里，断开后进程和布局保留；也可以直接打开原生 SSH 标签，口令只存 macOS 钥匙串。
+- 远程开发机器与 SSH：可以把 Linux 服务器等添加为远程开发机器，终端运行在远端后台会话服务里，断开后进程和布局保留；也可以直接打开原生 SSH 标签，口令只存 macOS 钥匙串。
 - Agent 会话：支持 Claude Code、Codex、OpenCode、Cursor CLI 等，会话自动获得标题、运行状态与完成通知，transcript 可在 File Pane 回看。
 - 本机补全：内置 714 份 Fig 命令规格，加上文件与别名候选和隐私感知学习，补全不经过任何服务器。
 - 主题：24 套内置主题，带实时终端预览，可导入 .astertheme。
@@ -48,7 +48,7 @@ Aster is an open-source, native macOS terminal workspace for macOS 14 and later.
 - [CLI 与深链](https://aster.foo/docs/cli-and-deep-links): aster 命令行、深链与后台受管终端。
 - [Working with Agents](https://aster.foo/docs/working-with-agents): Claude Code、Codex 等 Agent 的集成、会话历史与状态栏 AI 用量。
 - [项目记忆](https://aster.foo/docs/session-memory): Session Memory 与只读 MCP 查询。
-- [远程机器](https://aster.foo/docs/remote-machines): 把远端服务器当作工作机器使用。
+- [远程开发机器](https://aster.foo/docs/remote-machines): 把远端服务器当作工作机器使用。
 - [外观主题](https://aster.foo/docs/themes): 选择、编辑、导入主题，以及字体与光标。
 - [软件更新](https://aster.foo/docs/software-update): 自动更新设置、更新通道与校验方式。
 - [常见问题](https://aster.foo/docs/faq): 常见使用问题的解答。

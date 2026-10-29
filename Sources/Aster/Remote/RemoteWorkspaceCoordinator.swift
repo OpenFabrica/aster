@@ -459,7 +459,7 @@ final class RemoteWorkspaceCoordinator: RemoteStructureHandling {
   /// 取机器显示标签。远端机器用 SSH target，本机用 "Local"。
   private func machineLabel(for machineProfileID: UUID) -> String {
     ManagedTerminalCoordinatorRegistry.coordinator(forMachine: machineProfileID)
-      .remoteMachineLabel ?? L("远端机器")
+      .remoteMachineLabel ?? L("远程开发机器")
   }
 
   /// 机器断线时标记其所有 Agent 为 stale（不伪造完成）。

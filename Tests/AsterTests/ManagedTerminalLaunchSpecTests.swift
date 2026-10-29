@@ -100,7 +100,7 @@ func managedTerminalLaunchSpecSharesOneRemoteRule() throws {
   #expect(try #require(bound.last).hasSuffix(try #require(spec.argv.last)))
 }
 
-@Test("本机新建 Pane 默认原生 PTY；开关、显式端点或远端机器才自动托管；恢复的 Pane 永不自动托管")
+@Test("本机新建 Pane 默认原生 PTY；开关、显式端点或远程开发机器才自动托管；恢复的 Pane 永不自动托管")
 @MainActor
 func managedTerminalBinderAutoManagePolicy() {
   // 本机 + 自动解析端点 + 开关关闭 → 原生 PTY。

@@ -279,7 +279,7 @@ final class OpenQuicklyHostTargets {
     switch row.kind {
     case .machine(let id):
       return OpenQuicklyHostEntry(
-        item: item, symbol: "server.rack", badge: L("机器"), actionTitle: L("切换到机器")
+        item: item, symbol: "server.rack", badge: L("远程开发机器"), actionTitle: L("切换到远程开发机器")
       ) { [weak self] in self?.switchToMachine(id) }
     case .host(let id):
       let name = row.title
@@ -290,7 +290,7 @@ final class OpenQuicklyHostTargets {
         self?.model.openNativeSSH(hostID: id)
       }
       entry.menuActions = [
-        (L("添加为机器…"), { [weak self] in
+        (L("添加为远程开发机器…"), { [weak self] in
           self?.addMachine(.init(label: name, hostID: id))
         }),
         (L("编辑主机…"), { [weak self] in
@@ -312,7 +312,7 @@ final class OpenQuicklyHostTargets {
         (L("保存为主机…"), { [weak self] in
           self?.saveHost(.init(name: alias, target: aliasTarget))
         }),
-        (L("添加为机器…"), { [weak self] in
+        (L("添加为远程开发机器…"), { [weak self] in
           self?.addMachine(.init(label: alias, sshTarget: alias))
         }),
         (L("在终端里用 ssh 连接"), { [weak self] in
@@ -352,8 +352,8 @@ final class OpenQuicklyHostTargets {
         }
       case .addAsMachine:
         return OpenQuicklyHostEntry(
-          item: .init(id: action.id, kind: .ssh, title: L("添加为机器…"), detail: display),
-          symbol: "server.rack", badge: L("快连"), actionTitle: L("添加为机器…")
+          item: .init(id: action.id, kind: .ssh, title: L("添加为远程开发机器…"), detail: display),
+          symbol: "server.rack", badge: L("快连"), actionTitle: L("添加为远程开发机器…")
         ) { [weak self] in
           self?.addMachine(.init(label: target.host, sshTarget: normalized))
         }

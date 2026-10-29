@@ -593,7 +593,7 @@
 "切换 Composer" = "Toggle Composer";
 "切换 Prompt 队列" = "Toggle Prompt Queue";
 "切换到工作区" = "Switch to Workspace";
-"切换到机器" = "Switch to Machine";
+"切换到远程开发机器" = "Switch to Remote Development Machine";
 "切换到窗口" = "Switch to Window";
 "切换只读模式" = "Toggle Read-Only Mode";
 "切换工作区" = "Switch Workspace";
@@ -1016,14 +1016,14 @@
 "当前主题" = "Current Theme";
 "当前工作区" = "Current Workspace";
 "当前工作区没有可接收聊天内容的 Claude Code 或 Codex。" = "No Claude Code or Codex in the current workspace can receive chat content.";
-"当前显示的是远端机器。请先切回本机，再新建本机工作区。" = "A remote machine is showing. Switch back to this Mac before creating a local workspace.";
+"当前显示的是远程开发机器。请先切回本机，再新建本机工作区。" = "A remote development machine is showing. Switch back to this Mac before creating a local workspace.";
 "当前构建不可用" = "Unavailable in this build";
 "当前标签" = "Current Tab";
 "当前标签没有可接收聊天上下文的终端。" = "No terminal in the current tab can receive chat context.";
 "当前状态：%@" = "Current Status: %@";
 "当前目录不在 Git 仓库中。" = "Current directory is not in a Git repository.";
 "当前窗口" = "Current Window";
-"当前窗口在远端机器上，请先切回本机再打开 SSH 标签。" = "The current window is on a remote machine. Switch back to the local machine before opening an SSH tab.";
+"当前窗口在远程开发机器上，请先切回本机再打开 SSH 标签。" = "The current window is on a remote development machine. Switch back to the local machine before opening an SSH tab.";
 "当前系统不支持画中画" = "Picture in Picture is not supported on this system";
 "当前终端" = "Current Terminal";
 "当前终端 Pane 已关闭。" = "The current terminal pane has been closed.";
@@ -1521,11 +1521,11 @@
 "深链指定的 Pane 不存在。" = "The pane specified by the deep link does not exist.";
 "深链指定的标签不存在。" = "The tab specified by the deep link does not exist.";
 "添加" = "Add";
-"添加为机器…" = "Add as Machine…";
+"添加为远程开发机器…" = "Add as Remote Development Machine…";
 "添加主机…" = "Add Host…";
 "添加打开方式" = "Add Opener";
-"添加机器" = "Add Machine";
-"添加机器…" = "Add Machine…";
+"添加远程开发机器" = "Add Remote Development Machine";
+"添加远程开发机器…" = "Add Remote Development Machine…";
 "清屏" = "Clear Screen";
 "清空" = "Clear";
 "清空全部 Session Memory 记录？" = "Clear All Session Memory Records?";
@@ -1605,7 +1605,7 @@
 "移到行首" = "Move to Beginning of Line";
 "移除" = "Remove";
 "移除…" = "Remove…";
-"移除机器「%@」？" = "Remove Machine \"%@\"?";
+"移除远程开发机器「%@」？" = "Remove Remote Development Machine \"%@\"?";
 "程序已协商 bracketed paste 时跳过危险内容确认" = "Skip Dangerous Content Confirmation When the Program Has Negotiated Bracketed Paste";
 "稍后" = "Later";
 "稳定显示" = "Stable Display";
@@ -1850,7 +1850,7 @@
 "这个分组还没有主机。点「新建主机」会直接加到这一组；也可以在编辑主机时填这个分组名。" = "This group has no hosts yet. “New Host” adds one to this group; you can also type this group name when editing a host.";
 "这个工作区还开着。请先关闭它的窗口，再删除。" = "This workspace is still open. Close its window before deleting it.";
 "这台主机已被删除，无法连接。" = "This host has been deleted and cannot be connected to.";
-"这台主机是远程机器“%@”的连接目标，删除后这些机器无法再连接。" = "This host is the connection target of remote machine “%@”; after deletion those machines can no longer connect.";
+"这台主机是远程开发机器“%@”的连接目标，删除后这些机器无法再连接。" = "This host is the connection target of remote development machine “%@”; after deletion those machines can no longer connect.";
 "这是第一次连接这台主机。请和服务器管理员核对下面的指纹，一致后再连接。\n\n算法：%@\n指纹：%@" = "This is the first connection to this host. Check the fingerprint below with the server administrator, and connect only if it matches.\n\nAlgorithm: %@\nFingerprint: %@";
 "这条命令用了 %@ 等选项，只保存地址会连到不同的配置。请在侧栏「主机」页里新建主机并填写这些选项。" = "This command uses options such as %@; saving only the address would connect with a different configuration. Create a new host on the Hosts page in the sidebar and fill in these options.";
 "进入" = "Open";
@@ -1864,8 +1864,8 @@
 "进程（按 CPU）" = "Processes (by CPU)";
 "进程（按内存）" = "Processes (by memory)";
 "进行中" = "In Progress";
-"远程机器" = "Remote Machine";
-"远程机器：%@" = "Remote machines: %@";
+"远程开发机器" = "Remote Development Machine";
+"远程开发机器：%@" = "Remote Development Machines: %@";
 "远端" = "Remote";
 "远端 %@ 的协议主版本 %@ 与客户端 %@ 不兼容，需要显式替换；后台不会停止它。" = "Remote %@'s protocol major version %@ is incompatible with client %@; explicit replacement is required. It will not be stopped in the background.";
 "远端 %@/%@ 上没有可用的 aster-session，需要显式安装。" = "No usable aster-session on remote %@/%@; explicit installation is required.";
@@ -1892,7 +1892,6 @@
 "远端服务缺少必需能力：%@。" = "The remote service is missing required capabilities: %@.";
 "远端未报告 $HOME，无法安装 Agent 集成。" = "The remote did not report $HOME; unable to install Agent integration.";
 "远端未报告 $HOME，无法推导状态目录；请设置 ASTER_SESSION_STATE_DIR 后重试。" = "The remote did not report $HOME; unable to derive the state directory. Please set ASTER_SESSION_STATE_DIR and try again.";
-"远端机器" = "Remote Machines";
 "远端目录不可读" = "The remote folder cannot be read";
 "远端目录不存在" = "The remote folder does not exist";
 "远端终端冷恢复失败：%@" = "Remote terminal cold recovery failed: %@";
@@ -1976,7 +1975,7 @@
 "重命名密钥" = "Rename Key";
 "重命名工作区" = "Rename Workspace";
 "重命名工作区…" = "Rename Workspace…";
-"重命名机器" = "Rename Machine";
+"重命名远程开发机器" = "Rename Remote Development Machine";
 "重命名标签页" = "Rename Tab";
 "重命名标签页…" = "Rename Tab…";
 "重命名远端工作区" = "Rename Remote Workspace";
@@ -2212,7 +2211,6 @@
 "校验主机密钥" = "Verify Host Keys";
 "每行一个；可用 ~、%h（主机）、%r（用户）" = "One per line; ~, %h (host), and %r (user) are supported";
 "每行一个；留空使用默认值 %@" = "One per line; leave empty to use the default %@";
-"添加为远程机器…" = "Add as Remote Machine…";
 "用它作跳板的主机（%@），删除后不再经过跳板：" = "Hosts that use it as a jump host (%@); they will connect directly after deletion:";
 "用逗号分隔，最多 16 个" = "Separate with commas; up to 16";
 "留空的字段继承「默认」项。" = "Empty fields inherit from “Default”.";
@@ -2539,7 +2537,7 @@
 "开成 Pane" = "Open as Pane";
 "当前 Pane 不是终端，无法预填" = "The current pane isn’t a terminal, so it can’t be prefilled";
 "当前构建不能发送系统通知" = "This build can’t send system notifications";
-"当前窗口在远端机器上，请先切回本机再运行工具命令" = "This window is on a remote machine. Switch back to Local to run tool commands.";
+"当前窗口在远程开发机器上，请先切回本机再运行工具命令" = "This window is on a remote development machine. Switch back to Local to run tool commands.";
 "必须在 %@ 到 %@ 之间" = "Must be between %@ and %@";
 "必须在 1 到 60 秒之间" = "Must be between 1 and 60 seconds";
 "必须是插件目录内的相对路径" = "Must be a relative path inside the plugin folder";
@@ -2720,7 +2718,7 @@
 "这个组合已被工具面板使用，请为 Quick Terminal 换一个" = "This combination is already used by the Tool Panel. Choose a different one for Quick Terminal";
 "进程名" = "Process";
 "进程已经退出" = "The process has already exited";
-"远端机器上的工作区暂不支持工具 Pane" = "Tool panes aren’t supported in workspaces on remote machines yet";
+"远程开发机器上的工作区暂不支持工具 Pane" = "Tool panes aren’t supported in workspaces on remote development machines yet";
 "退出码 %@" = "Exit code %@";
 "退出码 %@：%@" = "Exit code %@: %@";
 "选择插件的开发目录" = "Choose a Plugin Development Folder";

@@ -32,7 +32,7 @@ enum MachineSetupSheet {
     in window: NSWindow?
   ) -> Draft? {
     let alert = NSAlert()
-    alert.messageText = L("添加机器")
+    alert.messageText = L("添加远程开发机器")
     alert.informativeText =
       L("选择一台已保存主机，或输入 SSH target（支持 alias、user@host、ssh://user@host:port 和 root@ubuntu@orb）")
       + L("，并指定要绑定的命名会话。一个配置只绑定一个会话。")
@@ -78,7 +78,7 @@ enum MachineSetupSheet {
   /// 展示重命名面板。重命名只改标签，不触发重连。
   static func promptForRename(current: String, in window: NSWindow?) -> String? {
     let alert = NSAlert()
-    alert.messageText = L("重命名机器")
+    alert.messageText = L("重命名远程开发机器")
     alert.informativeText = L("重命名只更新显示标签，不会断开或重建连接。")
     alert.addButton(withTitle: L("重命名"))
     alert.addButton(withTitle: L("取消"))
@@ -115,7 +115,7 @@ enum MachineSetupSheet {
   /// 移除机器的确认。移除只断开配置，远端资源全部保留——文案必须说清楚。
   static func confirmRemoval(label: String, in window: NSWindow?) -> Bool {
     let alert = NSAlert()
-    alert.messageText = L("移除机器「\(label)」？")
+    alert.messageText = L("移除远程开发机器「\(label)」？")
     alert.informativeText =
       L("只会删除本机上的这份配置并断开连接。远端的命名会话、终端进程与布局全部保留，不会被停止。")
     alert.addButton(withTitle: L("取消"))

@@ -190,11 +190,11 @@ extension WorkspaceViewController {
     let add = NSButton()
     add.isBordered = false
     add.title = ""
-    add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: L("添加机器"))?
+    add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: L("添加远程开发机器"))?
       .withSymbolConfiguration(.init(pointSize: InterfaceScale.font(10), weight: .semibold))
     add.contentTintColor = foreground
     add.identifier = NSUserInterfaceItemIdentifier("machine-add-button")
-    add.setAccessibilityLabel(L("添加机器"))
+    add.setAccessibilityLabel(L("添加远程开发机器"))
     add.target = self
     add.action = #selector(presentAddMachine)
     add.translatesAutoresizingMaskIntoConstraints = false

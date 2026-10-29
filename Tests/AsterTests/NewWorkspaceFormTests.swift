@@ -33,7 +33,7 @@ func newWorkspaceFormDedupesBoundHostsAndAliases() {
   #expect(
     entries == [
       .choice(.local, title: L("本机")),
-      .separator, .header(L("机器")),
+      .separator, .header(L("远程开发机器")),
       .choice(
         .machine(fixture.online.id), title: "prod-box（\(MachineRowButton.stateText(.online))）"),
       .separator, .header(L("主机")),
@@ -56,7 +56,7 @@ func newWorkspaceFormOmitsUnavailableGroups() {
 }
 
 @MainActor
-@Test("新建表单：提交按所选主机分派，名称去空白；未添加的主机与别名先走添加机器")
+@Test("新建表单：提交按所选主机分派，名称去空白；未添加的主机与别名先走添加远程开发机器")
 func newWorkspaceFormDispatchesSubmission() throws {
   let hostID = UUID()
   let machineID = UUID()

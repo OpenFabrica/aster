@@ -284,7 +284,7 @@ enum WorkspaceSwitcherCatalog {
           : "\(machine.label) · \(L("已断开"))",
         score: -1),
       symbol: "bolt.horizontal",
-      badge: L("机器"),
+      badge: L("远程开发机器"),
       isOpen: false,
       connectionState: machine.state,
       primaryTitle: L("连接"),

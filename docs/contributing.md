@@ -7,7 +7,7 @@
 
 - **领域模型与 AppKit 解耦。** `Sources/AsterCore` 放工作区、会话、配置及协议等可复用模型和规则，不依赖 AppKit、GhosttyKit、Sparkle 或应用 UI。现有 PTY 与 Markdown 依赖遵循 `Package.swift` 的 target 边界，不把 Core 当成任意基础设施的入口。
 - **应用层负责协调与呈现。** `Sources/Aster` 使用 AppKit，不引入 SwiftUI。窗口、视图和控制器负责事件转换、校验、编排与渲染；可复用业务规则下沉到 Core，存储与外部系统调用通过明确接口隔离。
-- **SSH 连接走原生运行时。** 远程机器与原生 SSH 标签经 `aster-ssh`（`SshRuntime/`，Rust + russh）连接；秘密只进钥匙串（`SSHCredentialStore`；口令、passphrase 与私钥保险库里的私钥都一样，`ssh-keys.json` 只放公钥与元数据），broker 不落盘；OpenSSH 只作为回退引擎，手敲的 `ssh` 不受影响。
+- **SSH 连接走原生运行时。** 远程开发机器与原生 SSH 标签经 `aster-ssh`（`SshRuntime/`，Rust + russh）连接；秘密只进钥匙串（`SSHCredentialStore`；口令、passphrase 与私钥保险库里的私钥都一样，`ssh-keys.json` 只放公钥与元数据），broker 不落盘；OpenSSH 只作为回退引擎，手敲的 `ssh` 不受影响。
 - **终端引擎桥接集中管理。** Ghostty 桥接保留在 `Sources/Aster/Ghostty`；PTY 原语在 `Sources/AsterPTY`。产品终端使用 Ghostty，SwiftTerm 仅作为迁移期回归适配器，不重新挂入产品工作区。生命周期与 ABI 约束见 [Ghostty 终端引擎](developer/ghostty-terminal-engine.md)。
 - **存储、查询与控制分开。** `AsterMemory` 负责 SQLite 编解码与文件布局，领域模型留在 Core；`AsterMemoryMCP` 保持只读查询；`AsterCLI` 通过既有协议控制应用，不依赖 AppKit。细节见 [会话记忆](developer/session-memory-domain.md) 与 [工作流和代理](developer/workflows-and-agents.md)。
 - **输入与渲染不能被辅助功能阻塞。** 网络、数据库与耗时计算不能占用主线程；异步结果按发起时的会话或 Pane 身份回写，处理取消、超时、关闭和过期响应，避免切换焦点后写入错误会话。
