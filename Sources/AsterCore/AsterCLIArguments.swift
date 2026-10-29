@@ -13,6 +13,8 @@ public enum AsterCLIOutputFormat: String, Equatable, Sendable {
 /// 解析后的子命令。字段尽量复用协议层 params，CLI 运行时可直接编码发出。
 public enum AsterCLICommand: Equatable, Sendable {
   case help
+  /// 只打印某个命令组的帮助（`aster pane -h`、`aster tab --help`）。
+  case groupHelp(AsterCLIHelpTopic)
   case version
   /// 打印内置 SKILL.md。
   case skill
@@ -45,6 +47,10 @@ public enum AsterCLICommand: Equatable, Sendable {
   /// 关闭必须显式指定目标（或 `--current`），不靠环境变量猜。
   case paneClose(PaneCloseParams)
   case paneSplit(pane: String?, direction: SplitDirection)
+  /// 列出 Pane；tab 为 nil 列全部，`current` 表示调用者所在标签。
+  case paneList(tab: String?)
+  /// 列出标签；window 为 nil 列全部，`current` 表示调用者所在窗口。
+  case tabList(window: String?)
   /// window 为 nil 表示调用者所在窗口；cwd 可以是相对路径，由运行时按当前目录补全。
   case tabNew(window: String?, cwd: String?)
   case tabClose(TabTargetParams)
@@ -100,8 +106,8 @@ public struct AsterCLIArguments: Equatable, Sendable {
       .agentStart, .agentReport, .eventsSubscribe, .eventsWait, .notificationShow, .sessionDetach,
       .sessionEnd, .paneClose, .paneSplit, .tabNew, .tabClose:
       return true
-    case .help, .version, .skill, .sessionSnapshot, .sessionTerminals, .paneRead, .paneSendText,
-      .paneSendKeys, .paneFocus, .paneWaitForOutput, .tabFocus, .tabRename, .legacy:
+    case .help, .groupHelp, .version, .skill, .sessionSnapshot, .sessionTerminals, .paneRead, .paneSendText,
+      .paneSendKeys, .paneFocus, .paneWaitForOutput, .paneList, .tabList, .tabFocus, .tabRename, .legacy:
       return false
     }
   }
@@ -114,7 +120,8 @@ public struct AsterCLIArguments: Equatable, Sendable {
   /// 新语法命令组；只写组名等同 `--help`。
   private static let newSyntaxGroups: Set<String> = ["agent", "pane", "events", "notification", "session"]
   /// `tab` 组里走新语法的子命令；其余（`tab badge` 等）仍交给旧解析器。
-  private static let tabSubcommands: Set<String> = ["new", "close", "focus", "rename"]
+  /// 分组帮助的判定（AsterCLILayoutArguments.swift）也要用，因此不是 private。
+  static let tabSubcommands: Set<String> = ["new", "close", "focus", "rename", "list"]
 
   /// 入口：argv 不含程序名（若含 `aster`/`aster-cli` 会被剥掉）。
   public static func parse(_ rawArguments: [String]) throws -> AsterCLIArguments {
@@ -184,6 +191,11 @@ public struct AsterCLIArguments: Equatable, Sendable {
         format: format, socketPath: socketPath, allowOutside: allowOutside, command: .help)
     }
     arguments.removeFirst()
+    // `pane` / `tab` 有自己的分组帮助：只写组名、`-h` / `--help` / `help`，或子命令后面带 `-h`。
+    if let topic = helpTopic(group: group, arguments: arguments) {
+      return AsterCLIArguments(
+        format: format, socketPath: socketPath, allowOutside: allowOutside, command: .groupHelp(topic))
+    }
     // SKILL.md 教 agent 用「只写命令组」（`aster agent` / `aster pane` …）学语法：等同打印帮助，
     // 而不是报参数错——它是探索动作，不该以 exit 2 收场。
     if arguments.isEmpty, newSyntaxGroups.contains(group) {
@@ -211,7 +223,7 @@ public struct AsterCLIArguments: Equatable, Sendable {
     case "pane":
       guard let subcommand = arguments.first else {
         throw AsterCLIArgumentError(
-          "pane 需要子命令：read | send-text | send-keys | focus | wait-output | split | close")
+          "pane 需要子命令：list | read | send-text | send-keys | focus | wait-output | split | close")
       }
       if legacyPaneSubcommands.contains(subcommand) { return legacy }
       // send-text / send-keys 新旧语法重叠：旧写法带 `--from-file` / `--stdin` / `--` 时交回旧解析器。
@@ -430,7 +442,7 @@ public struct AsterCLIArguments: Equatable, Sendable {
       return .paneWaitForOutput(
         pane: pane, match: match, regex: regex, source: try parsed.source(),
         lines: try parsed.int("--lines"), timeoutMs: try parsed.int("--timeout"))
-    case "close", "split":
+    case "close", "split", "list":
       return try parseLayoutPane(arguments, subcommand: subcommand)
     default:
       throw AsterCLIArgumentError("未知子命令: pane \(subcommand)")
@@ -778,20 +790,9 @@ public struct AsterCLIArguments: Equatable, Sendable {
       agent start <name> --kind <kind> [--pane <id>|--current] [--timeout ms] [-- <args>...]
       agent report <target>|--current --state <state> --provider <provider> [--session-id <id>]  （lifecycle hook 内部使用）
 
-    Pane:
-      pane read [<pane>|--pane <id>|--current] [--source visible|recent] [--lines N]
-      pane send-text [<pane>|--pane <id>|--current] <text> [--enter]
-      pane send-keys [--pane <id>|--current] <key>...
-      pane focus [<pane>|--pane <id>|--current]
-      pane wait-output [<pane>|--pane <id>|--current] (--match <text>|--regex <re>) [--source ...] [--lines N] [--timeout ms]
-      pane split [<pane>|--pane <id>|--current] [--direction right|left|down|up]
-      pane close <pane>|--pane <id>|--current
+    \(paneUsage)
 
-    标签（<tab> 是标签短 ID，或标签里任意 Pane 的 ID）:
-      tab new [--cwd <dir>] [--window <id>]
-      tab close <tab>|--current
-      tab focus <tab>|--current
-      tab rename <tab>|--current (<title>|--clear)
+    \(tabUsage)
 
     事件与通知（需 ASTER_ENV=1）:
       events subscribe [--kind <kind>]...
@@ -811,6 +812,6 @@ public struct AsterCLIArguments: Equatable, Sendable {
 
     旧命令（open/view/edit/watch/jump/learn/ignore/pane run|exec|capture）继续可用。
     target/pane 形态：w1:p5 短 ID、agent 名、current、p_<UUID>。
-    只写命令组（如 `aster agent`）等同本帮助。
+    只写命令组（如 `aster agent`）等同本帮助；`aster pane -h`、`aster tab -h` 只看该组。
     """
 }

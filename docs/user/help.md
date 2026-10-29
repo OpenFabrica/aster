@@ -395,6 +395,9 @@ aster pane exec --format json -- git status --short
 
 ```bash
 aster session snapshot                       # 所有窗口 / 标签 / pane
+aster tab list                               # 所有标签：ID、窗口、pane 数、标题
+aster pane list --current                    # 当前标签里的 pane：ID、Agent 或命令、目录
+aster pane -h                                # 只看 pane 命令的用法（tab -h 同理）
 aster agent list                             # 正在运行的 Agent 及状态
 aster agent read w1:p2 --lines 40            # 读某个 Agent 的屏幕
 aster agent prompt w1:p2 "跑一下测试" --wait  # 提交 prompt 并等它空闲
@@ -415,6 +418,8 @@ aster session end w1:p3                      # 结束：终止该受管终端的
 ```
 
 `pane split`、`pane close`、`tab new`、`tab close` 会启动或结束进程，和发送输入一样要先开启“允许发送输入”；它们不弹确认框，直接执行（有未保存文档时仍会提示保存）。`pane close` 和 `tab close` 必须写明目标或 `--current`。`tab` 命令里的目标可以写标签 ID，也可以写标签里任意一个 pane 的 ID。
+
+`tab list` 和 `pane list` 只读，任何终端都能用。`*` 标出窗口当前的标签和标签里有焦点的 pane。`tab list --window <id>` 只列一个窗口，`pane list --tab <id>` 只列一个标签；两者都接受 `--current`（调用者自己所在的窗口或标签）和 `--json`。`aster pane -h`、`aster tab -h`（或只写 `aster pane`、`aster tab`）只打印这一组命令的用法。
 
 ### 远程 TUI 客户端
 

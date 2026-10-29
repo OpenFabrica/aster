@@ -103,6 +103,10 @@ case .help:
   printLine(AsterCLIArguments.usage)
   exit(AsterCLIExitCode.success)
 
+case .groupHelp(let topic):
+  printLine(AsterCLIArguments.usage(for: topic))
+  exit(AsterCLIExitCode.success)
+
 case .version:
   // 版本真值只在 Info.plist；swift build 直接产物找不到 plist 时标 dev。
   let version = AsterCLILocations.appVersion ?? "dev"

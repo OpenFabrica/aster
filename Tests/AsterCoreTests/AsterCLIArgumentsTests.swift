@@ -125,10 +125,11 @@ struct AsterCLIArgumentsTests {
     #expect(throws: AsterCLIArgumentError.self) { try command(["agent", "start", "reviewer", "--kind", "nope"]) }
     #expect(throws: AsterCLIArgumentError.self) { try command(["agent", "start", "reviewer", "--kind", "codex", "--current", "--pane", "w1:p1"]) }
     #expect(throws: AsterCLIArgumentError.self) { try command(["agent", "start", "Bad", "--kind", "codex"]) }
-    // 只写命令组等同 --help（SKILL.md 用它学语法），不是参数错误。
-    for group in ["agent", "pane", "events", "notification", "session"] {
+    // 只写命令组等同 --help（SKILL.md 用它学语法），不是参数错误；pane / tab 只打印本组帮助。
+    for group in ["agent", "events", "notification", "session"] {
       #expect(try command([group]) == .help)
     }
+    #expect(try command(["pane"]) == .groupHelp(.pane))
     // send-text 两个位置参数时首个是 pane。
     #expect(try command(["pane", "send-text", "w1:p2", "just test", "--enter"]) == .paneSendText(pane: "w1:p2", text: "just test", enter: true))
   }
@@ -165,7 +166,7 @@ struct AsterCLIArgumentsTests {
     #expect(throws: AsterCLIArgumentError.self) { try command(["pane", "wait-output", "w1:p1"]) }
     #expect(throws: AsterCLIArgumentError.self) { try command(["pane", "wait-output", "--match", "a", "--regex", "b"]) }
     #expect(throws: AsterCLIArgumentError.self) { try command(["pane", "wait-output", "--regex", "["]) }
-    #expect(try command(["pane"]) == .help)
+    #expect(try command(["pane"]) == .groupHelp(.pane))
     #expect(throws: AsterCLIArgumentError.self) { try command(["pane", "explode"]) }
   }
 

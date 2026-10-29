@@ -370,6 +370,9 @@ Within Aster terminals, commands can inspect and control other Panes and Agents:
 
 ```bash
 aster session snapshot                       # All windows / tabs / Panes
+aster tab list                               # All tabs: ID, window, Pane count, title
+aster pane list --current                    # Panes in your tab: ID, Agent or command, directory
+aster pane -h                                # Usage of pane commands only (same for tab -h)
 aster agent list                             # Running Agents and status
 aster agent read w1:p2 --lines 40            # Read an Agent's screen
 aster agent prompt w1:p2 "Run the tests" --wait  # Submit and wait for idle
@@ -390,6 +393,8 @@ aster session end w1:p3                      # Terminate this managed terminal
 ```
 
 `pane split`, `pane close`, `tab new`, and `tab close` start or end processes, so they need "Allow Send Keys" just like sending input. They run without a confirmation dialog (unsaved documents still prompt to save). `pane close` and `tab close` require an explicit target or `--current`. In `tab` commands the target can be a tab ID or the ID of any Pane inside that tab.
+
+`tab list` and `pane list` are read-only and work in any terminal. `*` marks each window's selected tab and the focused Pane of each tab. `tab list --window <id>` lists one window and `pane list --tab <id>` lists one tab; both accept `--current` (the window or tab you run in) and `--json`. `aster pane -h` and `aster tab -h` (or just `aster pane` / `aster tab`) print the usage of that command group only.
 
 ### Remote TUI Client
 

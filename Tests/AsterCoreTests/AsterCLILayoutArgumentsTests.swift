@@ -3,7 +3,7 @@ import Testing
 
 @testable import AsterCore
 
-/// `aster pane close|split` 与 `aster tab new|close|focus|rename` 的参数解析。
+/// `aster pane close|split|list` 与 `aster tab new|close|focus|rename|list` 的参数解析与分组帮助。
 struct AsterCLILayoutArgumentsTests {
   private func parse(_ argv: [String]) throws -> AsterCLIArguments {
     try AsterCLIArguments.parse(argv)
@@ -73,7 +73,54 @@ struct AsterCLILayoutArgumentsTests {
     #expect(parsed.format == .json)
     #expect(parsed.command == .tabNew(window: nil, cwd: nil))
     #expect(try command(["tab", "badge", "3"]) == .legacy(["tab", "badge", "3"]))
-    #expect(try command(["tab"]) == .legacy(["tab"]))
+    #expect(try command(["tab"]) == .groupHelp(.tab))
+  }
+
+  @Test("pane / tab 分组帮助：组名、-h、--help、help 与新子命令后的 -h；旧子命令与 -- 之后不拦截")
+  func groupHelp() throws {
+    for argv in [["pane", "-h"], ["pane", "--help"], ["pane", "help"], ["pane", "list", "-h"], ["pane", "read", "w1:p1", "--help"]] {
+      #expect(try command(argv) == .groupHelp(.pane))
+    }
+    for argv in [["tab", "-h"], ["tab", "--help"], ["tab", "list", "--help"], ["tab", "rename", "-h"]] {
+      #expect(try command(argv) == .groupHelp(.tab))
+    }
+    #expect(try parse(["--json", "pane", "-h"]).command == .groupHelp(.pane))
+    #expect(try command(["pane", "run", "-h"]) == .legacy(["pane", "run", "-h"]))
+    #expect(try command(["tab", "badge", "-h"]) == .legacy(["tab", "badge", "-h"]))
+    #expect(try command(["pane", "send-text", "--", "-h"]) == .legacy(["pane", "send-text", "--", "-h"]))
+    #expect(try parse(["pane", "list", "-h"]).requiresAsterEnv == false)
+
+    let pane = AsterCLIArguments.usage(for: .pane)
+    #expect(pane.contains("pane list [--tab <tab>|--current]"))
+    #expect(!pane.contains("tab new"))
+    let tab = AsterCLIArguments.usage(for: .tab)
+    #expect(tab.contains("tab list [--window <id>|--current]"))
+    #expect(!tab.contains("pane read"))
+    // 总帮助与分组帮助共用同一份用法文本。
+    #expect(AsterCLIArguments.usage.contains(AsterCLIArguments.paneUsage))
+    #expect(AsterCLIArguments.usage.contains(AsterCLIArguments.tabUsage))
+  }
+
+  @Test("pane list / tab list：范围选项、--current 与非法输入；只读命令不要求 ASTER_ENV")
+  func listCommands() throws {
+    #expect(try command(["pane", "list"]) == .paneList(tab: nil))
+    #expect(try command(["pane", "list", "--tab", "w1:t2"]) == .paneList(tab: "w1:t2"))
+    #expect(try command(["pane", "list", "--tab=reviewer"]) == .paneList(tab: "reviewer"))
+    #expect(try command(["pane", "list", "--current"]) == .paneList(tab: "current"))
+    let json = try parse(["pane", "list", "--json"])
+    #expect(json.format == .json && json.command == .paneList(tab: nil) && !json.requiresAsterEnv)
+    #expect(throws: AsterCLIArgumentError("--current 与 --tab 不能同时给出")) {
+      try command(["pane", "list", "--current", "--tab", "w1:t1"])
+    }
+    #expect(throws: AsterCLIArgumentError.self) { try command(["pane", "list", "w1:t1"]) }
+    #expect(throws: AsterCLIArgumentError.self) { try command(["pane", "list", "--tab", "p_\(UUID().uuidString)"]) }
+
+    #expect(try command(["tab", "list"]) == .tabList(window: nil))
+    #expect(try command(["tab", "list", "--window", "w2"]) == .tabList(window: "w2"))
+    #expect(try command(["tab", "list", "--current"]) == .tabList(window: "current"))
+    #expect(try parse(["tab", "list"]).requiresAsterEnv == false)
+    #expect(throws: AsterCLIArgumentError.self) { try command(["tab", "list", "--window", "W 1"]) }
+    #expect(throws: AsterCLIArgumentError.self) { try command(["tab", "list", "--all"]) }
   }
 
   @Test("会启动或结束进程的结构命令只对 Aster 内进程开放；focus / rename 不设限")

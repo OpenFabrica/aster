@@ -21,7 +21,7 @@ struct CommandRunner {
       environment: environment)
 
     switch arguments.command {
-    case .help, .version, .skill:
+    case .help, .groupHelp, .version, .skill:
       // main.swift 已处理，不会走到这里。
       return AsterCLIExitCode.success
 
@@ -129,6 +129,21 @@ struct CommandRunner {
       let params = PaneSplitParams(pane: try resolvePane(pane), direction: direction)
       let result = try client.call(.paneSplit, params: try encode(params))
       try emit(result, text: renderLayoutAction("created"))
+
+    case .paneList(let tab):
+      // 列表在客户端按快照筛选；`current` 换成调用者自己的 Pane，范围就是调用者所在的标签。
+      let snapshot = try client.call(.sessionSnapshot, params: nil).decoded(as: SessionSnapshot.self)
+      let panes = try SessionLayoutListing.panes(in: snapshot, tab: tab.map(resolveTarget))
+      try emit(try encode(SessionLayoutListing.PaneListResult(panes: panes))) { _ in
+        SessionLayoutListing.renderPanes(panes)
+      }
+
+    case .tabList(let window):
+      let snapshot = try client.call(.sessionSnapshot, params: nil).decoded(as: SessionSnapshot.self)
+      let tabs = try SessionLayoutListing.tabs(in: snapshot, window: window.map(resolveTarget))
+      try emit(try encode(SessionLayoutListing.TabListResult(tabs: tabs))) { _ in
+        SessionLayoutListing.renderTabs(tabs)
+      }
 
     case .tabNew(let window, let cwd):
       // 不写 --window 时用调用者自己的 Pane 定位窗口；不在 Aster 里运行则交给服务端取焦点窗口。
@@ -392,18 +407,9 @@ struct CommandRunner {
     return lines.joined(separator: "\n")
   }
 
-  /// 左对齐等宽表格；最后一列不补空格。
+  /// 左对齐等宽表格，与 `pane list` / `tab list` 同一种排版。
   private func table(_ rows: [[String]]) -> String {
-    let columns = rows.map(\.count).max() ?? 0
-    var widths = [Int](repeating: 0, count: columns)
-    for row in rows {
-      for (index, cell) in row.enumerated() { widths[index] = max(widths[index], cell.count) }
-    }
-    return rows.map { row in
-      row.enumerated().map { index, cell in
-        index == row.count - 1 ? cell : cell.padding(toLength: widths[index], withPad: " ", startingAt: 0)
-      }.joined(separator: "  ")
-    }.joined(separator: "\n")
+    SessionLayoutListing.render(rows)
   }
 }
 

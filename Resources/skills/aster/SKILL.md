@@ -154,9 +154,12 @@ Read sources:
 
 If increasing `--lines` does not reveal more of a completed response, the pane is probably running the agent on the alternate screen. Ask the agent to write its complete response as Markdown to a temporary file and reply only with the path, then read the file. Use this only as a fallback.
 
-## Create and close panes and tabs
+## List, create, and close panes and tabs
 
 ```bash
+aster tab list --json
+aster pane list --current --json
+aster pane list --tab <tab-id>
 aster pane split --current --direction down --json
 aster tab new --cwd /path/to/project --json
 aster tab rename <tab-id> "build"
@@ -164,6 +167,8 @@ aster tab focus <tab-id>
 aster pane close <pane-id>
 aster tab close <tab-id>
 ```
+
+`tab list` returns `tabs` (`tab_id`, `window_id`, `title`, `pane_count`, `selected`, `window_focused`); `pane list` returns `panes` with the same fields as `session snapshot` panes. `pane list --current` lists your own tab; `--tab` also accepts a pane ID or agent name inside the tab. Both are read-only. `aster pane -h` and `aster tab -h` print the syntax of one group.
 
 `pane split` and `tab new` return the new IDs as `pane_id` and `tab_id`; read them from the JSON result. `--direction` is `right` (default), `left`, `down`, or `up`. `tab new` selects the new tab. `pane close` closes the whole tab when the pane is the last one in it (`closed_tab: true`). A `<tab-id>` argument also accepts the ID of any pane inside that tab. `pane close` and `tab close` need an explicit target or `--current`, and they run without a confirmation dialog.
 
