@@ -398,12 +398,12 @@ final class ToolBarView: NSView {
     resizeHandle.frame = NSRect(x: 0, y: y, width: bounds.width, height: min(thickness, bounds.height))
   }
 
-  /// 段间分隔线（在内容层里，跟着内容滚动）与边线。`tab.bottom` 的边线在顶部（贴着终端），`tab.top` 在底部。
+  /// 段间分隔线（在内容层里，跟着内容滚动）与边线。`tab.bottom` 的边线在顶部（贴着终端），`tab.top` 与 `pane.header` 在底部。
   private func layoutSeparators(_ separators: [(x: CGFloat, line: Int)], lineHeight: CGFloat, buttonHeight: CGFloat) {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    // 条在上方（tab.top、window.top）时边线画在底部，贴着下面的内容；其余画在顶部。
-    let lineY: CGFloat = slot == .tabTop || slot == .windowTop ? 0 : bounds.height - 1
+    // 条在上方（tab.top、window.top、pane.header）时边线画在底部，贴着下面的内容；其余画在顶部。
+    let lineY: CGFloat = slot == .tabTop || slot == .windowTop || slot == .paneHeader ? 0 : bounds.height - 1
     edgeLine.frame = NSRect(x: 0, y: lineY, width: bounds.width, height: 1)
     CATransaction.commit()
     while separatorViews.count < separators.count {

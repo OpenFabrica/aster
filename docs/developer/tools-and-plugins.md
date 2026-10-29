@@ -443,7 +443,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 | `sidebar.section` | bar（纵向列表）/ panel | 窗口级 | 竖排标签栏里，标签列表之后、留白之前；只在竖排且标签栏可见时挂载 | 已实现 |
 | `pane.bottom` | bar | 单个终端 Pane（cwd、远端、Agent 都取该 Pane 自己的） | 每个终端 Pane 底部，内容与 Prompt Queue 之间 | 已实现 |
 | `activePane.bottom` | bar | 当前标签（cwd = 活动 Pane，同 `tab.*`） | 只挂在当前聚焦的终端 Pane 底部，焦点换到哪个 Pane 就搬到哪个 | 已实现 |
-| `pane.header` | bar（只放图标，≤ 3 项） | 单个终端 Pane（同 `pane.bottom`） | 每个终端 Pane 顶条右侧、自带按钮左边，指针靠近顶边才淡入 | 已实现 |
+| `pane.header` | bar | 单个终端 Pane（同 `pane.bottom`） | 每个终端 Pane 顶部一行，固定显示、占布局空间（高 20–26，缺省 24），没有项目时高度归零 | 已实现 |
 
 将来新增的位置在实现之前，清单里**可以声明**（向前兼容，不会因此拒绝插件），但视图不挂载、不跑脚本；设置页显示
 「本版本暂不支持这个位置」，用户可以把它改放到已实现的位置。`ToolViewSlot.isImplemented` 是唯一的开关（本版本全部为真），
@@ -524,19 +524,18 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 
 `pane.header` 的规则：
 
-- **每个终端 Pane 一组图标**（`ToolPaneHeaderView`），同一 Pane 上的所有 `pane.header` 视图共用。工具、文件、网页 Pane 不挂。
-  和 `pane.bottom` 一起由 `ToolPaneBars` 按 Pane id 长期持有：两种视图**共用该 Pane 的上下文与分支监听**，feed 键同样是
-  `<视图 id>@<Pane id>`，上下文、触发、可见性、`terminal` 动作都和 `pane.bottom` 一样。只停掉一种时只释放那一种视图，
+- **每个终端 Pane 一条**，同一 Pane 上的所有 `pane.header` 视图共用（段按视图排列，和 `pane.bottom` 同一种 `ToolBarView`）。
+  工具、文件、网页 Pane 不挂。和 `pane.bottom` 一起由 `ToolPaneBars` 按 Pane id 长期持有：两种视图**共用该 Pane 的上下文与分支监听**，
+  feed 键同样是 `<视图 id>@<Pane id>`，上下文、触发、可见性、`terminal` 动作都和 `pane.bottom` 一样。只停掉一种时只释放那一种视图，
   Pane 的登记留给另一种（`removeBars()` / `removeHeaders()`）。
 - **挂载**：`refresh()` 在 `installExtensionPaneBar(for:)` 之后调 `installExtensionPaneHeader(for:)`，经
-  `ActivePaneHostView.setHeaderBar(_:)` 贴在最左一个自带按钮（实时画面 → 缩放 → 关闭）左边 4pt、顶边对齐、高 14pt
-  （= 顶边感应带）。必须在自带按钮装完之后调。终端 Pane 总有实时画面按钮，所以感应带总在。
-- **显隐跟顶条**：`updateChromeReveal` 写 `isRevealed`，与把手、按钮同一判定，淡入淡出 0.14 s（减少动态效果时为 0）。
-  隐藏时 `hitTest` 返回 nil，点击落到终端。**不下移内容**：和单 Pane 时的实时画面按钮一样浮在终端上方，
-  为一个悬停才出现的图标让出一行会让终端 resize（多 Pane 时内容本来就为把手下移了 18pt）。
-- **只放图标、最多 3 个**（`ToolPaneHeaderView.maximumButtons`）：按段、项目顺序取前 3 个有图标的按钮
-  （`ToolBarItemButton.showsLabel = false`），纯文字项目不显示；文字进提示（项目没写 `tooltip` 时用 `text`）。
-  失败段显示插件图标 + 三角，「需要授权」显示锁，点击照常重跑 / 弹授权。没有 spinner，不能拖高（`ToolBarHeightPolicy`）。
+  `ActivePaneHostView.setHeaderBar(_:)` 贴 Pane 顶部与左右边，放在宿主子视图的最底层（顶条自带按钮盖在它上面，仍点得到）。
+- **固定显示、占一行**：和 `pane.bottom` 一样占布局空间，终端少绘一行而不是被盖住首行输出；条没有项目时自己把高度归零
+  （`collapsesWhenEmpty`），内容回到原来的位置。约束：内容顶边 ≥ 条底边，且 ≥ 顶条控件要求的间距（`chromeContentInset`）；
+  原来「内容顶边 = Pane 顶边 + 间距」的等式降为低优先级，只负责没有条时把内容拉回顶部（`rebuildHeaderConstraints`）。
+  边线画在底部，贴着终端。
+- **图标加文字**：和其它 bar 一样每项可以是图标、文字或两者都有，超出宽度时尾部截断；不能拖高（`ToolBarHeightPolicy`，固定一行）。
+  失败段显示插件图标 + 三角，「需要授权」显示锁，点击照常重跑 / 弹授权。
 
 ### 清单 `contributes.views[]`
 
@@ -804,7 +803,7 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 只跑定向用例：`./scripts/test.sh --filter <name>`。覆盖：清单校验（每条拒绝规则）、匹配与拼音、信任状态机、
 摘要、脚本协议解析与上限、桥接参数与授权、内置转换；scheme handler 路径越界、桥接未授权拒绝、脚本超时与
 输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作；加密存储的密文格式、密钥丢失与预埋条目、
-剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）、`aster.sysbar` 脚本（预置网速基准，`BuiltinSysbarTests`）、`pane.header` 图标组与挂载（`PaneHeaderBarTests`）。
+剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）、`aster.sysbar` 脚本（预置网速基准，`BuiltinSysbarTests`）、`pane.header` 顶部条与挂载（`PaneHeaderBarTests`）。
 
 ## 独立工具窗口
 

@@ -1,5 +1,5 @@
-// 界面扩展 pane.header：图标组只放图标、最多 3 个，文字进提示；隐藏时不拦截点击。挂到真实工作区时每个终端
-// Pane 一组（文件 Pane 不挂），跨整树重建是同一实例，排在顶条自带按钮左边、随顶条一起淡入；和 pane.bottom
+// 界面扩展 pane.header：固定贴在 Pane 顶部的一行条（图标加文字），占布局空间，没有项目时高度归零。
+// 挂到真实工作区时每个终端 Pane 一条（文件 Pane 不挂），跨整树重建是同一实例；和 pane.bottom
 // 共用 Pane 的上下文，停掉其中一种不影响另一种。
 import AppKit
 import AsterCore
@@ -85,37 +85,14 @@ struct PaneHeaderBarTests {
     ToolBarSegment(id: id, pluginName: "Test", iconPath: nil, content: .items(items), runningSince: nil)
   }
 
-  @Test("图标组：跨段只取前 3 个有图标的项目，纯文字项目不显示，文字进提示；隐藏时不拦截点击")
-  func headerShowsAtMostThreeIconsAndIgnoresClicksWhenHidden() throws {
-    let header = ToolPaneHeaderView()
-    header.apply(segments: [
-      segment("one", [
-        ToolBarItem(id: "text", text: "只有文字"),
-        ToolBarItem(id: "branch", text: "main", symbol: "arrow.triangle.branch"),
-        ToolBarItem(id: "copy", symbol: "doc.on.doc", tooltip: "复制"),
-      ]),
-      segment("two", [
-        ToolBarItem(id: "refresh", symbol: "arrow.clockwise"),
-        ToolBarItem(id: "fourth", symbol: "star"),
-      ]),
-    ])
-    let buttons = header.visibleButtons
-    #expect(buttons.count == ToolPaneHeaderView.maximumButtons)
-    // 第一个按钮是 branch：文字不显示，没写 tooltip 时提示用文字。
-    #expect(buttons.first?.toolTip == "main")
-    #expect(buttons.dropFirst().first?.toolTip == "复制")
-    #expect(buttons.allSatisfy { !$0.showsLabel })
-
-    header.frame = NSRect(x: 0, y: 0, width: 120, height: 14)
-    header.layoutSubtreeIfNeeded()
-    let inside = NSPoint(x: buttons[0].frame.midX, y: 7)
-    #expect(header.hitTest(inside) == nil)
-    header.isRevealed = true
-    #expect(header.hitTest(inside) != nil)
+  /// 一个 Pane 宿主里内容视图（终端）的顶边：宿主里除了条以外最高的那个直接子视图。
+  private func contentTop(of host: ActivePaneHostView, excluding bar: ToolBarView) -> CGFloat? {
+    host.subviews.filter { $0 !== bar && !($0 is ToolBarView) && $0.frame.height > host.bounds.height / 2 }
+      .map(\.frame.maxY).max()
   }
 
-  @Test("pane.header：每个终端 Pane 一组（文件 Pane 不挂），跨整树重建是同一实例，随顶条淡入；停用后撤下")
-  func paneHeaderMountsPerTerminalPaneAndFollowsChromeReveal() async throws {
+  @Test("pane.header：每个终端 Pane 一条（文件 Pane 不挂），固定贴在 Pane 顶部、与 Pane 同宽、占布局空间；停用后撤下")
+  func paneHeaderMountsPerTerminalPaneAsFixedRow() async throws {
     let (fixture, panes) = try makeFixture(entries: [makeToolViewEntry(slot: .paneHeader)])
     defer { fixture.close() }
     let root = try #require(fixture.window.contentView)
@@ -127,18 +104,25 @@ struct PaneHeaderBarTests {
     #expect(paneHost(panes.b.id, in: root)?.installedHeaderBar === headerB)
     #expect(paneHost(panes.files.id, in: root)?.installedHeaderBar == nil)
     #expect(fixture.host.existingPaneHeader(for: panes.files.id) == nil)
-    // 只挂顶条图标，不建底部条。
+    // 只挂顶部条，不建底部条。
     #expect(fixture.host.existingPaneBar(for: panes.a.id) == nil)
 
-    // 指针进 / 出顶边感应带：图标组跟着自带按钮一起显隐。
+    // 有项目：固定显示（不依赖指针），贴顶、与 Pane 同宽、高度是声明的 24pt，终端顶边在它下面。
+    headerA.apply(segments: [segment("a", [ToolBarItem(id: "model", text: "gpt-6.1 · high", symbol: "cpu")])])
     hostA.layoutSubtreeIfNeeded()
-    hostA.updateChromeReveal(pointerInView: NSPoint(x: hostA.bounds.midX, y: hostA.bounds.height - 4))
-    #expect(headerA.isRevealed)
-    hostA.updateChromeReveal(pointerInView: NSPoint(x: hostA.bounds.midX, y: hostA.bounds.midY))
-    #expect(!headerA.isRevealed)
-    // 贴着顶边，在 Pane 右上角（自带按钮左边）。
+    #expect(headerA.alphaValue == 1 && !headerA.isHidden)
+    #expect(abs(headerA.frame.height - InterfaceScale.length(24)) < 0.5)
     #expect(abs(headerA.frame.maxY - hostA.bounds.maxY) < 0.5)
-    #expect(headerA.frame.maxX < hostA.bounds.maxX && headerA.frame.maxX > hostA.bounds.midX)
+    #expect(abs(headerA.frame.width - hostA.bounds.width) < 0.5)
+    let top = try #require(contentTop(of: hostA, excluding: headerA))
+    #expect(top <= headerA.frame.minY + 0.5, "终端顶边应在条下面，不被条盖住")
+
+    // 没有项目：条高归零，终端回到没有条时的位置（不留空行）。
+    headerA.apply(segments: [])
+    hostA.layoutSubtreeIfNeeded()
+    #expect(headerA.frame.height < 0.5)
+    let emptyTop = try #require(contentTop(of: hostA, excluding: headerA))
+    #expect(emptyTop > top)
 
     fixture.workspace.scheduleRefresh()
     await pollUntil { paneHost(panes.a.id, in: root).map { $0 !== hostA } ?? false }

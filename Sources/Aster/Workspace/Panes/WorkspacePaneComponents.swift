@@ -479,11 +479,14 @@ final class ActivePaneHostView: NSView {
   private var closeButton: PaneCloseButton?
   private var zoomButton: PaneZoomButton?
   private var liveViewButton: PaneLiveViewButton?
-  /// 插件 pane.header 图标组：排在自带按钮左边，随顶条一起淡入。由扩展宿主按 Pane 长期持有。
-  private var headerBar: ToolPaneHeaderView?
+  /// 插件 pane.header 条：固定贴在 Pane 顶部、占一行布局空间（没有项目时高度归零）。由扩展宿主按 Pane 长期持有。
+  private var headerBar: ToolBarView?
+  private var headerConstraints: [NSLayoutConstraint] = []
+  /// 顶条控件（把手 / 缩放 / 关闭）装好后内容要让出的顶部间距是否已生效；见 `rebuildHeaderConstraints`。
+  private var chromeInsetApplied = false
   /// 是否装了任何顶条控件；没有控件时不建感应带，也不做显隐同步。
   private var hasChrome: Bool {
-    dragHandle != nil || closeButton != nil || zoomButton != nil || liveViewButton != nil || headerBar != nil
+    dragHandle != nil || closeButton != nil || zoomButton != nil || liveViewButton != nil
   }
   private var handleTrackingArea: NSTrackingArea?
   /// 顶条控件当前是否淡入；只由 `updateChromeReveal` 写入。
@@ -562,6 +565,7 @@ final class ActivePaneHostView: NSView {
     contentView = view
     contentTopConstraint = top
     rebuildBottomChain()
+    rebuildHeaderConstraints()
     // 恢复/重建工作区时 host 以初始焦点状态创建，didSet 不会触发，这里补一次。
     applyActivationAppearance()
   }
@@ -800,13 +804,14 @@ final class ActivePaneHostView: NSView {
     closeButton?.isRevealed = revealed
     zoomButton?.isRevealed = revealed
     liveViewButton?.isRevealed = revealed
-    if let headerBar, headerBar.superview === self { headerBar.isRevealed = revealed }
   }
 
   /// 顶条控件安装后把内容整体下移,让胶囊/按钮与内容之间留出固定间距,
   /// 不再压在终端首行文本上。重复调用幂等。
   private func applyChromeContentInset() {
+    chromeInsetApplied = true
     contentTopConstraint?.constant = Self.chromeContentInset
+    if headerBar != nil { rebuildHeaderConstraints() }
   }
 
   /// 安装顶边拖动把手；只有存在多个 Pane 时才有意义（单 Pane 无处可拖）。
@@ -902,31 +907,46 @@ final class ActivePaneHostView: NSView {
     syncChromeReveal()
   }
 
-  /// 安装或移除插件 pane.header 图标组：贴在最左一个自带按钮（实时画面 / 缩放 / 关闭）左边，与它们同一行。
-  /// 必须在自带按钮之后调用。和实时画面按钮一样不下移内容：图标只在指针靠近顶边时淡入，浮在终端上方，
-  /// 为它让出一行会让终端 resize。语义同 `setExtensionBar`：图标组跨整树重建被新 host 接走，
-  /// 只在它确实挂在本 host 下时才移除。
-  func setHeaderBar(_ header: ToolPaneHeaderView?) {
-    if header == nil, headerBar == nil { return }
-    if let old = headerBar, old !== header, old.superview === self { old.removeFromSuperview() }
-    headerBar = header
-    guard let header else { return }
-    if header.superview !== self {
-      addSubview(header)
-      let anchor = liveViewButton?.leadingAnchor ?? zoomButton?.leadingAnchor ?? closeButton?.leadingAnchor
-      NSLayoutConstraint.activate([
-        header.trailingAnchor.constraint(equalTo: anchor ?? trailingAnchor, constant: anchor == nil ? -6 : -4),
-        header.topAnchor.constraint(equalTo: topAnchor),
-        header.heightAnchor.constraint(equalToConstant: Self.handleRevealHeight),
-      ])
+  /// 安装或移除插件 pane.header 条：贴 Pane 顶部和左右边，固定显示、占一行布局空间（终端因此少绘一行，
+  /// 而不是被盖住首行输出）。条没有项目时自己把高度归零，内容回到原来的位置。
+  /// 语义同 `setExtensionBar`：条由扩展宿主按 Pane 长期持有，跨整树重建被新 host 接走，
+  /// 只在它确实挂在本 host 下时才移除或建约束。
+  func setHeaderBar(_ bar: ToolBarView?) {
+    if bar == nil, headerBar == nil { return }
+    if let old = headerBar, old !== bar, old.superview === self { old.removeFromSuperview() }
+    headerBar = bar
+    if let bar, bar.superview !== self {
+      // 放在最底层：顶条自带按钮（把手 / 缩放 / 关闭）与条同在顶部一行，按钮必须盖在条上面才点得到。
+      addSubview(bar, positioned: .below, relativeTo: subviews.first)
     }
-    // 新挂上的图标组继承当前显隐状态；隐藏时 `hitTest` 返回 nil，不挡终端点击。
-    header.isRevealed = chromeRevealed
-    syncChromeReveal()
+    rebuildHeaderConstraints()
   }
 
-  /// 当前挂着的插件 pane.header 图标组（测试用）。
-  var installedHeaderBar: ToolPaneHeaderView? { headerBar?.superview === self ? headerBar : nil }
+  /// 当前挂着的插件 pane.header 条（测试用）。
+  var installedHeaderBar: ToolBarView? { headerBar?.superview === self ? headerBar : nil }
+
+  /// 重建顶部条的约束：条贴顶、左右撑满；内容顶边 ≥ 条底边，且 ≥ 顶条控件要求的间距。
+  /// 原来「内容顶边 = Pane 顶边 + 间距」的等式降为低优先级，只在没有条（或条高为 0）时把内容拉回顶部：
+  /// 条高于间距时内容跟着条走，条高为 0 时与原来的布局完全一样。每次整体重建，不残留半条约束。
+  private func rebuildHeaderConstraints() {
+    NSLayoutConstraint.deactivate(headerConstraints)
+    headerConstraints.removeAll()
+    guard let contentView, let bar = headerBar, bar.superview === self else {
+      contentTopConstraint?.priority = .required
+      return
+    }
+    bar.translatesAutoresizingMaskIntoConstraints = false
+    headerConstraints = [
+      bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+      bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+      bar.topAnchor.constraint(equalTo: topAnchor),
+      contentView.topAnchor.constraint(greaterThanOrEqualTo: bar.bottomAnchor),
+      contentView.topAnchor.constraint(
+        greaterThanOrEqualTo: topAnchor, constant: chromeInsetApplied ? Self.chromeContentInset : 0),
+    ]
+    contentTopConstraint?.priority = NSLayoutConstraint.Priority(250)
+    NSLayoutConstraint.activate(headerConstraints)
+  }
 
   /// 快捷键提示随设置实时刷新，不改动缩放真值或按钮身份。
   func updateZoomShortcut(_ shortcut: String) {

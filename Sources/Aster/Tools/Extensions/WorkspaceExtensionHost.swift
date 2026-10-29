@@ -24,7 +24,7 @@ extension ToolCenter: ToolViewCatalog {}
 @MainActor
 final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 本版本由宿主挂 bar 的标签范围位置（`pane.bottom` 每 Pane 一条，见 `paneBar(for:)`；`pane.header` 每 Pane
-  /// 一组图标，见 `paneHeader(for:)`；
+  /// 一条固定在顶部，见 `paneHeader(for:)`；
   /// `inspector.panel` 由详情面板经 `ToolPanelProviding` 取用）。
   /// `window.*` 与 `activePane.bottom` 的上下文与标签范围相同（窗口选中标签的活动 Pane），共用调度器的 `context`；
   /// `activePane.bottom` 只有一条，由工作区挂到活动终端 Pane 底部，见 `activePaneBarPaneID()`。
@@ -70,7 +70,9 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
       makeBar: { [weak self] _ in
         self?.makeBar(slot: .paneBottom, height: self?.paneBarHeight ?? 24) ?? ToolBarView(slot: .paneBottom, height: 24)
       },
-      makeHeader: { [weak self] _ in self?.makeHeader() ?? ToolPaneHeaderView() })
+      makeHeader: { [weak self] _ in
+        self?.makeBar(slot: .paneHeader, height: self?.paneHeaderHeight ?? 24) ?? ToolBarView(slot: .paneHeader, height: 24)
+      })
     bars.onBranchChange = { [weak self] paneID in self?.updatePaneContext(paneID) }
     return bars
   }()
@@ -162,8 +164,8 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 某个 Pane 已建好的 pane.bottom 条（测试用）。
   func existingPaneBar(for paneID: UUID) -> ToolBarView? { paneBars.existingBar(for: paneID) }
 
-  /// 某个 Pane 已建好的 pane.header 图标组（测试用）。
-  func existingPaneHeader(for paneID: UUID) -> ToolPaneHeaderView? { paneBars.existingHeader(for: paneID) }
+  /// 某个 Pane 已建好的 pane.header 条（测试用）。
+  func existingPaneHeader(for paneID: UUID) -> ToolBarView? { paneBars.existingHeader(for: paneID) }
 
   /// 某个 Pane 当前的 pane 上下文（测试用）。
   func paneContext(for paneID: UUID) -> ToolBarContext? { paneBars.contexts[paneID] }
@@ -171,6 +173,11 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   /// pane.bottom 的条高（点，未缩放）：取第一个视图的声明。
   private var paneBarHeight: Int {
     paneEntries.first?.contribution.barHeight(in: .paneBottom) ?? ToolViewSlot.paneBottom.defaultBarHeight ?? 24
+  }
+
+  /// pane.header 的条高（点，未缩放）：取第一个视图的声明。
+  private var paneHeaderHeight: Int {
+    paneHeaderEntries.first?.contribution.barHeight(in: .paneHeader) ?? ToolViewSlot.paneHeader.defaultBarHeight ?? 24
   }
 
   /// 某个 Pane 的 pane.bottom 条：没有可挂载视图、Pane 不在选中标签或不是终端 Pane（工具、文件 Pane）时为 nil。
@@ -184,8 +191,8 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     return bar
   }
 
-  /// 某个 Pane 的 pane.header 图标组：规则同 `paneBar(for:)`，由工作区装到 Pane 顶条上。
-  func paneHeader(for paneID: UUID) -> ToolPaneHeaderView? {
+  /// 某个 Pane 的 pane.header 条：规则同 `paneBar(for:)`，由工作区装到 Pane 顶部，占一行布局空间。
+  func paneHeader(for paneID: UUID) -> ToolBarView? {
     guard !isTornDown, !paneHeaderEntries.isEmpty, canMountPaneView(paneID) else { return nil }
     let isRegistered = paneBars.contains(paneID)
     let (header, isNew) = paneBars.header(for: paneID)
@@ -422,16 +429,6 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     return bar
   }
 
-  /// 建一个 pane.header 图标组并接上点击回调。
-  private func makeHeader() -> ToolPaneHeaderView {
-    let header = ToolPaneHeaderView()
-    header.themeProvider = { [weak preferences] in preferences?.activeTheme }
-    header.onItem = { [weak self] id, item in self?.perform(item, entryID: id) }
-    header.onRetry = { [weak self] id in self?.scheduler.refresh(entryID: id) }
-    header.onApprove = { [weak self] id in self?.approve(entryID: id) }
-    return header
-  }
-
   /// 条拖高松开或双击复位：按位置记住；`pane.bottom` 共用一个值，其它 Pane 的条跟着变。
   private func barHeightDidCommit(_ height: Double, slot: ToolViewSlot) {
     barHeights.setHeight(height, for: slot)
@@ -450,7 +447,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     }
   }
 
-  /// 重画一个 Pane 的底部条与顶条图标组：该 Pane 的每个 pane 视图一段，段 id 是 feed 键。
+  /// 重画一个 Pane 的底部条与顶部条：该 Pane 的每个 pane 视图一段，段 id 是 feed 键。
   private func renderPane(_ paneID: UUID) {
     let segments: ([ToolViewEntry]) -> [ToolBarSegment] = { entries in
       entries.compactMap { self.segment(for: $0, key: ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID)) }
@@ -459,7 +456,10 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
       bar.setHeight(paneBarHeight)
       bar.apply(segments: segments(paneEntries))
     }
-    paneBars.existingHeader(for: paneID)?.apply(segments: segments(paneHeaderEntries))
+    if let header = paneBars.existingHeader(for: paneID) {
+      header.setHeight(paneHeaderHeight)
+      header.apply(segments: segments(paneHeaderEntries))
+    }
   }
 
   /// 一个 feed 的当前段。

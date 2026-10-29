@@ -9,7 +9,7 @@ public enum ToolBarHeightPolicy {
   /// 高度上限（点）。行高很大时它比 8 行先到。
   public static let maximumHeight: Double = 240
 
-  /// 能拖高的位置。`window.top` 与红绿灯同一行、高度由窗口决定；`sidebar.section` 是纵向列表；`pane.header` 只放图标。
+  /// 能拖高的位置。`window.top` 与红绿灯同一行、高度由窗口决定；`sidebar.section` 是纵向列表；`pane.header` 固定一行（和 `window.top` 一样不拖高）。
   public static func isResizable(_ slot: ToolViewSlot) -> Bool {
     switch slot {
     case .tabTop, .tabBottom, .windowBottom, .paneBottom, .activePaneBottom: true

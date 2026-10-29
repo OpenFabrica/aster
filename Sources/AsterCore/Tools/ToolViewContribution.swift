@@ -55,7 +55,7 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
     case .tabTop, .tabBottom, .windowBottom: 22...28
     case .windowTop: 28...28
     case .paneBottom, .activePaneBottom: 20...26
-    case .paneHeader: 14...14
+    case .paneHeader: 20...26
     case .sidebarSection: 24...24
     case .inspectorPanel: nil
     }
@@ -66,8 +66,7 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
     switch self {
     case .tabTop, .tabBottom, .windowBottom: 26
     case .windowTop: 28
-    case .paneBottom, .activePaneBottom, .sidebarSection: 24
-    case .paneHeader: 14
+    case .paneBottom, .activePaneBottom, .sidebarSection, .paneHeader: 24
     case .inspectorPanel: nil
     }
   }
