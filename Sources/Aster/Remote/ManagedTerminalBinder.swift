@@ -59,12 +59,23 @@ enum ManagedTerminalBinder {
     // 引用本身来自服务端权威快照或持久化布局，同步采信它是安全的：对账失败会走
     // `markManagedFailure` 明确报错，不会退化成一个未标识的本机 Shell。
     if let existing = descriptor.managedTerminal { session.bindManagedTerminal(existing) }
+    // 要新建受管终端时同理：创建是异步的，surface 先挂上就会起一个本机 Shell，用户在里面
+    // 工作，布局却记下另一个从没用过的受管终端（重启后附加回去的是它，目录停在创建时）。
+    // 是否托管在这里同步定下来，等待期间 Pane 只显示占位，见 `beginPendingManagedLaunch`。
+    let createsManagedTerminal =
+      descriptor.managedTerminal == nil
+      && shouldAutoManage(
+        isRestored: isRestored,
+        isLocal: coordinator.machineProfileID == MachineProfile.localProfileID,
+        endpointIsExplicit: coordinator.endpointIsExplicit,
+        localManagedEnabled: localAutoManagePolicy())
+    if createsManagedTerminal { session.beginPendingManagedLaunch() }
     // 绑定要么查服务端真实状态、要么创建远端终端，两者在 P3 都可能是 SSH 往返。
     // 必须异步执行：在 MainActor 上同步等待会让新建 Pane 时整个界面随网络延迟卡住。
     Task { @MainActor in
       await bindAsync(
-        session: session, descriptor: descriptor, isRestored: isRestored, shell: shell,
-        onBind: onBind)
+        session: session, descriptor: descriptor, createsManagedTerminal: createsManagedTerminal,
+        shell: shell, onBind: onBind)
     }
   }
 
@@ -72,7 +83,7 @@ enum ManagedTerminalBinder {
   private static func bindAsync(
     session: TerminalSession,
     descriptor: PaneDescriptor,
-    isRestored: Bool,
+    createsManagedTerminal: Bool,
     shell: String,
     onBind: @escaping (ManagedTerminalReference) -> Void
   ) async {
@@ -103,12 +114,9 @@ enum ManagedTerminalBinder {
     }
 
     // 旧布局的非受管 Pane 保持原样，等待显式迁移；本机默认原生 PTY，见 shouldAutoManage。
-    guard shouldAutoManage(
-      isRestored: isRestored,
-      isLocal: coordinator.machineProfileID == MachineProfile.localProfileID,
-      endpointIsExplicit: coordinator.endpointIsExplicit,
-      localManagedEnabled: localAutoManagePolicy())
-    else { return }
+    guard createsManagedTerminal else { return }
+    // 无论成败都要结束等待：成功换上显示桥，失败显示错误卡。
+    defer { session.completePendingManagedLaunch() }
 
     // cwd 与 Shell 属于**执行机器**：协调器是 SSH 传输时，本机 Pane 目录与本机 `$SHELL`
     // 在远端都可能不存在（修 §6.9）。两条路径共用同一个入口，不再各拼一份。
@@ -122,6 +130,11 @@ enum ManagedTerminalBinder {
         workingDirectory: launch.workingDirectory,
         argv: launch.argv
       )
+      // 创建期间 Pane 已被关闭：`stop()` 当时还没有引用可结束，这里补结束，不留孤儿 Shell。
+      if session.lifecycleState == .stopping {
+        _ = await coordinator.terminateAsync(status.reference)
+        return
+      }
       session.bindManagedTerminal(status.reference)
       noteCapabilityLimitations(session: session, coordinator: coordinator)
       onBind(status.reference)

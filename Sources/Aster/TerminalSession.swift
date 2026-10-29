@@ -2533,9 +2533,10 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 命令会被判成空闲。
   var hasForegroundCommand: Bool {
     if let ghosttyView {
-      guard ghosttyView.isProcessRunning, let foreground = ghosttyView.foregroundProcessIdentifier
+      guard ghosttyView.isProcessRunning, let sample = ghosttyForegroundSample(ghosttyView),
+        let foreground = sample.foreground
       else { return false }
-      return foreground != (ghosttyShellProcessIdentifier ?? foreground)
+      return foreground != (sample.shell ?? foreground)
     }
     guard let process = terminalView?.process, process.running, process.childfd >= 0 else { return false }
     let foreground = tcgetpgrp(process.childfd)
@@ -2549,6 +2550,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   private(set) var managedFailure: String?
   /// 本次关闭的语义。分离只释放客户端资源并保留服务端进程；结束才终止远端进程。
   var managedDisposition: ManagedTerminalDisposition = .terminated
+  /// 新 Pane 正在等后台服务创建受管终端。期间不起本地 Shell：否则用户一直在本地 Shell 里
+  /// 工作，布局却记下另一个从没用过的受管终端，重启 App 后附加回去的是它（目录、进程都不对）。
+  private(set) var managedLaunchPending = false
+  /// 等待期间有人要焦点（新建标签）；surface 建好后补交。
+  private var focusRequestedWhileManagedLaunchPending = false
   /// 是否为受管终端。
   var isManagedTerminal: Bool { managedTerminal != nil }
   /// 受管终端交互闸门（P4.2 §4.2）。默认 true：本地非受管终端与 Local 受管终端
@@ -2617,6 +2623,27 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     if remoteManagedMachineLabel != nil { currentWorkingDirectoryIsLocal = false }
     // 本机受管终端可能在 App 重启前就已经在跑 Agent：绑定后补识别一次。
     if reference != nil, isLocalManagedTerminal { recoverRunningForegroundAgent() }
+  }
+
+  /// 进入「等受管终端创建」：之后的 `makeTerminalHost` 只给占位，不启动任何进程。
+  /// 必须在首次挂载前调用，与 `bindManagedTerminal` 的约束相同。
+  func beginPendingManagedLaunch() {
+    managedLaunchPending = true
+  }
+
+  /// 受管终端已绑定或已失败：结束等待，并在占位里原位换上真正的终端视图。
+  ///
+  /// 视图树还没要过 host 时什么都不做，之后的 `makeTerminalHost` 按绑定结果正常创建。
+  /// 等待期间 Pane 已被关闭（`stop()` 置 `.stopping`）时不再创建，避免给死 Pane 起显示桥。
+  func completePendingManagedLaunch() {
+    guard managedLaunchPending else { return }
+    managedLaunchPending = false
+    let wantsFocus = focusRequestedWhileManagedLaunchPending
+    focusRequestedWhileManagedLaunchPending = false
+    guard lifecycleState != .stopping, ghosttyView == nil, let preferences, let terminalHostView
+    else { return }
+    attachTerminal(makeGhosttyTerminalView(preferences: preferences), to: terminalHostView)
+    if wantsFocus { focus() }
   }
 
   /// 标记受管终端创建/对账失败；该 Pane 只显示错误，不启动本地 Shell。
@@ -3609,11 +3636,12 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
             SecureInputCoordinator.shared.releaseAutomaticRequest(for: self.id)
             return
           }
-          let foreground = ghosttyView.foregroundProcessIdentifier
-          if self.ghosttyShellProcessIdentifier == nil {
-            self.ghosttyShellProcessIdentifier = foreground
+          if !self.isManagedTerminal, self.ghosttyShellProcessIdentifier == nil {
+            self.ghosttyShellProcessIdentifier = ghosttyView.foregroundProcessIdentifier
           }
-          let running = foreground != nil && foreground != self.ghosttyShellProcessIdentifier
+          // 采样不可用（远端受管终端）时不覆盖 OSC 133 给出的命令状态。
+          guard let sample = self.ghosttyForegroundSample(ghosttyView) else { continue }
+          let running = sample.foreground != nil && sample.foreground != sample.shell
           if running, !self.hasRunningCommand {
             self.handleShellIntegrationEvent(.commandStart)
           }
@@ -3668,7 +3696,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     // 标签切换、主题刷新），此时绝不能顺手新建 surface：那会立刻拉起一个新的显示桥，
     // 让刚刚经 CLI 或菜单完成的“分离”被自动重新附加，分离形同无效。重新附加只走
     // 用户显式的 `reattachManagedTerminal()`。
-    if isManagedTerminal, lifecycleState == .detached {
+    // 等受管终端创建期间同样只给占位，见 `managedLaunchPending`。
+    if (isManagedTerminal && lifecycleState == .detached) || managedLaunchPending {
       self.preferences = preferences
       if let terminalHostView {
         terminalHostView.layer?.backgroundColor = preferences.terminalCanvasBackgroundColor.cgColor
@@ -3959,6 +3988,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// `focusFailureReason`（视图未创建 / 未上屏 / 系统拒绝交接）。
   @discardableResult
   func focus() -> Bool {
+    if managedLaunchPending {
+      focusRequestedWhileManagedLaunchPending = true
+      focusFailureReason = "managed_launch_pending"
+      return false
+    }
     // 实时画面收起时焦点落在状态卡上：键盘输入不能到达隐藏的终端。
     if let collapsedLiveViewCard {
       guard let window = collapsedLiveViewCard.window else {
@@ -5132,6 +5166,22 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
       }
       self?.managedAgentRecoveryTask = nil
     }
+  }
+
+  /// Ghostty 路径的一次前台采样：(前台进程组, 登录 Shell)。
+  ///
+  /// 受管终端的 surface 子进程是显示桥，它的前台进程组永远是桥自己；拿它比较会让轮询每秒
+  /// 把 OSC 133 刚置上的「命令在跑」改回 false，Codex 等 Agent 因此识别不出来。本机受管终端
+  /// 改问服务端上报的 Shell pid；远端受管终端在本机没有进程可问，返回 nil。
+  private func ghosttyForegroundSample(_ view: GhosttySurfaceView) -> (foreground: Int32?, shell: Int32?)? {
+    guard let managedTerminal else {
+      return (view.foregroundProcessIdentifier, ghosttyShellProcessIdentifier)
+    }
+    guard isLocalManagedTerminal,
+      let shell = ManagedTerminalCoordinatorRegistry.coordinator(for: managedTerminal)
+        .shellProcessIdentifier(for: managedTerminal)
+    else { return nil }
+    return (ProcessForegroundGroupReader.foregroundGroup(of: shell), shell)
   }
 
   /// 前台命令（不是登录 Shell 本身）的 argv；没有前台命令或读不到时返回 nil。
