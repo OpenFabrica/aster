@@ -2841,5 +2841,5 @@
 "Claude Code 速率" = "Claude Code Rate";
 "调整状态条高度" = "Resize Status Bar";
 "系统状态条" = "System Status Bar";
-"在窗口底部显示本机的 CPU、内存、磁盘与网络" = "Shows this Mac’s CPU, memory, disk, and network at the bottom of the window";
+"在窗口底部显示本机的 CPU、GPU、温度、风扇、内存、磁盘、网络与电池" = "Shows this Mac’s CPU, GPU, temperature, fans, memory, disk, network, and battery at the bottom of the window";
 "系统状态" = "System Status";

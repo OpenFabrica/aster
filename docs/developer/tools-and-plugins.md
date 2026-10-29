@@ -178,7 +178,7 @@ v1 范围：
 | `aster.gitbar` | 示例：`activePane.bottom` 状态条（跟着当前 Pane 走），显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
 | `aster.codexbar` | `pane.bottom` 状态条：运行 Codex 的 Pane 显示该会话的模型 · 思考等级、状态、最近用量区间的输入 / 输出速率、累计；见「内置 Agent 速率条」 | — | `exec`、`clipboard.write` |
 | `aster.claudebar` | `pane.bottom` 状态条：运行 Claude Code 的 Pane 显示该会话的模型 · 思考等级、状态、最近一条回复的输出速率、上下文大小、累计输出 | — | `exec`、`clipboard.write` |
-| `aster.sysbar` | `window.bottom` 状态条：本机 CPU、内存（已用 / 总量）、数据卷剩余空间、Wi-Fi / 以太网上下行速率；只用系统命令，不需要 Python；见「内置系统状态条」 | — | `exec` |
+| `aster.sysbar` | `window.bottom` 状态条：本机 CPU、GPU、温度、风扇、内存（已用 / 总量）、数据卷剩余空间、Wi-Fi / 以太网上下行速率、电池；脚本只用系统命令，不需要 Python，温度与风扇由同目录的 C 读取器 `aster-sensors` 提供；见「内置系统状态条」 | — | `exec` |
 | `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
 - 输入分配：JWT 与颜色的 `enter`/`query` 都填输入框；正则的 `enter` 填测试文本（单行 `/…/flags` 填进正则），
@@ -692,17 +692,28 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 ### 内置系统状态条：`aster.sysbar`
 
 只贡献一个 `window.bottom` 的 bar `stats`（权限只有 `exec`；`refresh {interval: 10, on: []}`，只按时间刷新，超时 5 s）。
-`bin/sysbar.sh` 是纯 `sh` + `awk`，只调系统自带命令，没装 Command Line Tools 也能用；一次约 80 ms。
+`bin/sysbar.sh` 是纯 `sh` + `awk`，只调系统自带命令，没装 Command Line Tools 也能用；一次约 200 ms。温度与风扇来自同目录的 `bin/aster-sensors`（见下），
+它不在就不显示这两项，其余照常。
 
-- **CPU**：`ps -A -o %cpu` 求和 ÷ `hw.logicalcpu`。`ps` 的 `%cpu` 是近期衰减平均，不用像 `top -l 2` 那样采样等一秒。≥ 80% 显示 warning 色。
+- **CPU**：`ps -A -o %cpu` 求和 ÷ `hw.logicalcpu`。`ps` 的 `%cpu` 是近期衰减平均，不用像 `top -l 2` 那样采样等一秒。≥ 80% 显示 warning 色。同一次 `ps -r`（按 CPU 降序）取前 3 个进程放进提示；进程名去掉目录，并去掉引号、反斜杠、控制字符与分隔符 `|`，保证 JSON 合法。
+- **GPU**：`ioreg -c IOAccelerator` 的 `Device Utilization %`，多块 GPU 取最高；没有该字段就不显示。
+- **温度**：`aster-sensors` 的 `temp_soc`（芯片最热核心，`tdie*` 传感器取最高）；≥ 90 ℃ warning、≥ 100 ℃ error。提示里附电池与闪存温度。
+- **风扇**：`aster-sensors` 的 `fans` 与每个风扇的当前 / 最大转速；显示最快那个，全部停转显示「停转」，任一风扇达到最大转速 90% 时 warning。没有风扇的机型（Air）不显示。
 - **内存**：按活动监视器的「已使用内存」= App 内存（`vm_stat` 的匿名页 − 可清除页）+ 联动内存 + 被压缩，总量取 `hw.memsize`，
-  按 1024 进位；≥ 90% warning。
+  按 1024 进位；占用 ≥ 90% warning。提示里附交换区已用量（`vm.swapusage`）与内存压力（`kern.memorystatus_vm_pressure_level`：1 正常 / 2 警告 / 4 严重）；压力警告 → warning、严重 → error。
 - **磁盘**：`df -Pk /System/Volumes/Data`（没有时用 `/`）的可用空间，按 1000 进位（和访达一致）；不含可清除空间，所以比访达略少。
   剩余 < 10% warning、< 5% error。
 - **网络**：`netstat -ibn` 只累计名字是 `en<数字>`（在线，名字不带 `*`）的 `<Link#>` 行；VPN 的 `utun` 流量也经过 `en`，再算会重复。
   从行尾数列取 `Ibytes` / `Obytes`。速率要两次采样：上次的「时间 收 发 下行 上行 间隔」存在
   `$ASTER_PLUGIN_DATA/network.state`，各窗口共用、写临时文件再改名；两次间隔 < 2 s（别的窗口刚跑过）时沿用上次速率、不改基准；
   计数变小（接口重置）时这次不显示网速。刚存下基准时输出 `ttl: 5`，让网速尽快出现；没有数据目录时不显示网速。
+- **电池**：`pmset -g batt` 的 `InternalBattery` 行，取电量、状态（放电 / 充电 / 已充满 / 接电源未充电）与剩余时间；放电时 < 20% warning、< 10% error；
+  图标按电量分五档，充电中用带闪电的符号。台式机没有这一行，不显示。
+- **`aster-sensors`**：`scripts/sysbar-sensors.c`，由 `scripts/build-sysbar-sensors.sh` 构建成通用二进制（arm64 + x86_64），`build-app.sh` 把它构建进包内
+  `tools-builtin/aster.sysbar/bin/` 并单独签名（Resources 里的 Mach-O 不会被外层签名覆盖，公证要求每个都签）。开发时直接跑该脚本（默认输出到
+  仓库的 `Resources/tools-builtin/aster.sysbar/bin/`，已 gitignore）。温度走 `IOHIDEventSystem`（私有接口，Stats / macmon 同款；PrimaryUsagePage 0xff00、
+  PrimaryUsage 5，失效传感器会返回约 -9000，只收 0–150 ℃），风扇走 AppleSMC 用户态连接（`FNum`、`F<n>Ac`、`F<n>Mx`，
+  支持 `flt ` / `fpe2` / `ui8 `）；都不需要 root。每行 `键=值`，读不到的项不输出，退出码恒为 0。私有接口随系统版本可能变化，失效时状态条只是少这两项。
 - 文案按 `ASTER_LOCALE` 选中文或英文；没有点击动作。
 
 ### 内置示例：`aster.gitbar`

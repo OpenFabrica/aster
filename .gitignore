@@ -48,3 +48,6 @@ _to_delete/
 
 # Python protocol and test orchestration helpers
 __pycache__/
+
+# 系统状态条的传感器读取器由 scripts/build-sysbar-sensors.sh 构建，不提交二进制。
+Resources/tools-builtin/aster.sysbar/bin/aster-sensors

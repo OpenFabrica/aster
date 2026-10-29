@@ -2839,5 +2839,5 @@
 "Claude Code 速率" = "Claude-Code-Rate";
 "调整状态条高度" = "Höhe der Statusleiste anpassen";
 "系统状态条" = "Systemstatusleiste";
-"在窗口底部显示本机的 CPU、内存、磁盘与网络" = "Zeigt CPU, Arbeitsspeicher, Festplatte und Netzwerk dieses Macs unten im Fenster an";
+"在窗口底部显示本机的 CPU、GPU、温度、风扇、内存、磁盘、网络与电池" = "Zeigt CPU, GPU, Temperatur, Lüfter, Arbeitsspeicher, Festplatte, Netzwerk und Akku dieses Macs unten im Fenster an";
 "系统状态" = "Systemstatus";

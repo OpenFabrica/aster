@@ -105,6 +105,9 @@ for TOOL_RESOURCE in tools-builtin tool-runtime; do
   fi
   cp -R "$PROJECT_DIR/Resources/$TOOL_RESOURCE" "$RESOURCES_DIR/$TOOL_RESOURCE"
 done
+# 系统状态条的传感器读取器（温度、风扇）：C 编译的通用二进制，直接构建到包内插件的 bin 目录。
+# 缺了它状态条只是不显示温度与风扇，但发布包不该悄悄少功能，所以构建失败让打包失败。
+"$PROJECT_DIR/scripts/build-sysbar-sensors.sh" "$RESOURCES_DIR/tools-builtin/aster.sysbar/bin" >/dev/null
 # 24 套内置主题的原始文件。首次启动由 AppPreferences 复制到 ~/.config/aster/themes，
 # 用户机器上装没装 Otty 都不影响初始化；缺了这一步只会回落到代码内真值表。
 cp -R "$PROJECT_DIR/Resources/themes" "$RESOURCES_DIR/themes"
@@ -335,6 +338,8 @@ fi
 "${SIGN[@]}" "$CONTENTS_DIR/MacOS/aster-cli"
 "${SIGN[@]}" "$CONTENTS_DIR/MacOS/aster-session"
 "${SIGN[@]}" "$CONTENTS_DIR/MacOS/aster-ssh"
+# Resources 里的 Mach-O 也要单独签名，否则公证会拒（外层签名只封存它的哈希，不替它签）。
+"${SIGN[@]}" "$RESOURCES_DIR/tools-builtin/aster.sysbar/bin/aster-sensors"
 
 # 最后签外层 App：Frameworks/ 与 MacOS/ 下已签好的嵌套代码在这一步被密封进 CodeResources。
 "${SIGN[@]}" "$APP_DIR"

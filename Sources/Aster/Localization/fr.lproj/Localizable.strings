@@ -2839,5 +2839,5 @@
 "Claude Code 速率" = "Débit Claude Code";
 "调整状态条高度" = "Redimensionner la barre d’état";
 "系统状态条" = "Barre d’état du système";
-"在窗口底部显示本机的 CPU、内存、磁盘与网络" = "Affiche le processeur, la mémoire, le disque et le réseau de ce Mac en bas de la fenêtre";
+"在窗口底部显示本机的 CPU、GPU、温度、风扇、内存、磁盘、网络与电池" = "Affiche le processeur, le GPU, la température, les ventilateurs, la mémoire, le disque, le réseau et la batterie de ce Mac en bas de la fenêtre";
 "系统状态" = "État du système";
