@@ -179,6 +179,13 @@ final class FilePaneToolbar: NSView {
   private var zoomFactor: Double = 1
 
   func selectZoom(_ factor: Double) {
+    displayZoom(factor)
+    onZoom?(factor)
+  }
+
+  /// 只更新倍率显示，不回调 `onZoom`：内容自己改了倍率（适应窗口、捏合、双击）时用，
+  /// 避免把「适应窗口」误当成用户手动选了固定倍率。
+  func displayZoom(_ factor: Double) {
     zoomFactor = factor
     let percent = Int((factor * 100).rounded())
     if zoom.menu?.item(withTag: percent) == nil {
@@ -186,6 +193,5 @@ final class FilePaneToolbar: NSView {
       zoom.item(at: 0)?.tag = percent
     }
     zoom.selectItem(withTag: percent)
-    onZoom?(factor)
   }
 }

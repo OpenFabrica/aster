@@ -113,7 +113,7 @@ flowchart LR
 
 Files 的右键菜单保持固定结构：`Open`、`Open in Aster` 子菜单、创建/重命名/废纸篓、路径复制和 Finder。树展开仍由 chevron、双击或键盘（→ l、Space）负责，不混入资源动作。`Copy Relative Path` 以当前 Files 根目录按 path components 计算，不用字符串前缀，也不添加 `./`。
 
-File Pane 顶部使用 32 pt 工具栏，负责模式、预览缩放、Send to Chat、运行脚本、Open In、保存状态与关闭；文件名由活动 Pane 的外层标题承载。Markdown、reStructuredText、HTML 与 SVG 显示 code/eye 胶囊，默认 Source，可切换 Preview；普通源码显示 code/lock 胶囊，默认可编辑，可就地锁定。预览专用类型不显示无效模式开关。Markdown 由固定版本 `swift-markdown` 解析 GFM 后在禁用 JavaScript、禁用网络的 `WKWebView` 中展示；HTML/SVG 使用同一沙箱。源码由 HighlighterSwift/highlight.js 着色，同时保持原生 `NSTextView` 输入语义。图片使用可缩放 `NSScrollView`，PDF 使用 PDFKit，Office/媒体/字体交给 Quick Look，二进制使用 `NSTableView` 按可见行生成有界 hex。可信 Agent transcript 只复用已发现历史的解析结果，并提供 Resume/Fork；任意 JSONL 不会自行升级为会话。
+File Pane 顶部使用 32 pt 工具栏，负责模式、预览缩放、Send to Chat、运行脚本、Open In、保存状态与关闭；文件名由活动 Pane 的外层标题承载。Markdown、reStructuredText、HTML 与 SVG 显示 code/eye 胶囊，默认 Source，可切换 Preview；普通源码显示 code/lock 胶囊，默认可编辑，可就地锁定。预览专用类型不显示无效模式开关。Markdown 由固定版本 `swift-markdown` 解析 GFM 后在禁用 JavaScript、禁用网络的 `WKWebView` 中展示；HTML/SVG 使用同一沙箱。源码由 HighlighterSwift/highlight.js 着色，同时保持原生 `NSTextView` 输入语义。图片使用 `FileImagePreviewView`（可缩放 `NSScrollView`，见下文倍率说明），PDF 使用 PDFKit，Office/媒体/字体交给 Quick Look，二进制使用 `NSTableView` 按可见行生成有界 hex。可信 Agent transcript 只复用已发现历史的解析结果，并提供 Resume/Fork；任意 JSONL 不会自行升级为会话。
 
 图片、PDF、富文档和二进制（`FilePresentationKind.usesTextContent == false`）没有文本内容，`WorkspacePaneRuntime` 不为它们加载 `documentText`。因此 File Pane 打开这类文件时不看 `PaneDescriptor.kind`，一律直接显示预览：File Browser 双击、终端链接等入口经 `openFile` 以 `.editor` 打开图片时，若仍进入源码视图，只会看到一个空的行号 1。
 
@@ -160,7 +160,15 @@ JSON（`.json`、`.geojson`；`.jsonl` 仍按源码或 transcript）在 `FileDoc
 
 格式化由 `JSONDocumentFormatter` 完成：先完整解析校验，再只重排 token 之间的空白，字符串、数字和字面量逐字节照抄，所以 `\u4e2d` 转义、大整数和 `1.0` 不被改写；缩进单位取第一条有缩进行的前导空白（tab 或 1–8 个空格），找不到用 2 空格。写回走 `FileSourceTextView.replaceAllText`（`shouldChangeText` → `replaceCharacters` → `didChangeText`），因此进入撤销栈、文档标脏，不会自动保存；解析失败只经 `model.notice` 提示行列。工具栏“格式化”仅在 `.json` 的可编辑 Source 中显示。
 
-图片和 SVG 预览支持倍率、放大/缩小、实际大小和适应窗口；预设为 25/50/75/100/150/200/400%，步进 ×/÷1.25、范围 0.1…16。Markdown、RST、HTML 和纯源码不显示倍率按钮；预览倍率不改变源码字号。仅本地 `.sh` 显示 Run：`AppModel.runShellFile` 创建以脚本父目录为 CWD 的新终端，通过已有就绪命令队列执行 `bash` 加安全转义路径。Run 执行磁盘版本，未保存稿留在原 Pane；远端或非 `.sh` 拒绝。
+图片和 SVG 预览支持倍率、放大/缩小、实际大小和适应窗口；预设为 25/50/75/100/150/200/400%，步进 ×/÷1.25、范围 0.1…16。
+
+图片预览由 `FileImagePreviewView` 负责：
+- **默认适应窗口**：倍率取 `min(1, 可视宽/图宽, 可视高/图高)`，大图缩小到完整可见，小图保持 100% 不放大。处于适应状态时 Pane 尺寸变化会重新计算；工具条选倍率或触控板捏合后进入手动状态，保持所选倍率，直到再点「适应窗口」或双击。
+- **居中与平移**：`FileImageCenteringClipView` 让比可视区小的图片居中；图片在任一方向超出可视区时，按住拖动平移（张开 / 握紧的手形光标），滚轮与触控板滚动照常。双击在适应窗口与 100% 之间切换。
+- **后台解码**：`FileImageDecodeResult.decode` 在分离任务里用 ImageIO 解码并按 EXIF 方向转正，最长边超过 8192 px 时降采样；100% 的点尺寸按原图像素与 DPI 换算（144 DPI 截图在 100% 下不放大一倍），不受降采样影响。多帧图片（GIF 等）不在后台解码，主线程交给 `NSImage` 以保留播放。
+- 内容自己改倍率时经 `FilePaneToolbar.displayZoom` 只更新倍率显示，不回调 `onZoom`，避免把适应状态误记成手动倍率。
+
+验证：`FileImagePreviewTests` 覆盖 DPI 与方向换算、动图与非图片、大图适应与小图居中、随尺寸重算与手动缩放保持、双击切换。Markdown、RST、HTML 和纯源码不显示倍率按钮；预览倍率不改变源码字号。仅本地 `.sh` 显示 Run：`AppModel.runShellFile` 创建以脚本父目录为 CWD 的新终端，通过已有就绪命令队列执行 `bash` 加安全转义路径。Run 执行磁盘版本，未保存稿留在原 Pane；远端或非 `.sh` 拒绝。
 
 布局和菜单证据来自现有 Otty 数据库所对应的同 SHA arm64 切片：toolbar `0x1000c2f00`、状态 `0x1000c3670`、源码菜单 `0x1000ca1f0`/`0x1000b7be4`、Web 菜单 `0x1000f1e28`、QL 菜单 `0x1000ac614`、公共动作 `0x1000fd114`、Run `0x1000e2044`。新补证是 LLVM 指令核对，并非新的 REA/Hopper 伪代码导出；不能据此声称实际 Otty 窗口逐像素验收完成。Swift 枚举元数据已恢复 DualMode 的 markdown / rst / svg / html 顺序，kind==2 对应 SVG；倍率按钮因此仅用于 SVG 和图片。
 

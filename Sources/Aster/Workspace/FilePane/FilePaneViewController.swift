@@ -497,8 +497,8 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     jsonTreeView?.apply(theme: theme, font: font)
     if let preview = cachedPreviewView as? QLPreviewView { applyPreviewTheme(preview) }
     if let pdf = cachedPreviewView as? PDFView { pdf.backgroundColor = NSColor(theme.palette.renderedTerminalBackground) }
-    if presentationKind == .image, let scroll = cachedPreviewView as? NSScrollView {
-      scroll.backgroundColor = NSColor(theme.palette.renderedTerminalBackground)
+    if let image = cachedPreviewView as? FileImagePreviewView {
+      image.setBackground(NSColor(theme.palette.renderedTerminalBackground))
     }
   }
 
@@ -656,30 +656,22 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     case .json:
       return makeJSONTree()
     case .image:
-      guard let image = NSImage(contentsOf: fileURL) else {
-        return messageView("Unable to decode this image.", symbol: "photo")
-      }
-      let imageView = FilePreviewImageView(image: image)
-      imageView.contextMenuProvider = { [weak self, weak imageView] in
+      // 解码在后台进行；默认适应窗口，可拖动平移，双击在适应与 100% 之间切换。
+      let preview = FileImagePreviewView(
+        url: fileURL, background: NSColor(preferences.activeTheme.palette.renderedTerminalBackground))
+      preview.imageView.contextMenuProvider = { [weak self, weak preview] in
         guard let self else { return NSMenu() }
         return FileNativePreviewMenus.make(copy: {
-          guard let image = imageView?.image else { return }
+          guard let image = preview?.imageView.image else { return }
           NSPasteboard.general.clearContents()
           NSPasteboard.general.writeObjects([image])
         }, selectAll: nil, send: { [weak self] in self?.sendCurrentContentToChat() }, fileActions: fileActionsMenu())
       }
-      imageView.imageScaling = .scaleProportionallyUpOrDown
-      imageView.animates = true
-      let scroll = NSScrollView()
-      scroll.backgroundColor = NSColor(preferences.activeTheme.palette.renderedTerminalBackground)
-      scroll.hasVerticalScroller = true
-      scroll.hasHorizontalScroller = true
-      scroll.allowsMagnification = true
-      scroll.minMagnification = 0.1
-      scroll.maxMagnification = 16
-      scroll.documentView = imageView
-      imageView.frame = NSRect(origin: .zero, size: image.size)
-      return scroll
+      preview.onMagnificationChanged = { [weak self] zoom in
+        self?.contentZoom = zoom
+        self?.toolbarView?.displayZoom(zoom)
+      }
+      return preview
     case .pdf:
       let pdf = FilePreviewPDFView()
       pdf.contextMenuProvider = { [weak self, weak pdf] in
@@ -961,14 +953,15 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
   private func setContentZoom(_ zoom: Double) {
     contentZoom = zoom
     previewWebView?.magnification = zoom
-    if let image = cachedPreviewView as? NSScrollView, presentationKind == .image { image.magnification = zoom }
+    if let image = cachedPreviewView as? FileImagePreviewView { image.setZoom(zoom) }
   }
 
+  /// 工具条「适应窗口」：图片回到自动适应状态（之后随 Pane 尺寸重算）；其它预览回到 100%。
   private func zoomToFit() {
-    if presentationKind == .image, let scroll = cachedPreviewView as? NSScrollView, let image = scroll.documentView,
-      image.bounds.width > 0, image.bounds.height > 0 {
-      toolbarView?.selectZoom(max(0.1, min(16, min(scroll.contentSize.width / image.bounds.width,
-        scroll.contentSize.height / image.bounds.height))))
+    if let image = cachedPreviewView as? FileImagePreviewView {
+      image.fitToWindow()
+      contentZoom = Double(image.scrollView.magnification)
+      toolbarView?.displayZoom(contentZoom)
     } else { toolbarView?.selectZoom(1) }
   }
 
