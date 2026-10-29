@@ -122,8 +122,12 @@ pub const Filter = struct {
                         self.osc_header = false;
                         // 133（shell 集成提示符标记）与 6974（Aster 私有 Agent/徽章指令）只改客户端
                         // 状态、没有宿主副作用；不放行的话受管 Pane 收不到命令边界与 hook 信号。
+                        // 6973 是 Aster Shell 集成每个提示符都发的别名/PATH 上报，7501 是 Codex 的
+                        // 运行状态通知，同样只是状态。它们不放行时，每个提示符、Codex 每次状态切换
+                        // 都退回以 RIS 开头的全量快照：同一块里的 OSC 7 被丢掉（cd 后目录不更新），
+                        // 客户端画面整屏重画并跳回底部（Codex 运行时闪烁）。
                         self.osc_allowed = self.osc_code == 0 or self.osc_code == 1 or self.osc_code == 2 or self.osc_code == 7 or self.osc_code == 8 or
-                            self.osc_code == 133 or self.osc_code == 6974;
+                            self.osc_code == 133 or self.osc_code == 6973 or self.osc_code == 6974 or self.osc_code == 7501;
                         self.osc_progress = self.osc_code == 9;
                     } else if (byte >= '0' and byte <= '9' and self.osc_code < 10000) {
                         self.osc_code = self.osc_code * 10 + byte - '0';
@@ -256,7 +260,7 @@ fn safeCSI(parameters: []const u8, final: u8) bool {
 }
 
 test "ordinary terminal drawing is eligible but queries and host side effects are not" {
-    for ([_][]const u8{ "hello中\r\n", "\x1b[2;3H\x1b[31mred\x1b[0m", "\x1b[?2004h", "\x1b[>1u", "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\", "\x1b]133;A\x07prompt", "\x1b]6974;AgentState=processing;Provider=codex;SessionID=abc\x07" }) |value| {
+    for ([_][]const u8{ "hello中\r\n", "\x1b[2;3H\x1b[31mred\x1b[0m", "\x1b[?2004h", "\x1b[>1u", "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\", "\x1b]133;A\x07prompt", "\x1b]6974;AgentState=processing;Provider=codex;SessionID=abc\x07", "\x1b]6973;Aliases=ll,gs\x07", "\x1b]6973;Path=/usr/bin:/bin\x07", "\x1b]7501;state=working:app=codex\x1b\\" }) |value| {
         var filter: Filter = .{};
         try std.testing.expect(filter.consume(value));
     }
@@ -265,6 +269,14 @@ test "ordinary terminal drawing is eligible but queries and host side effects ar
         try std.testing.expect(!filter.consume(value));
         try std.testing.expect(filter.consume("next"));
     }
+}
+
+test "a zsh prompt block keeps its OSC 7 working directory as a delta" {
+    // Aster zsh 集成在 cd 之后的真实输出：OSC 7 与 6973 在同一块里，整块必须可镜像，
+    // 否则退回快照，OSC 7 随之丢失，受管 Pane 的目录停在旧值。
+    const block = "\x1b]133;D;0\x07\x1b]133;A\x07\x1b]7;file://localhost/Users\x07\x1b]6973;Aliases=ll,gs\x07\r\x1b[0m\x1b[27m\x1b[24m\x1b[J /Users \x1b[0m\r\n\xe2\x9d\xaf \x1b]133;B\x07\x1b[K\x1b[?2004h";
+    var filter: Filter = .{};
+    try std.testing.expect(filter.consume(block));
 }
 
 test "split control strings never leak their payload as printable deltas" {
