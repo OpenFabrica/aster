@@ -76,6 +76,49 @@ import Testing
     }
   }
 
+  @Test func developmentFolderOverridesBuiltinPluginWithSameID() async throws {
+    let sandbox = try ToolRuntimeSandbox()
+    defer { sandbox.cleanup() }
+    try writeToolPlugin(
+      at: sandbox.builtinDirectory.appendingPathComponent("aster.sample"), id: "aster.sample", name: "Packaged",
+      permissions: [], features: [uiFeature()], ui: ["main": "index.html"])
+    let development = try writeToolPlugin(
+      at: sandbox.external.appendingPathComponent("sample-dev"), id: "aster.sample", name: "Edited",
+      features: [uiFeature()], ui: ["main": "index.html"])
+    let center = sandbox.makeCenter()
+    await center.reloadAndWait()
+    #expect(center.pluginSummaries.first { $0.id == "aster.sample" }?.source == .builtin)
+
+    // 开发目录沿用内置插件的 id：覆盖它，不记冲突；改文件不用重新打包。
+    #expect(try await center.addDevelopmentFolder(development, window: nil) == "aster.sample")
+    let overridden = center.pluginSummaries.filter { $0.id == "aster.sample" }
+    #expect(overridden.map(\.source) == [.development])
+    #expect(overridden.first?.name == "Edited")
+    #expect(center.pluginIssues.isEmpty)
+    #expect(center.pluginStatus(pluginID: "aster.sample") == .ready)
+
+    // 取消登记后回到打包进来的版本。
+    center.removeDevelopmentFolder(development.standardizedFileURL.resolvingSymlinksInPath().path)
+    await center.reloadAndWait()
+    #expect(center.pluginSummaries.filter { $0.id == "aster.sample" }.map(\.source) == [.builtin])
+  }
+
+  @Test func developmentFolderCannotClaimReservedOrNativeBuiltinIDs() async throws {
+    let sandbox = try ToolRuntimeSandbox()
+    defer { sandbox.cleanup() }
+    let center = sandbox.makeCenter()
+    await center.reloadAndWait()
+    // 没有对应内置插件的 aster. 前缀仍保留；原生内置工具（没有目录）也不能被覆盖。
+    for id in ["aster.unknown", BuiltinToolCatalog.pluginID] {
+      let folder = try writeToolPlugin(
+        at: sandbox.external.appendingPathComponent(id), id: id, features: [uiFeature()], ui: ["main": "index.html"])
+      await #expect(throws: ToolCenterError.self) {
+        _ = try await center.addDevelopmentFolder(folder, window: nil)
+      }
+    }
+    #expect(center.developmentFolders.isEmpty)
+  }
+
   @Test func missingDevelopmentFolderIsReported() async throws {
     let sandbox = try ToolRuntimeSandbox()
     defer { sandbox.cleanup() }

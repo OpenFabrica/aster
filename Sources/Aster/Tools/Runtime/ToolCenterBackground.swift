@@ -13,8 +13,10 @@ enum ToolCenterBackground {
 
   /// 后台读取并校验一个待安装或待登记的文件夹。
   @concurrent
-  static func inspect(_ folder: URL, source: ToolPluginSource) async throws -> ToolPluginRecord {
-    switch ToolPluginScanner.loadPlugin(at: folder, source: source) {
+  static func inspect(
+    _ folder: URL, source: ToolPluginSource, overridableBuiltinIDs: Set<String> = []
+  ) async throws -> ToolPluginRecord {
+    switch ToolPluginScanner.loadPlugin(at: folder, source: source, overridableBuiltinIDs: overridableBuiltinIDs) {
     case .success(let record): return record
     case .failure(let error) where error.isManifestError: throw ToolCenterError.invalidManifest(error.detail)
     case .failure(let error): throw ToolCenterError.fileOperationFailed(error.detail)

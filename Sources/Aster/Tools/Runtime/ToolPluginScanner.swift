@@ -23,6 +23,9 @@ struct ToolPluginRecord: Equatable, Sendable {
 
   var id: String { manifest.id }
 
+  /// 来自内置资源目录的插件（不是原生内置工具）；开发目录可以按 id 覆盖它。
+  var isBuiltinFolderPlugin: Bool { source == .builtin && directory != nil }
+
   init(
     manifest: ToolManifest,
     source: ToolPluginSource,
@@ -69,10 +72,18 @@ struct ToolPluginLoadError: Error, Equatable, Sendable {
 /// 插件扫描的纯函数集合。全部在后台线程调用。
 enum ToolPluginScanner {
   /// 依次扫描内置原生、内置网页、用户插件、开发目录；同 id 先到先得，后到的记一条冲突并跳过。
+  /// 例外：开发目录里同 id 的插件覆盖内置网页 / 脚本插件（原生内置工具除外），改插件不用重新打包 App。
   static func scan(_ locations: ToolPluginScanLocations, fileManager: FileManager = .default) -> ToolPluginScanResult {
     var result = ToolPluginScanResult()
     var owners: [String: String] = [:]
     func add(_ record: ToolPluginRecord, path: String) {
+      if record.source == .development,
+        let index = result.records.firstIndex(where: { $0.id == record.id && $0.isBuiltinFolderPlugin })
+      {
+        result.records[index] = record
+        owners[record.id] = path
+        return
+      }
       if let owner = owners[record.id] {
         result.issues.append(
           ToolPluginIssue(path: path, message: L("插件 id \(record.id) 已由 \(owner) 提供，这一份已跳过")))
@@ -82,7 +93,8 @@ enum ToolPluginScanner {
       result.records.append(record)
     }
     func load(_ folder: URL, source: ToolPluginSource, registeredPath: String? = nil) {
-      switch loadPlugin(at: folder, source: source, fileManager: fileManager) {
+      let overridable = source == .development ? Self.overridableIDs(in: result.records) : []
+      switch loadPlugin(at: folder, source: source, overridableBuiltinIDs: overridable, fileManager: fileManager) {
       case .success(var record):
         record.registeredPath = registeredPath
         add(record, path: registeredPath ?? record.directory?.path ?? folder.path)
@@ -111,10 +123,17 @@ enum ToolPluginScanner {
     return result
   }
 
+  /// 开发目录可以覆盖的内置插件 id：来自内置资源目录的插件（原生内置工具没有目录，不可覆盖）。
+  static func overridableIDs(in records: [ToolPluginRecord]) -> Set<String> {
+    Set(records.filter(\.isBuiltinFolderPlugin).map(\.id))
+  }
+
   /// 读取并校验一个插件目录：清单（≤ 64 KiB）、用户来源的文件摘要、图标路径。
+  /// `overridableBuiltinIDs`：开发来源允许使用的内置插件 id（覆盖内置插件时用）。
   static func loadPlugin(
     at folder: URL,
     source: ToolPluginSource,
+    overridableBuiltinIDs: Set<String> = [],
     fileManager: FileManager = .default
   ) -> Result<ToolPluginRecord, ToolPluginLoadError> {
     let directory = folder.standardizedFileURL.resolvingSymlinksInPath()
@@ -126,7 +145,7 @@ enum ToolPluginScanner {
     }
     let manifest: ToolManifest
     do {
-      manifest = try ToolManifest.decode(data, source: source)
+      manifest = try ToolManifest.decode(data, source: source, overridableBuiltinIDs: overridableBuiltinIDs)
     } catch let error as ToolManifestError {
       let detail = error.errorDescription ?? error.reason
       return .failure(ToolPluginLoadError(isManifestError: true, detail: detail))

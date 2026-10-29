@@ -3,8 +3,9 @@ import Foundation
 
 extension ToolManifest {
   /// 校验字段取值与组合规则。模型可以来自 `decode`，也可以由代码构造（内置清单），规则相同。
-  public func validate(source: ToolPluginSource) throws {
-    try ToolManifestValidator(manifest: self, source: source).validate()
+  /// `overridableBuiltinIDs` 是开发目录可以覆盖的内置插件 id：这些 `aster.` 前缀的 id 对开发来源放行。
+  public func validate(source: ToolPluginSource, overridableBuiltinIDs: Set<String> = []) throws {
+    try ToolManifestValidator(manifest: self, source: source, overridableBuiltinIDs: overridableBuiltinIDs).validate()
   }
 }
 
@@ -40,6 +41,8 @@ struct ToolManifestValidator {
   typealias Limits = ToolManifestLimits
   let manifest: ToolManifest
   let source: ToolPluginSource
+  /// 开发目录可以覆盖的内置插件 id；只对开发来源生效。
+  var overridableBuiltinIDs: Set<String> = []
 
   /// 入口：顶层字段 → 界面 → 权限与域名 → 功能。
   func validate() throws {
@@ -70,7 +73,9 @@ struct ToolManifestValidator {
     guard Self.isValidPluginID(manifest.id) else {
       throw failure("id", L("id 格式不对，应形如 com.example.tool"))
     }
-    if manifest.id.hasPrefix(ToolManifest.builtinIDPrefix), source != .builtin {
+    // 开发目录覆盖内置插件时沿用它的 id（例如 aster.sysbar），改完脚本不用重新打包；其它来源仍不能用保留前缀。
+    let overridesBuiltin = source == .development && overridableBuiltinIDs.contains(manifest.id)
+    if manifest.id.hasPrefix(ToolManifest.builtinIDPrefix), source != .builtin, !overridesBuiltin {
       throw failure("id", L("aster. 前缀保留给内置插件"))
     }
   }

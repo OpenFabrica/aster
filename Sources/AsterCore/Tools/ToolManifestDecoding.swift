@@ -20,7 +20,10 @@ extension ToolManifest {
   public static let maximumFileBytes = 64 * 1_024
 
   /// 解析并完整校验清单；任何一条规则不满足都抛出 `ToolManifestError`。
-  public static func decode(_ data: Data, source: ToolPluginSource) throws -> ToolManifest {
+  /// `overridableBuiltinIDs` 见 `validate(source:overridableBuiltinIDs:)`。
+  public static func decode(
+    _ data: Data, source: ToolPluginSource, overridableBuiltinIDs: Set<String> = []
+  ) throws -> ToolManifest {
     guard data.count <= maximumFileBytes else {
       throw ToolManifestError(field: fileName, reason: L("清单文件太大"))
     }
@@ -45,7 +48,7 @@ extension ToolManifest {
     } catch {
       throw ToolManifestError(field: fileName, reason: L("不是有效的清单 JSON"))
     }
-    try manifest.validate(source: source)
+    try manifest.validate(source: source, overridableBuiltinIDs: overridableBuiltinIDs)
     return manifest
   }
 }

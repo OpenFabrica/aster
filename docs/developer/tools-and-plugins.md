@@ -786,8 +786,7 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
 已打开的网页工具自动刷新（`reloadFromDisk()`）；清单或授权变化时重建网页工具控制器；外观变化时调 `applyAppearance`。
 
 扫描（`ToolPluginScanner`）在后台进行，结果按代次应用，迟到的旧结果丢弃；`reloadAndWait()` 等到不早于本次发起的
-扫描生效才返回。来源优先级：内置 > 用户 > 开发，id 冲突与无效清单记入 `pluginIssues`；用户插件扫描时算摘要，失败就
-跳过并记一条问题。`runtimeInfo(pluginID:)` 只在状态为 `ready` 时返回；原生内置插件 `aster.builtin` 没有目录，返回 nil。
+扫描生效才返回。来源优先级：内置 > 用户 > 开发，id 冲突与无效清单记入 `pluginIssues`。**例外：开发目录里同 id 的插件覆盖内置资源目录里的插件**（`aster.sysbar` 等；原生内置工具 `aster.builtin` 没有目录，不可覆盖），这样改内置插件的脚本不用重新打包 App：把仓库的 `Resources/tools-builtin/<id>` 登记为开发目录即可。覆盖后它按开发来源对待——需要在登记时确认权限，不比对摘要（热重载），清单文案不走内置翻译表；取消登记后回到打包进来的版本。校验上 `aster.` 前缀对开发来源放行，但只限已存在的内置插件 id（`ToolManifest.decode(_:source:overridableBuiltinIDs:)`），其它 `aster.*` 仍被拒绝。用户插件扫描时算摘要，失败就跳过并记一条问题。`runtimeInfo(pluginID:)` 只在状态为 `ready` 时返回；原生内置插件 `aster.builtin` 没有目录，返回 nil。
 
 `tools-state.json`：启动时同步读一次（上限 4 MiB）；写入走串行队列、原子写；使用记录去抖 2 s，App 退出前 flush。
 文件损坏时改名为 `.bad` 留底并记一条问题，再按空状态启动。

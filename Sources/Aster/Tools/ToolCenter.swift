@@ -275,10 +275,13 @@ final class ToolCenter: ToolManaging {
   }
 
   func addDevelopmentFolder(_ folder: URL, window: NSWindow?) async throws -> String {
-    let candidate = try await ToolCenterBackground.inspect(folder, source: .development)
+    // 内置资源目录里的插件（aster.sysbar 等）允许被开发目录按 id 覆盖：登记后改文件立即生效，不用重新打包。
+    let candidate = try await ToolCenterBackground.inspect(
+      folder, source: .development, overridableBuiltinIDs: ToolPluginScanner.overridableIDs(in: records))
     let manifest = candidate.manifest
     let path = candidate.directory?.path ?? folder.path
-    guard !developmentFolders.contains(path), record(id: manifest.id) == nil else {
+    let existing = record(id: manifest.id)
+    guard !developmentFolders.contains(path), existing == nil || existing?.isBuiltinFolderPlugin == true else {
       throw ToolCenterError.alreadyInstalled(manifest.id)
     }
     let prompt = ToolInstallPrompt(kind: .developmentFolder, manifest: manifest, source: .development, directory: path)
