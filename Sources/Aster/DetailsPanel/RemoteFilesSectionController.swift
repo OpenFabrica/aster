@@ -232,6 +232,13 @@ final class RemoteFilesSectionController: NSViewController, NSTableViewDataSourc
       requestListing(directory)
       return
     }
+    if case .nativeSSH = newHost.context {
+      // 没有 Shell Integration 时仍能立即浏览登录目录；远端脚本解析空参数为 $HOME。
+      graceTask?.cancel()
+      graceTask = nil
+      requestListing("")
+      return
+    }
     // 受管终端可以用监控脚本的 `[cwd]` 段兜底；场景 A 只能等远端集成上报。
     startAwaitingIntegration()
   }

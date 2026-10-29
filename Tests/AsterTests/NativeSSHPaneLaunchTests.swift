@@ -108,6 +108,7 @@ func openNativeSSHCreatesTaggedTab() throws {
     #expect(tab.title == "box")
     #expect(tab.activeSession?.nativeSSH == pane.nativeSSH)
     #expect(tab.activeSession?.isManagedTerminal == false)
+    #expect(model.isInspectorPresented)
     let ledger = try HostUsageLedger.load(from: defaults)
     #expect(ledger.entries[.target("ssh://deploy@box:2222")]?.count == 1)
   }

@@ -186,6 +186,13 @@ flowchart LR
 - 原生页面：分组、徽章、hashed 记录的名称、搜索与删除选项由纯函数 `KnownHostsPageContent` 推导。删除用 `NSAlert` sheet：单模式行只有「删除」，多模式行再给每个命中主机一个「只删除 <host>」。首次显示时自动列出一次；之后只在点「重新加载」或删除后重新列出，因为工作区每次整树重建（例如弹出 toast）都会回调 `pageDidAppear`。提示写到外壳所属窗口的 `AppModel.notice`。
 - 写入修复：改写走 `atomic_file::write`，先顺着符号链接找到真实文件，在它的目录写临时文件（`create_new`）再 rename，保留原权限。之前 `replace()` 直接 rename 会把指向 dotfiles 的 `~/.ssh/known_hosts` 链接换成普通文件。
 
+## 主机连接的右侧详情
+
+打开原生 SSH 标签时自动展开右侧 Inspector。`TerminalSession.remoteInspectionContext` 从持久化的
+`NativeSSHPaneSpec` 投影 `.nativeSSH(spec, label)`，无需先手敲 `ssh` 或配置成远程机器。Info 与 Files
+复用远程机器的监控与文件控制器，旁路通过 broker 的非交互 exec 复用连接；没有 OSC 7 时先浏览
+远端登录目录，收到目录上报后跟随远端路径。具体状态与边界见 [详情面板](details-panel-domain.md#远端模式服务器文件与服务器监控)。
+
 ## 主机标签
 
 - 模型：`SSHHostProfile.tags: [String]?`，nil 表示没有标签。默认项不使用标签，`SSHHostStore.normalized` 会把它清成 nil，标签也不参与继承。

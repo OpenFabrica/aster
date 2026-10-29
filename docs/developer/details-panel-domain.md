@@ -104,11 +104,13 @@ Content / Inspector 之间绘制 1pt 分隔线，使用 `interface.border`（含
 
 - 模式的唯一来源是当前聚焦 Pane 的 `TerminalSession.remoteInspectionContext`
   （`AsterCore/RemoteInspection/RemoteInspectionContext.swift`）：`.ssh(invocation, endpoint)`
-  表示用户在本地 Pane 手敲 `ssh …`，`.managed(reference, label, pid)` 表示远程工作模式的受管
+  表示用户在本地 Pane 手敲 `ssh …`，`.nativeSSH(spec, label)` 表示主机页或快速连接打开的原生 SSH 标签，
+  `.managed(reference, label, pid)` 表示远程工作模式的受管
   远端终端，nil 即本地模式。不按命令行文本、标题或主机名猜测远端。
 - 远端目录来自远端 Shell 上报的 OSC 7，由 `RemoteWorkingDirectoryReport.parse` 判成
-  `.local` / `.remote` / `.invalid`；只有 `.remote` 写入 `TerminalSession.remoteWorkingDirectory`。
-  `.local` 继续走 Ghostty 校验后的 `GHOSTTY_ACTION_PWD`，同一次上报不得投递两次。
+  `.local` / `.remote` / `.invalid`；手敲 `ssh` 的本地 Pane 只有 `.remote` 写入 `TerminalSession.remoteWorkingDirectory`。
+  `.local` 继续走 Ghostty 校验后的 `GHOSTTY_ACTION_PWD`，同一次上报不得投递两次。原生 SSH 标签直接运行
+  远端 Shell，因此 localhost 或省略主机名的目录上报也记为远端目录，保留原来的本机路径基准。
 - 远端上下文变化走独立的 `TerminalTabItem.remoteContextChanged`，**不复用**
   `workingDirectoryChanged`：后者驱动 Git 与 History 页执行本地 git 与本地 SQLite 查询，把远端
   路径喂给它们等于拿远端路径当本机路径用。Git 页在远端模式显示「远端不支持」占位。
@@ -119,6 +121,8 @@ Content / Inspector 之间绘制 1pt 分隔线，使用 `interface.border`（含
 
 - `awaitingIntegration`：远端模式但还没收到远端 cwd。给 1.5 秒宽限再显示横幅，避免登录过程中
   闪一下提示。横幅提供「安装远端集成…」「浏览 $HOME」「输入路径…」。
+- 原生 SSH 标签没有目录上报时，Files 自动列远端登录目录（空参数由远端脚本解析为 `$HOME`）；收到
+  OSC 7 后跟随远端目录。新开原生 SSH 标签自动展开 Inspector，Info / Files 复用现有远端控制器。
 - `loading`：旧列表保留为不可交互视觉帧，与本地 Files 的刷新语义一致。
 - `listed`：目录优先 + 名称排序、Find 过滤与隐藏项开关复用本地控件。隐藏项由远端全量下发，
   本地按 `filesShowHidden` 过滤，不为切换开关重跑远端脚本。
@@ -137,7 +141,10 @@ Content / Inspector 之间绘制 1pt 分隔线，使用 `interface.border`（含
 
 ### 旁路通道与连接复用
 
-- `RemoteSideChannel` 是两种场景唯一的调用面（`run` / `download` / `upload`）。场景 A 用
+- 原生 SSH 标签的旁路按 `NativeSSHPaneSpec` 生成 `aster-ssh client --host-id/--target --no-prompt`，
+  与前台复用 broker；可执行文件与 socket 来自当前 `SSHEngineRouting`，引擎不可用或主机已删除时
+  返回通道不可用，不回退 OpenSSH。缓存键为 `native:host:<UUID>` 或 `native:target:<target>`，标签改名不改变身份。
+- `RemoteSideChannel` 是各类连接唯一的调用面（`run` / `download` / `upload`）。场景 A 用
   `SSHControlPathInvocation` 复用用户前台 `ssh` 已建立的 ControlMaster socket；场景 B 直接复用
   `RemoteSessionTransport` 的私有配置。
 - 场景 A 的固定 `-o` 选项（`ControlMaster=no`、`ControlPath=<dir>/%C`、`BatchMode=yes`、

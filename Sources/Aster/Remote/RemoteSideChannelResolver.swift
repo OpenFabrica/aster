@@ -1,4 +1,4 @@
-// 把 Pane 的远端上下文翻译成可执行的旁路通道。两种场景的差异只在这里收敛一次。
+// 把 Pane 的远端上下文翻译成可执行的旁路通道。各类连接的差异只在这里收敛一次。
 
 import AsterCore
 import Foundation
@@ -16,6 +16,8 @@ enum RemoteSideChannelResolver {
   /// 不参与 key，所以这里传占位值也不影响结果。
   static func channelKey(for context: RemoteInspectionContext) -> String {
     switch context {
+    case .nativeSSH(let spec, _):
+      return "native:" + (spec.hostID.map { "host:" + $0.uuidString } ?? "target:" + (spec.target ?? ""))
     case .ssh(let invocation, let endpoint):
       return RemoteSideChannel.ssh(
         invocation: invocation,
@@ -37,6 +39,23 @@ enum RemoteSideChannelResolver {
   @MainActor
   static func resolve(_ context: RemoteInspectionContext) -> RemoteSideChannel? {
     switch context {
+    case .nativeSSH(let spec, let label):
+      // 原生标签与前台 client 共用 broker；不降级 OpenSSH，也不在旁路弹认证表单。
+      guard let endpoint = SSHEngineRouting.shared.nativeEndpoint else { return nil }
+      if let hostID = spec.hostID,
+        SSHHostDirectory.shared.host(hostID).map({ !$0.isDefaults }) != true
+      { return nil }
+      return RemoteSideChannel(
+        identity: RemoteSideChannelIdentity(key: channelKey(for: context), label: label),
+        sshArguments: { command in
+          NativeSSHClientInvocation(
+            endpoint: endpoint, target: spec.clientTarget, noPrompt: true,
+            remoteCommand: command
+          ).arguments()
+        },
+        runner: RemoteSSHProcessRunner(executablePath: endpoint.executablePath),
+        streamRunner: RemoteSSHStreamRunner(executablePath: endpoint.executablePath)
+      )
     case .ssh(let invocation, let endpoint):
       // 场景 A 完全依赖 ControlMaster socket 目录：目录校验不过就放弃复用，
       // 绝不降级去建一条新的交互连接（那会在后台弹口令提示）。

@@ -2604,6 +2604,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 绑定原生 SSH 目标。surface 创建时据此把启动命令换成 `aster-ssh client`。
   func bindNativeSSH(_ spec: NativeSSHPaneSpec?) {
     nativeSSH = spec
+    if spec != nil { currentWorkingDirectoryIsLocal = false }
   }
 
   /// 是否为本机受管终端（「本机后台保活」）：有受管引用且协调器走本机传输。
@@ -4527,6 +4528,21 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
       applyManagedRemoteWorkingDirectory(report, machineLabel: machineLabel)
       return
     }
+    if let nativeSSH {
+      // 原生 Pane 直接运行远端 Shell；localhost 或省略 host 的 OSC 7 也属于服务器。
+      currentWorkingDirectoryIsLocal = false
+      let remote: RemoteWorkingDirectory
+      switch report {
+      case .remote(let value): remote = value
+      case .local(let path):
+        remote = RemoteWorkingDirectory(
+          host: NativeSSHPaneLaunch.defaultTitle(for: nativeSSH, hosts: SSHHostDirectory.shared.hosts),
+          path: path)
+      case .invalid: return
+      }
+      if remoteWorkingDirectory != remote { remoteWorkingDirectory = remote }
+      return
+    }
     switch report {
     case .remote(let remote):
       currentWorkingDirectoryIsLocal = false
@@ -4559,8 +4575,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     if currentWorkingDirectory != remote.path { currentWorkingDirectory = remote.path }
   }
 
-  /// 详情面板的远端上下文投影。受管远端优先，其次是本地 Pane 内手敲的 `ssh`；
-  /// 两者都不成立时返回 nil，面板保持本机模式。
+  /// 详情面板的远端上下文投影：受管远端、原生 SSH 标签、本地 Pane 内手敲的 `ssh`。
+  /// 没有远端连接时返回 nil，面板保持本机模式。
   var remoteInspectionContext: RemoteInspectionContext? {
     if let managedTerminal, let label = remoteManagedMachineLabel {
       let coordinator = ManagedTerminalCoordinatorRegistry.coordinator(for: managedTerminal)
@@ -4569,6 +4585,11 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
         label: label,
         pid: coordinator.shellProcessIdentifier(for: managedTerminal)
       )
+    }
+    if let nativeSSH {
+      return .nativeSSH(
+        spec: nativeSSH,
+        label: NativeSSHPaneLaunch.defaultTitle(for: nativeSSH, hosts: SSHHostDirectory.shared.hosts))
     }
     if let endpoint = sshRemoteEndpoint, let invocation = sshInvocation {
       return .ssh(invocation: invocation, endpoint: endpoint)
@@ -6164,6 +6185,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     let endpoint = Result { try NativeSSHPaneLaunch.endpointProvider() }
     switch NativeSSHPaneLaunch.plan(for: spec, endpoint: endpoint, hosts: SSHHostDirectory.shared.hosts) {
     case .native(let executable, let arguments):
+      currentWorkingDirectoryIsLocal = false
       view.command = GhosttyConfiguration.launchCommand(shell: executable, arguments: arguments)
       // 票据一次性、120 秒有效：后台标签的 surface 可能很久后才创建，所以在创建时现签，
       // surface 重建（重新连接）也会再签一张。
