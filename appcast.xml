@@ -3,6 +3,43 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.27</title>
+            <pubDate>Thu, 29 Oct 2026 14:01:09 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>46</sparkle:version>
+            <sparkle:shortVersionString>0.6.27</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 新功能
+
+- **工具箱与插件**：一组随手用的小工具，也能装自己写的插件。
+  - 打开方式：`⇧⌘O` 后按 `⌘U` 进「工具」页，或选「窗口 → 工具面板」。可以在「设置 → 工具」里给工具面板设全局快捷键（`⌥Space` 或 `⌃⌥Space`）。
+  - 直接粘贴一段文字，面板会列出能处理它的工具，结果直接显示，按 `↩` 复制。
+  - 内置工具：时间戳、Base64、URL 编解码、哈希、UUID 与随机串、本机监听端口、JSON 格式化与树视图；网页工具：JWT 解析、正则测试、文本对比、颜色转换、密码生成。
+  - 工具面板可以钉在屏幕上并拖动；工具也可以开在独立窗口里，和终端并排。
+- **密码生成**：选规则或自定义长度和字符，点「复制」才记进历史。历史加密保存在本机，可以搜索、修改和删除；复制时剪贴板标成机密内容。
+- **便笺**：桌面上的彩色小纸，自动保存，支持字体与格式，快捷键和 macOS「便笺」一样。按 `⌘↩` 把便笺里的文字发到当前终端 Pane 并回车执行。
+- **插件状态条**：插件可以把状态条放到标签顶部 / 底部、当前 Pane 底部、Pane 顶部、窗口顶部 / 底部，或竖排侧栏。在「设置 → 工具」的「视图」里开关或换位置。状态条可以拖高到 8 行，放不下时滚动。
+  - **Git 状态条**：显示分支、领先 / 落后的提交数和改动文件数，点一下预填 `git push` / `git pull --ff-only`。
+  - **Codex / Claude Code 速率条**：在运行 Agent 的 Pane 底部显示模型、状态、输入 / 输出速率和累计用量。需要 `python3`。
+  - **系统状态条**：窗口底部显示 CPU、GPU、温度、风扇、内存、磁盘、网速和电池，超过阈值时变色提醒。
+  - 第一次使用插件前，Aster 会列出它要的权限，由你确认。
+- **JSON 文件**：文件 Pane 打开 `.json` 可以切到树视图，也可以一键格式化或压缩。
+- **图片预览**：文件浏览器选中图片时直接在下方预览，`↑`/`↓` 换一张。
+
+## 修复
+
+- **重启后找回 Agent**：重启 Aster 后，受管终端里正在运行的 Agent 能重新识别。
+- **分屏首次布局**：新分屏按比例分配宽度，切回标签后 Agent 输入框不再错乱。
+- **拖动便笺时终端不闪**：机器列表变化不再整棵重建。
+- **补全**：只有一个候选时，按一次 Tab 就接受。
+- **文件 Pane**：切换标签后正文不再挤成窄列。
+- **主机管理**：布局更整齐，已知主机列表分页显示。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.27/Aster-0.6.27.dmg" length="44847147" type="application/octet-stream" sparkle:edSignature="b6LpnCfkhWI4dLescHIsbOd0lS1EXJFMgr69XTa8217xpAtxD4O8MnP2dvdX47oHm5mkgfMG+kOdsLxuw83vCA=="/>
+        </item>
+        <item>
             <title>0.6.26</title>
             <pubDate>Mon, 26 Oct 2026 09:22:53 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -94,27 +131,6 @@
 - **任务进度更新不再打断目录同步和历史滚动**：终端程序上报标准任务进度时，侧栏项目目录仍跟随 Shell 当前目录，正在查看的历史输出也不会因此被重置到底部。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.23/Aster-0.6.23.dmg" length="42390501" type="application/octet-stream" sparkle:edSignature="ErGcHAMAkDYwE5/sBEQ1g1Sm/jQLz7zCLAoHwp04OicdgqVpnhzrfArs4DJCyuaAN/CopJHbkXDKiSMQSlXkBQ=="/>
-        </item>
-        <item>
-            <title>0.6.22</title>
-            <pubDate>Sat, 17 Oct 2026 20:39:40 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>41</sparkle:version>
-            <sparkle:shortVersionString>0.6.22</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 改进
-
-- **Agent 终端新的控制方式**：Claude Code、Codex 等 agent 在 SSH 主机上用的浮动终端，顶部那排按钮换成了底部一个深色控制胶囊。胶囊上写着是哪个 agent、哪台主机、现在在做什么，按住按钮以外的地方可以拖到别处。
-- **Agent 运行时不会被误输入打断**：agent 连接或运行命令时，终端四周亮起一圈蓝光，这时终端不接受点击和键盘输入，防止你的输入和 agent 的命令混在一起。滚轮照样能翻看输出。
-- **「暂停 agent」改名为「接管」**：点「接管」后蓝光消失，agent 暂停，你可以直接在终端里打字；点「交还 agent」让它继续。「中断」不用先接管。
-
-## 修复
-
-- **打开链接后不再残留下划线和网址提示**：按住 Command 点链接打开后，终端里的链接下划线、手形光标和左下角的网址提示有时会一直留着，还会随着输出不停刷新。现在切到别的窗口或弹出确认框时会自动清掉。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.22/Aster-0.6.22.dmg" length="42400646" type="application/octet-stream" sparkle:edSignature="sPlxH8J4tctwI2VCaiZFArWu0bOcyKEjKeb+8lKmiq2LT8eft6yPxR/pcKuzRQkDrvGDoEaaL02CQ9MC4yR1AQ=="/>
         </item>
     </channel>
 </rss>
