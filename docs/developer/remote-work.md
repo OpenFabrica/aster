@@ -71,6 +71,8 @@ Ghostty surface 启动本地 `aster-session bridge` 子进程；bridge 使用 ra
 
 回归检查：`zig test src/delta_filter.zig`（在 `SessionRuntime/` 执行）覆盖进度分类、全部切点和副作用拒绝；`python3 SessionRuntime/tests/bridge_progress.py <aster-session绝对路径>` 启动独立服务与真实 PTY bridge，断言同批目录与进度均到达、连续更新不包含 RIS。`ghosttyWorkingDirectoryFollowsShellAfterRestore` 另行覆盖原生新建 / 快照恢复 Pane 的实际 `cd` → Session → 标签目录链路；`ghosttyManagedProgressPreservesDirectoryAndScrollback` 在真实 AppKit 窗口断言侧栏分组与上滚视口，运行时可用 `ASTER_TEST_SESSION_BINARY` 指定待比较的二进制。
 
+画面事务尚在发送时，`surface_service.zig` 的每个订阅继续收集后续连续、安全的绘制，等上一份事务实际发送完成后合并为下一份增量。不能只在事务完成时读取 `Session.delta_bytes`：它每轮都会被替换，中间绘制一旦丢失，就会反复退回 RIS 全量快照。待发增量每订阅上限 64 KiB，最多 64 个订阅合计 4 MiB；不安全序列、序号断层或超限仍退回完整快照，保持原有副作用隔离。`python3 SessionRuntime/tests/surface_pending.py <aster-session绝对路径>` 用真实服务、大快照背压和多轮 PTY 更新验证正常合并与不安全/超限降级。真实 Claude CLI 另可显式验收：设置 `ASTER_CLAUDE_PROBE_BINARY` 与指向已信任项目的 `ASTER_CLAUDE_PROBE_CWD` 后运行 `./scripts/test.sh --filter managedClaudeAcceptsKeyboardWithoutSnapshotLoop`；它使用独立服务与不显示的 AppKit 窗口，检查文字、按键事件与空闲时的重置次数，不发送提问。
+
 终端池持有每个 PTY/VT 的唯一所有权，不以客户端引用计数决定是否销毁。公开创建适配层先解析
 执行路径并合并执行机器的环境，再传入独立 argv/envp；启动失败不占槽位。默认限制为 32 个记录、
 单屏 262144 单元及 4096 列，超限返回资源错误，不分配超大 VT。终端池的启动等待须通过待启动

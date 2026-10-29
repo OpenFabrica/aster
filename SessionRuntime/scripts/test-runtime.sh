@@ -10,6 +10,7 @@ python3 tests/probe.py zig-out/bin/aster-session
 python3 tests/handshake_gate.py zig-out/bin/aster-session
 python3 tests/snapshot_gate.py zig-out/bin/aster-session
 python3 tests/bridge_pty.py zig-out/bin/aster-session
+python3 tests/surface_pending.py zig-out/bin/aster-session
 
 python3 tests/graphics_service.py zig-out/bin/aster-session
 

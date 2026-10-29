@@ -10,7 +10,40 @@ const ids = @import("service_identity.zig");
 const Geometry = @import("geometry.zig").Geometry;
 const ID = interests.ID;
 const queue_bytes = 8 * 1024 * 1024;
-const Producer = struct { id: ID, stream: streams.Stream, queued: bool = false };
+const Producer = struct {
+    id: ID,
+    stream: streams.Stream,
+    queued: bool = false,
+    observed_sequence: ?u64 = null,
+    pending_base: ?u64 = null,
+    /// 正在传输的事务之后产生的绘制。每个订阅最多 64 KiB（64 个订阅合计最多 4 MiB）；
+    /// 不安全序列、序号断层或超过上限时清空，继续使用既有全量快照恢复。
+    pending_delta: std.ArrayList(u8) = .empty,
+
+    fn observe(self: *Producer, allocator: std.mem.Allocator, session: *Session) !void {
+        if (self.observed_sequence == session.output_sequence) return;
+        if (self.pending_base != null and self.observed_sequence == session.delta_base and
+            session.delta_safe and session.delta_bytes.items.len <= streams.maximum_delta_bytes - self.pending_delta.items.len)
+        {
+            try self.pending_delta.appendSlice(allocator, session.delta_bytes.items);
+        } else {
+            self.pending_delta.clearRetainingCapacity();
+            self.pending_base = null;
+        }
+        self.observed_sequence = session.output_sequence;
+    }
+
+    fn captured(self: *Producer, sequence: u64) void {
+        self.pending_delta.clearRetainingCapacity();
+        self.pending_base = sequence;
+        self.observed_sequence = sequence;
+    }
+
+    fn deinit(self: *Producer, allocator: std.mem.Allocator) void {
+        self.pending_delta.deinit(allocator);
+        self.stream.deinit();
+    }
+};
 
 /// Session-thread adapter. Transport/source failures release only a surface;
 /// attachments and their PTYs remain owned by terminal_service.
@@ -29,7 +62,7 @@ pub const Service = struct {
         return self;
     }
     pub fn deinit(self: *Service) void {
-        for (self.producers.items) |*p| p.stream.deinit();
+        for (self.producers.items) |*p| p.deinit(self.allocator);
         self.producers.deinit(self.allocator);
         self.registry.deinit();
     }
@@ -96,7 +129,7 @@ pub const Service = struct {
     fn removeProducer(self: *Service, stream_id: ID) void {
         for (self.producers.items, 0..) |p, i| if (std.mem.eql(u8, &p.id, &stream_id)) {
             var removed = self.producers.orderedRemove(i);
-            removed.stream.deinit();
+            removed.deinit(self.allocator);
             return;
         };
     }
@@ -146,6 +179,12 @@ pub const Service = struct {
     fn advance(self: *Service, stream_id: ID, now_ms: u64) !void {
         const interest = self.registry.find(stream_id).?;
         const p = self.producer(stream_id).?;
+        const entry = self.terminals.pool.find(interest.attachment.terminal_id) orelse return error.AttachmentNotFound;
+        const session = entry.session;
+        // 必须在事务仍在发送、或 socket 队列尚未排空时也观察每轮输出。Session 的
+        // delta_bytes 下一轮就会被替换；只在上份事务完成后才读取它会丢掉中间绘制，
+        // 把持续刷新的 TUI 变成每秒几十次 RIS 全屏重置。
+        try p.observe(self.allocator, session);
         const budget = self.reactor.availableSurfaceWireBytes(interest.surface_generation) orelse return error.ConnectionClosed;
         try p.stream.tick(now_ms);
         if (p.queued) {
@@ -154,8 +193,6 @@ pub const Service = struct {
             p.queued = false;
         }
         if (p.stream.ownedBytes() == 0) {
-            const entry = self.terminals.pool.find(interest.attachment.terminal_id) orelse return error.AttachmentNotFound;
-            const session = entry.session;
             try checkGeometry(session, interest.geometry);
             if (!interest.needs_snapshot and p.stream.completed_sequence == session.output_sequence) {
                 if (session.eof and session.exit_status != null and session.cleanupComplete()) {
@@ -172,12 +209,13 @@ pub const Service = struct {
             for (self.producers.items) |other| used += other.stream.ownedBytes();
             const remaining = streams.maximum_snapshot_bytes - used;
             if (remaining == 0) return;
-            const delta = !interest.needs_snapshot and session.delta_safe and p.stream.completed_sequence != null and p.stream.completed_sequence.? == session.delta_base and session.delta_bytes.items.len != 0 and session.delta_bytes.items.len <= streams.maximum_delta_bytes;
+            const delta = !interest.needs_snapshot and p.pending_base != null and
+                p.stream.completed_sequence == p.pending_base and p.pending_delta.items.len != 0;
             if (delta) {
-                if (session.delta_bytes.items.len > remaining) return;
-                const bytes = try self.allocator.dupe(u8, session.delta_bytes.items);
+                if (p.pending_delta.items.len > remaining) return;
+                const bytes = try self.allocator.dupe(u8, p.pending_delta.items);
                 errdefer self.allocator.free(bytes);
-                try p.stream.beginDelta(bytes, session.output_sequence, session.delta_base, now_ms);
+                try p.stream.beginDelta(bytes, session.output_sequence, p.pending_base.?, now_ms);
             } else {
                 // Reserve remaining global budget before capture. A temporarily
                 // insufficient budget waits for other transactions to complete.
@@ -194,6 +232,7 @@ pub const Service = struct {
                 errdefer self.allocator.free(owned);
                 try p.stream.beginSnapshot(owned, session.output_sequence, now_ms);
             }
+            p.captured(session.output_sequence);
             interest.needs_snapshot = false;
         }
         if (try p.stream.next(budget, now_ms)) |frame| {
