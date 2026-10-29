@@ -76,9 +76,9 @@ public enum ToolViewSlot: String, Codable, CaseIterable, Sendable {
   /// 设置页显示「本版本暂不支持这个位置」。
   public var isImplemented: Bool {
     switch self {
-    case .windowTop, .windowBottom, .sidebarSection, .tabTop, .tabBottom, .paneBottom, .activePaneBottom, .inspectorPanel:
+    case .windowTop, .windowBottom, .sidebarSection, .tabTop, .tabBottom, .paneHeader, .paneBottom, .activePaneBottom,
+      .inspectorPanel:
       true
-    case .paneHeader: false
     }
   }
 

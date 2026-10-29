@@ -76,6 +76,10 @@ final class ToolBarItemButton: NSControl {
   }
   /// 点击（鼠标松开在按钮内或辅助功能按下）。
   var onPress: (() -> Void)?
+  /// 是否显示文字。`pane.header` 只放图标，关掉后只剩图标，没有图标的项目随之没有内容。
+  var showsLabel = true {
+    didSet { if showsLabel != oldValue { configure(content) } }
+  }
 
   private let iconView = NSImageView()
   /// 失败项的第二个图标（警告三角）。
@@ -125,6 +129,7 @@ final class ToolBarItemButton: NSControl {
       toolTip = L("插件「\(pluginName)」需要授权才能运行")
       setAccessibilityLabel(toolTip)
     }
+    if !showsLabel { label.stringValue = "" }
     label.isHidden = label.stringValue.isEmpty
     applyColors()
     invalidateIntrinsicContentSize()

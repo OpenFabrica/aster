@@ -479,9 +479,11 @@ final class ActivePaneHostView: NSView {
   private var closeButton: PaneCloseButton?
   private var zoomButton: PaneZoomButton?
   private var liveViewButton: PaneLiveViewButton?
+  /// 插件 pane.header 图标组：排在自带按钮左边，随顶条一起淡入。由扩展宿主按 Pane 长期持有。
+  private var headerBar: ToolPaneHeaderView?
   /// 是否装了任何顶条控件；没有控件时不建感应带，也不做显隐同步。
   private var hasChrome: Bool {
-    dragHandle != nil || closeButton != nil || zoomButton != nil || liveViewButton != nil
+    dragHandle != nil || closeButton != nil || zoomButton != nil || liveViewButton != nil || headerBar != nil
   }
   private var handleTrackingArea: NSTrackingArea?
   /// 顶条控件当前是否淡入；只由 `updateChromeReveal` 写入。
@@ -798,6 +800,7 @@ final class ActivePaneHostView: NSView {
     closeButton?.isRevealed = revealed
     zoomButton?.isRevealed = revealed
     liveViewButton?.isRevealed = revealed
+    if let headerBar, headerBar.superview === self { headerBar.isRevealed = revealed }
   }
 
   /// 顶条控件安装后把内容整体下移,让胶囊/按钮与内容之间留出固定间距,
@@ -898,6 +901,32 @@ final class ActivePaneHostView: NSView {
     // 会让显隐判定一直为假。AppKit 在随后的布局里会按真实 bounds 调 `updateTrackingAreas`。
     syncChromeReveal()
   }
+
+  /// 安装或移除插件 pane.header 图标组：贴在最左一个自带按钮（实时画面 / 缩放 / 关闭）左边，与它们同一行。
+  /// 必须在自带按钮之后调用。和实时画面按钮一样不下移内容：图标只在指针靠近顶边时淡入，浮在终端上方，
+  /// 为它让出一行会让终端 resize。语义同 `setExtensionBar`：图标组跨整树重建被新 host 接走，
+  /// 只在它确实挂在本 host 下时才移除。
+  func setHeaderBar(_ header: ToolPaneHeaderView?) {
+    if header == nil, headerBar == nil { return }
+    if let old = headerBar, old !== header, old.superview === self { old.removeFromSuperview() }
+    headerBar = header
+    guard let header else { return }
+    if header.superview !== self {
+      addSubview(header)
+      let anchor = liveViewButton?.leadingAnchor ?? zoomButton?.leadingAnchor ?? closeButton?.leadingAnchor
+      NSLayoutConstraint.activate([
+        header.trailingAnchor.constraint(equalTo: anchor ?? trailingAnchor, constant: anchor == nil ? -6 : -4),
+        header.topAnchor.constraint(equalTo: topAnchor),
+        header.heightAnchor.constraint(equalToConstant: Self.handleRevealHeight),
+      ])
+    }
+    // 新挂上的图标组继承当前显隐状态；隐藏时 `hitTest` 返回 nil，不挡终端点击。
+    header.isRevealed = chromeRevealed
+    syncChromeReveal()
+  }
+
+  /// 当前挂着的插件 pane.header 图标组（测试用）。
+  var installedHeaderBar: ToolPaneHeaderView? { headerBar?.superview === self ? headerBar : nil }
 
   /// 快捷键提示随设置实时刷新，不改动缩放真值或按钮身份。
   func updateZoomShortcut(_ shortcut: String) {

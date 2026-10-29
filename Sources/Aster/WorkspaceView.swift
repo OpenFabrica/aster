@@ -1018,6 +1018,7 @@ final class WorkspaceViewController: NSViewController {
     for paneID in paneHosts.keys {
       installAgentHostDock(for: paneID, refocusIfLost: false)
       installExtensionPaneBar(for: paneID)
+      installExtensionPaneHeader(for: paneID)
     }
     installExtensionActivePaneBar()
     extensionHost.workspaceDidRefresh()
@@ -2836,6 +2837,12 @@ final class WorkspaceViewController: NSViewController {
   /// 条自带必需的高度约束（没有项目时归零），这里不另给高度。
   private func installExtensionPaneBar(for paneID: UUID) {
     paneHosts[paneID]?.setExtensionBar(extensionHost.paneBar(for: paneID))
+  }
+
+  /// 插件 pane.header 图标组：扩展宿主按 Pane 长期持有同一实例，只给终端 Pane；装在顶条自带按钮左边。
+  /// 叶子建好、自带按钮装完之后才调，图标组才能排到它们左边。
+  private func installExtensionPaneHeader(for paneID: UUID) {
+    paneHosts[paneID]?.setHeaderBar(extensionHost.paneHeader(for: paneID))
   }
 
   /// 插件 activePane.bottom 条：扩展宿主持有的同一实例挂到选中标签的活动终端 Pane 底部。焦点切换时只调这里，

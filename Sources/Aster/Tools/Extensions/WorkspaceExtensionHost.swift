@@ -23,7 +23,8 @@ extension ToolCenter: ToolViewCatalog {}
 /// 界面扩展宿主。只在主线程使用。
 @MainActor
 final class WorkspaceExtensionHost: ToolPanelProviding {
-  /// 本版本由宿主挂 bar 的标签范围位置（`pane.bottom` 每 Pane 一条，见 `paneBar(for:)`；
+  /// 本版本由宿主挂 bar 的标签范围位置（`pane.bottom` 每 Pane 一条，见 `paneBar(for:)`；`pane.header` 每 Pane
+  /// 一组图标，见 `paneHeader(for:)`；
   /// `inspector.panel` 由详情面板经 `ToolPanelProviding` 取用）。
   /// `window.*` 与 `activePane.bottom` 的上下文与标签范围相同（窗口选中标签的活动 Pane），共用调度器的 `context`；
   /// `activePane.bottom` 只有一条，由工作区挂到活动终端 Pane 底部，见 `activePaneBarPaneID()`。
@@ -44,8 +45,12 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   private(set) var inspectorPanelEntries: [ToolViewEntry] = []
   /// 调度中的 bar 视图（可挂载、位置在 `mountedBarSlots`），按目录顺序。
   private(set) var barEntries: [ToolViewEntry] = []
-  /// 可挂载的 `pane.bottom` 视图；每个建过条的终端 Pane 各一份 feed。
+  /// 可挂载的 `pane.bottom` 视图；每个建过视图的终端 Pane 各一份 feed。
   private(set) var paneEntries: [ToolViewEntry] = []
+  /// 可挂载的 `pane.header` 视图；同上，与 `paneEntries` 共用 Pane 的上下文。
+  private(set) var paneHeaderEntries: [ToolViewEntry] = []
+  /// 两种 pane 范围视图，调度、点击与查找都一起处理。
+  private var allPaneEntries: [ToolViewEntry] { paneEntries + paneHeaderEntries }
   /// pane feed 键 → Pane。
   private var paneFeedPanes: [String: UUID] = [:]
   /// 当前布局能显示侧栏插件区块（竖排标签栏且标签栏可见）。由工作区在每次整树重建前设置；
@@ -61,9 +66,11 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   private var sidebarPanelHeights: [String: CGFloat] = [:]
   private var sidebarRemountScheduled = false
   private lazy var paneBars: ToolPaneBars = {
-    let bars = ToolPaneBars { [weak self] paneID in
-      self?.makeBar(slot: .paneBottom, height: self?.paneBarHeight ?? 24) ?? ToolBarView(slot: .paneBottom, height: 24)
-    }
+    let bars = ToolPaneBars(
+      makeBar: { [weak self] _ in
+        self?.makeBar(slot: .paneBottom, height: self?.paneBarHeight ?? 24) ?? ToolBarView(slot: .paneBottom, height: 24)
+      },
+      makeHeader: { [weak self] _ in self?.makeHeader() ?? ToolPaneHeaderView() })
     bars.onBranchChange = { [weak self] paneID in self?.updatePaneContext(paneID) }
     return bars
   }()
@@ -155,6 +162,9 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 某个 Pane 已建好的 pane.bottom 条（测试用）。
   func existingPaneBar(for paneID: UUID) -> ToolBarView? { paneBars.existingBar(for: paneID) }
 
+  /// 某个 Pane 已建好的 pane.header 图标组（测试用）。
+  func existingPaneHeader(for paneID: UUID) -> ToolPaneHeaderView? { paneBars.existingHeader(for: paneID) }
+
   /// 某个 Pane 当前的 pane 上下文（测试用）。
   func paneContext(for paneID: UUID) -> ToolBarContext? { paneBars.contexts[paneID] }
 
@@ -166,18 +176,38 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   /// 某个 Pane 的 pane.bottom 条：没有可挂载视图、Pane 不在选中标签或不是终端 Pane（工具、文件 Pane）时为 nil。
   /// 同一 Pane 跨整树重建复用同一实例，交出前先从旧父视图摘下；第一次挂载时建该 Pane 的 feed。
   func paneBar(for paneID: UUID) -> NSView? {
-    guard !isTornDown, !paneEntries.isEmpty, let model,
-      model.selectedTab?.layout.descriptor(forPane: paneID) != nil,
-      ToolPaneBars.terminalTab(of: paneID, model: model) != nil
-    else { return nil }
+    guard !isTornDown, !paneEntries.isEmpty, canMountPaneView(paneID) else { return nil }
+    let isRegistered = paneBars.contains(paneID)
     let (bar, isNew) = paneBars.bar(for: paneID)
-    if isNew {
-      _ = paneBars.updateContext(for: paneID, model: model)
-      syncFeeds()
-      renderPane(paneID)
-    }
+    paneViewDidAppear(paneID, isRegistered: isRegistered, isNew: isNew)
     bar.removeFromSuperview()
     return bar
+  }
+
+  /// 某个 Pane 的 pane.header 图标组：规则同 `paneBar(for:)`，由工作区装到 Pane 顶条上。
+  func paneHeader(for paneID: UUID) -> ToolPaneHeaderView? {
+    guard !isTornDown, !paneHeaderEntries.isEmpty, canMountPaneView(paneID) else { return nil }
+    let isRegistered = paneBars.contains(paneID)
+    let (header, isNew) = paneBars.header(for: paneID)
+    paneViewDidAppear(paneID, isRegistered: isRegistered, isNew: isNew)
+    header.removeFromSuperview()
+    return header
+  }
+
+  /// pane 范围视图只挂在选中标签的终端 Pane 上（工具、文件 Pane 不挂）。
+  private func canMountPaneView(_ paneID: UUID) -> Bool {
+    guard let model else { return false }
+    return model.selectedTab?.layout.descriptor(forPane: paneID) != nil
+      && ToolPaneBars.terminalTab(of: paneID, model: model) != nil
+  }
+
+  /// 新建了 pane 视图：Pane 第一次登记时算上下文、建 feed；视图新建时画一次当前结果。
+  private func paneViewDidAppear(_ paneID: UUID, isRegistered: Bool, isNew: Bool) {
+    if !isRegistered, let model {
+      _ = paneBars.updateContext(for: paneID, model: model)
+      syncFeeds()
+    }
+    if isNew { renderPane(paneID) }
   }
 
   /// 工作区整树重建之后：重新订阅当前标签的局部事件、重算上下文（没变不动）、刷新配色与可见性。
@@ -218,7 +248,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     }
     var index: [String: UUID] = [:]
     for paneID in paneBars.paneIDs {
-      for entry in paneEntries {
+      for entry in allPaneEntries {
         let key = ToolBarScheduler.paneFeedKey(entryID: entry.id, paneID: paneID)
         index[key] = paneID
         specs.append(ToolBarFeedSpec(key: key, entry: entry, paneID: paneID, context: paneBars.contexts[paneID]))
@@ -338,13 +368,22 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
       $0.isMountable && $0.contribution.kind == .bar && Self.mountedBarSlots.contains($0.slot)
     }
     paneEntries = all.filter { $0.isMountable && $0.contribution.kind == .bar && $0.slot == .paneBottom }
-    // 没有 pane 视图了：条全部释放，下次整树重建时 `paneBar(for:)` 返回 nil，Pane 宿主随之撤下。
-    if paneEntries.isEmpty { paneBars.removeAll() }
+    paneHeaderEntries = all.filter { $0.isMountable && $0.contribution.kind == .bar && $0.slot == .paneHeader }
+    // 没有 pane 视图了：视图全部释放，下次整树重建时 `paneBar(for:)` / `paneHeader(for:)` 返回 nil，Pane 宿主随之撤下。
+    // 只剩一种时只释放另一种，Pane 的上下文与分支监听留给还在的那种。
+    if allPaneEntries.isEmpty {
+      paneBars.removeAll()
+    } else if paneEntries.isEmpty {
+      paneBars.removeBars()
+    } else if paneHeaderEntries.isEmpty {
+      paneBars.removeHeaders()
+    }
     syncFeeds()
     var slots = Set(barEntries.map(\.slot))
     if !paneEntries.isEmpty { slots.insert(.paneBottom) }
+    if !paneHeaderEntries.isEmpty { slots.insert(.paneHeader) }
     if !sidebarEntries.isEmpty { slots.insert(.sidebarSection) }
-    for slot in slots where slot != .paneBottom && slot != .sidebarSection {
+    for slot in slots where Self.mountedBarSlots.contains(slot) {
       let height = barEntries.first { $0.slot == slot }?.contribution.barHeight(in: slot) ?? 26
       if let bar = bars[slot] { bar.setHeight(height) } else { bars[slot] = makeBar(slot: slot, height: height) }
     }
@@ -383,6 +422,16 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     return bar
   }
 
+  /// 建一个 pane.header 图标组并接上点击回调。
+  private func makeHeader() -> ToolPaneHeaderView {
+    let header = ToolPaneHeaderView()
+    header.themeProvider = { [weak preferences] in preferences?.activeTheme }
+    header.onItem = { [weak self] id, item in self?.perform(item, entryID: id) }
+    header.onRetry = { [weak self] id in self?.scheduler.refresh(entryID: id) }
+    header.onApprove = { [weak self] id in self?.approve(entryID: id) }
+    return header
+  }
+
   /// 条拖高松开或双击复位：按位置记住；`pane.bottom` 共用一个值，其它 Pane 的条跟着变。
   private func barHeightDidCommit(_ height: Double, slot: ToolViewSlot) {
     barHeights.setHeight(height, for: slot)
@@ -401,14 +450,16 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
     }
   }
 
-  /// 重画一个 Pane 的条：该 Pane 的每个 pane 视图一段，段 id 是 feed 键。
+  /// 重画一个 Pane 的底部条与顶条图标组：该 Pane 的每个 pane 视图一段，段 id 是 feed 键。
   private func renderPane(_ paneID: UUID) {
-    guard let bar = paneBars.existingBar(for: paneID) else { return }
-    bar.setHeight(paneBarHeight)
-    bar.apply(
-      segments: paneEntries.compactMap {
-        segment(for: $0, key: ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID))
-      })
+    let segments: ([ToolViewEntry]) -> [ToolBarSegment] = { entries in
+      entries.compactMap { self.segment(for: $0, key: ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID)) }
+    }
+    if let bar = paneBars.existingBar(for: paneID) {
+      bar.setHeight(paneBarHeight)
+      bar.apply(segments: segments(paneEntries))
+    }
+    paneBars.existingHeader(for: paneID)?.apply(segments: segments(paneHeaderEntries))
   }
 
   /// 一个 feed 的当前段。
@@ -429,7 +480,7 @@ final class WorkspaceExtensionHost: ToolPanelProviding {
   /// feed 键对应的视图与 Pane（标签范围的 Pane 为 nil）。
   private func lookup(_ key: String) -> (entry: ToolViewEntry, paneID: UUID?)? {
     if let paneID = paneFeedPanes[key] {
-      return paneEntries.first { ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID) == key }
+      return allPaneEntries.first { ToolBarScheduler.paneFeedKey(entryID: $0.id, paneID: paneID) == key }
         .map { ($0, paneID) }
     }
     return (barEntries + sidebarBarEntries).first { $0.id == key }.map { ($0, nil) }

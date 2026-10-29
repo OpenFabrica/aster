@@ -40,7 +40,7 @@ func snapshotIncludesViewRowsAndSlots() throws {
   #expect(branch["enabled"] as? Bool == true)
   #expect(branch["inactiveReason"] is NSNull)
   // 可选位置只含本版本已实现且接受该类型的挂载点。
-  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.bottom", "activePane.bottom"])
+  #expect(branch["slots"] as? [String] == ["window.top", "window.bottom", "sidebar.section", "tab.top", "tab.bottom", "pane.header", "pane.bottom", "activePane.bottom"])
   #expect(views[1]["slots"] as? [String] == ["sidebar.section", "inspector.panel"])
   #expect(views[2]["inactiveReason"] as? String == "unsupported")
 
@@ -51,26 +51,26 @@ func snapshotIncludesViewRowsAndSlots() throws {
   #expect(bottom["kinds"] as? [String] == ["bar"])
   #expect(bottom["implemented"] as? Bool == true)
   let paneHeader = try #require(slots.first { $0["id"] as? String == "pane.header" })
-  #expect(paneHeader["implemented"] as? Bool == false)
+  #expect(paneHeader["implemented"] as? Bool == true)
   #expect(JSONSerialization.isValidJSONObject(snapshot))
 }
 
-@Test("视图动作：setViewSlot 拒绝类型不符、未实现与未知的位置")
+@Test("视图动作：setViewSlot 拒绝类型不符与未知的位置")
 @MainActor
 func setViewSlotRejectsIncompatibleKind() async {
   let tools = makeViewTools()
   let (bridge, recorder) = makeToolsBridge(tools)
   let base: [String: Any] = ["id": "com.example.views", "view": "branch"]
 
-  // panel 的位置不接受 bar；pane.header 接受 bar 但本版本没有实现；其余是未知字符串或错误类型。
-  for slot: Any in ["inspector.panel", "pane.header", "nowhere", 7] {
+  // panel 的位置不接受 bar；其余是未知字符串或错误类型。
+  for slot: Any in ["inspector.panel", "nowhere", 7] {
     #expect(await performToolsAction(bridge, "tools.setViewSlot", base.merging(["slot": slot]) { $1 }) == false)
   }
   // 不存在的视图与缺少 view 参数。
   #expect(await performToolsAction(bridge, "tools.setViewSlot", ["id": "com.example.views", "view": "none", "slot": "tab.top"]) == false)
   #expect(await performToolsAction(bridge, "tools.setViewSlot", ["id": "com.example.views", "slot": "tab.top"]) == false)
   #expect(tools.viewSlotCalls.isEmpty)
-  #expect(recorder.toasts.count == 6 && recorder.toasts.allSatisfy { $0.isError })
+  #expect(recorder.toasts.count == 5 && recorder.toasts.allSatisfy { $0.isError })
 
   // 兼容的位置放行。
   #expect(await performToolsAction(bridge, "tools.setViewSlot", base.merging(["slot": "tab.top"]) { $1 }))

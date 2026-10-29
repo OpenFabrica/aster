@@ -285,10 +285,14 @@ await aster.openURL("https://example.com"); // 先弹确认，返回用户是否
 | `window.bottom` | 状态条 | 窗口最下面一整行（底部标签栏布局时在标签栏下面） | 可用 |
 | `sidebar.section` | 状态条（竖排列表）/ 面板 | 竖排标签栏里、标签列表下面，每个视图一块，标题是视图的 `title`；只在竖排标签栏可见时显示 | 可用 |
 | `activePane.bottom` | 状态条 | 只在当前聚焦的终端 Pane 底部，焦点换到哪个 Pane 就跟到哪个；上下文和 `tab.*` 一样 | 可用 |
-| `pane.header` | — | Pane 顶部 | 后续版本；现在可以写进清单，但不会显示 |
+| `pane.header` | 状态条（只放图标） | 每个终端 Pane 顶部右侧，在关闭、缩放按钮左边；鼠标移到 Pane 顶边才出现。最多 3 个图标，上下文和 `pane.bottom` 一样 | 可用 |
 
 `pane.bottom` 只挂在终端 Pane 上（工具、文件 Pane 不挂），只有当前标签里的 Pane 会运行脚本；切到别的标签时暂停，
 切回来补跑一次。切换焦点到别的 Pane 不会让它重跑；条上的 `terminal` 动作写到这条所在的 Pane。
+
+`pane.header` 只显示图标：每个项目要有 `icon` 或 `iconFile`，只有文字的项目不显示；`text` 会作为悬停提示
+（写了 `tooltip` 时用 `tooltip`）。整组最多 3 个图标，多出来的不显示。图标浮在终端上方，不占终端的行，鼠标离开顶边后隐藏，
+隐藏时点击会落到终端上。
 
 `activePane.bottom` 每个窗口只有一条：焦点在文件、工具或网页 Pane 上时先收起，回到终端 Pane 再出现；和 `pane.bottom`
 可以同时用，`pane.bottom` 在上面。
