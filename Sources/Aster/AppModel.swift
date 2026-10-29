@@ -196,9 +196,19 @@ final class WorkspacePaneRuntime: ObservableObject, Identifiable {
   /// 由新标签覆盖，引用因此写进正确的布局。
   var onManagedTerminalBound: ((ManagedTerminalReference) -> Void)?
 
-  init(descriptor: PaneDescriptor) {
+  /// Files 预览槽在后台预读得到的呈现类型；File Pane 有值时直接使用，不再在主线程读前缀。
+  let preloadedPresentationKind: FilePresentationKind?
+
+  /// - Parameter preload: Files 预览槽的后台预读结果。提供时跳过主线程上的前缀读取与
+  ///   `DocumentBuffer.load`；路径必须与 `descriptor.resourcePath` 一致，否则忽略。
+  init(descriptor: PaneDescriptor, preload: FileDocumentPreload? = nil) {
     id = descriptor.id
     self.descriptor = descriptor
+    let preload = preload.flatMap { preload in
+      descriptor.resourcePath.map { URL(fileURLWithPath: $0).standardizedFileURL }
+        == preload.url.standardizedFileURL ? preload : nil
+    }
+    preloadedPresentationKind = preload?.presentationKind
     if descriptor.kind == .terminal {
       terminalSession = TerminalSession(workingDirectory: descriptor.workingDirectory)
       // Session Recording 是全局装配的旁路消费者；开关关闭时服务内部直接丢弃事件。
@@ -208,7 +218,19 @@ final class WorkspacePaneRuntime: ObservableObject, Identifiable {
     }
 
     isReadOnly = descriptor.kind == .preview
-    if [.editor, .preview].contains(descriptor.kind), let path = descriptor.resourcePath {
+    if [.editor, .preview].contains(descriptor.kind), let preload {
+      switch preload.document {
+      case .success(let buffer):
+        documentBuffer = buffer
+        documentText = buffer.text
+      case .failure(.tooLarge):
+        documentError = DocumentBufferError.fileTooLarge.localizedDescription
+      case .failure(.unreadable(let message)):
+        documentError = message
+      case nil:
+        break
+      }
+    } else if [.editor, .preview].contains(descriptor.kind), let path = descriptor.resourcePath {
       let url = URL(fileURLWithPath: path)
       let handle = try? FileHandle(forReadingFrom: url)
       let prefix = handle?.readData(ofLength: 64 * 1_024) ?? Data()
@@ -392,6 +414,22 @@ final class TerminalTabItem: ObservableObject, Identifiable {
       onWorkspaceChanged?()
     }
   }
+  /// 原地替换 Pane 内容期间为 true。`layout` 仍经 `@Published` 发布（控制桥、画中画等
+  /// 订阅 `$layout` 需要知道描述符变化），但工作区视图据此跳过整树重建，改由
+  /// `paneContentReplaced` 只替换那一个叶子的内容。
+  private(set) var isUpdatingLayoutInPlace = false
+  /// 某个 Pane 的运行态被原地替换（Pane ID 与树位置不变）。视图层只换该叶子的内容视图。
+  let paneContentReplaced = PassthroughSubject<UUID, Never>()
+  /// Files 预览槽：右侧 Files 选中文件时原地复用的那个 Pane。纯运行态，不进快照；
+  /// 重启后该 Pane 按普通 Pane 恢复。有效性由 `validatedPreviewSlotPaneID` 懒校验。
+  var previewSlotPaneID: UUID? {
+    didSet {
+      guard previewSlotPaneID != oldValue else { return }
+      previewSlotChanged.send(previewSlotPaneID)
+    }
+  }
+  /// 预览槽身份变化的局部通道；视图层据此切换「预览」标识与非活动褪色。
+  let previewSlotChanged = PassthroughSubject<UUID?, Never>()
   /// 当前聚焦的面板。刻意不是 `@Published`：切换焦点只需要移动 first responder 和
   /// 焦点指示器，若走 `objectWillChange` 会让整个工作区视图树重建，正在进行的终端
   /// 拖选、TUI 重绘都会被打断。视图层订阅 `activePaneChanged` 做局部更新。
@@ -753,7 +791,9 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     kind: PaneKind = .terminal,
     resourcePath: String? = nil,
     workingDirectory requestedWorkingDirectory: String? = nil,
-    paneID: UUID = UUID()
+    paneID: UUID = UUID(),
+    activate: Bool = true,
+    preload: FileDocumentPreload? = nil
   ) {
     // Recipe 恢复必须在创建运行对象前给出目标目录；事后只改布局描述会让 PTY 仍从
     // 原目录启动。普通交互拆分继续继承当前 Pane 的实时 cwd。
@@ -774,9 +814,12 @@ final class TerminalTabItem: ObservableObject, Identifiable {
       )
     else { return }
     layout = updated
-    addRuntime(for: descriptor)
-    activePaneID = descriptor.id
-    if let state = paneTitleStates[descriptor.id] { applyActiveTitleState(state) }
+    addRuntime(for: descriptor, preload: preload)
+    // Files 预览槽不抢焦点：切换活动 Pane 会重置详情面板并把 Files 根目录换成文件父目录。
+    if activate {
+      activePaneID = descriptor.id
+      if let state = paneTitleStates[descriptor.id] { applyActiveTitleState(state) }
+    }
     // 新面板必须可见：在放大态下继续拆分，否则新建的 Shell 会藏在被折叠的分屏里。
     zoomedPaneID = nil
   }
@@ -968,11 +1011,45 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     runtimes.removeValue(forKey: activePaneID)?.stop()
     paneAgentSessionTitles.removeValue(forKey: activePaneID)
     paneTitleStates.removeValue(forKey: activePaneID)
+    // 用户显式把别的内容放进预览槽：它不再是 Files 可以随意覆盖的槽。
+    if previewSlotPaneID == activePaneID { previewSlotPaneID = nil }
     layout = layout.updatingPane(paneID: activePaneID) { _ in replacement }
     addRuntime(for: replacement)
     updateTitleFallback(resourceURL.lastPathComponent, paneID: activePaneID)
     zoomedPaneID = nil
     markUpdated()
+    return true
+  }
+
+  /// 原地替换指定 Pane 的运行态：保留 Pane ID 与树位置，不改活动 Pane，不触发工作区
+  /// 整树重建（视图层收到 `paneContentReplaced` 后只换该叶子的内容）。布局描述符照常
+  /// 更新，持久化仍走 `onWorkspaceChanged` 的合并写入。
+  /// - Returns: Pane 不存在或有未保存内容时返回 false，调用方应改为新开 Pane。
+  @discardableResult
+  func replacePaneContentInPlace(
+    _ paneID: UUID,
+    with descriptor: PaneDescriptor,
+    preload: FileDocumentPreload?,
+    readOnly: Bool
+  ) -> Bool {
+    guard descriptor.id == paneID, let old = runtimes[paneID], !old.isDirty,
+      layout.descriptor(forPane: paneID) != nil
+    else { return false }
+    paneCancellables.removeValue(forKey: paneID)
+    runtimes.removeValue(forKey: paneID)
+    old.stop()
+    paneAgentSessionTitles.removeValue(forKey: paneID)
+    paneTitleStates.removeValue(forKey: paneID)
+    let runtime = WorkspacePaneRuntime(descriptor: descriptor, preload: preload)
+    runtime.setReadOnly(readOnly)
+    attach(runtime)
+    isUpdatingLayoutInPlace = true
+    layout = layout.updatingPane(paneID: paneID) { _ in descriptor }
+    isUpdatingLayoutInPlace = false
+    if let path = descriptor.resourcePath {
+      updateTitleFallback(URL(fileURLWithPath: path).lastPathComponent, paneID: paneID)
+    }
+    paneContentReplaced.send(paneID)
     return true
   }
 
@@ -1087,6 +1164,8 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     paneTitleStates.removeValue(forKey: paneID)
     paneAgentSessionTitles.removeValue(forKey: paneID)
     if zoomedPaneID == paneID { zoomedPaneID = nil }
+    // 关闭或拖成独立标签都让预览槽失效；搬走的 Pane 在新标签里是普通 Pane。
+    if previewSlotPaneID == paneID { previewSlotPaneID = nil }
     layout = updated
     if paneID == activePaneID {
       activePaneID = successor ?? activePaneID
@@ -1114,6 +1193,7 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     paneTitleStates.removeAll()
     paneAgentSessionTitles.removeAll()
     zoomedPaneID = nil
+    previewSlotPaneID = nil
     return payload
   }
 
@@ -1257,9 +1337,12 @@ final class TerminalTabItem: ObservableObject, Identifiable {
 
   /// - Parameter isRestored: 来自持久化恢复的 Pane。旧布局中没有受管引用的 Pane
   ///   不自动托管，必须走显式迁移事务。
-  private func addRuntime(for descriptor: PaneDescriptor, isRestored: Bool = false) {
+  /// - Parameter preload: Files 预览槽的后台预读结果，透传给文件运行态。
+  private func addRuntime(
+    for descriptor: PaneDescriptor, isRestored: Bool = false, preload: FileDocumentPreload? = nil
+  ) {
     guard runtimes[descriptor.id] == nil else { return }
-    let runtime = WorkspacePaneRuntime(descriptor: descriptor)
+    let runtime = WorkspacePaneRuntime(descriptor: descriptor, preload: preload)
     if let session = runtime.terminalSession, let nativeSSH = descriptor.nativeSSH {
       // 原生 SSH Pane 的子进程就是 aster-ssh client，不能再被托管成本机受管终端。
       session.bindNativeSSH(nativeSSH)
@@ -1288,6 +1371,15 @@ final class TerminalTabItem: ObservableObject, Identifiable {
     runtimes[descriptor.id] = runtime
     var cancellables: Set<AnyCancellable> = []
     defer { paneCancellables[descriptor.id] = cancellables }
+    if [.editor, .preview].contains(descriptor.kind) {
+      // 预览槽被解锁或编辑即视为已固定：立刻清掉槽身份，「预览」标识与不褪色外观随之撤下。
+      runtime.$isReadOnly.combineLatest(runtime.$isDirty)
+        .sink { [weak self] readOnly, dirty in
+          guard let self, self.previewSlotPaneID == descriptor.id, !readOnly || dirty else { return }
+          self.previewSlotPaneID = nil
+        }
+        .store(in: &cancellables)
+    }
     runtime.onManagedTerminalBound = { [weak self] reference in
       // 引用写回布局后才会随工作区快照持久化，重开 App 才能查真实状态。
       guard let self else { return }

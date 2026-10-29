@@ -25,7 +25,7 @@
 4. OSC 8 不受自动检测白名单限制，但仍需打开授权。
 5. FIFO、socket、设备和未知文件类型不得打开或预读。
 6. 网站与 scheme 例外小写去重；可执行授权绑定文件身份，文件变化后重新确认；配置导入会剥离全部本机授权。
-7. Files 打开使用 `automatic`：Markdown、reStructuredText、HTML、SVG 和普通源码恢复为 `.editor` 且默认可编辑；图片、PDF、富文档、diff、Agent transcript 与二进制恢复为 `.preview`。CLI 的 `view` / `edit` 与新建文件的显式 `edit` 不受影响。
+7. Files 打开使用 `automatic`：Markdown、reStructuredText、HTML、SVG 和普通源码恢复为 `.editor` 且默认可编辑；图片、PDF、富文档、diff、Agent transcript 与二进制恢复为 `.preview`。CLI 的 `view` / `edit` 与新建文件的显式 `edit` 不受影响。右侧 Files 页的单击或方向键选中只做预览（见「Files 预览槽」），Enter / 双击才作为上述 `automatic` 打开固定到 Pane。
 8. 文件名拒绝空值、`.`、`..`、路径分隔符、控制字符和超过 255 UTF-8 字节的值；创建不覆盖同名项。
 9. Rename 只在同一父目录内移动，并同步所有已打开文件及目录后代 Pane；删除只调用系统 Trash。
 10. Source/Preview、锁定、语言与预览缩放属于运行态，不改变既有 `.editor` / `.preview` 快照格式；软换行与行号跟随编辑器配置。
@@ -87,7 +87,14 @@ AppKit 行在明暗外观下的图标与名称色，可用 `ASTER_FILES_UI_EVIDE
 
 ```mermaid
 flowchart LR
-  A[Files row] --> B{Context action}
+  A[Files row] --> S{选中 / 键盘}
+  S -->|单击 ↑ ↓ j k| P[DetailsFilesPreviewCoordinator]
+  P --> Q[FileDocumentPreload 后台预读]
+  Q --> R[TerminalTabItem.showInPreviewSlot]
+  R -->|无槽| T[右侧拆出预览槽]
+  R -->|有槽| U[原地换内容]
+  S -->|Enter / 双击| V[pinPreviewSlot]
+  A --> B{Context action}
   B -->|Open| C[Launch Services]
   B -->|Open in Aster| D[AppModel.openResource]
   D --> E{Placement}
@@ -97,11 +104,14 @@ flowchart LR
   F --> I[PaneDescriptor]
   G --> I
   H --> I
+  T --> I
+  U --> I
+  V --> I
   I --> J[WorkspacePaneRuntime]
   J --> K[FilePaneViewController]
 ```
 
-Files 的右键菜单保持固定结构：`Open`、`Open in Aster` 子菜单、创建/重命名/废纸篓、路径复制和 Finder。树展开仍由 chevron 或双击负责，不混入资源动作。`Copy Relative Path` 以当前 Files 根目录按 path components 计算，不用字符串前缀，也不添加 `./`。
+Files 的右键菜单保持固定结构：`Open`、`Open in Aster` 子菜单、创建/重命名/废纸篓、路径复制和 Finder。树展开仍由 chevron、双击或键盘（→ l、Space）负责，不混入资源动作。`Copy Relative Path` 以当前 Files 根目录按 path components 计算，不用字符串前缀，也不添加 `./`。
 
 File Pane 顶部使用 32 pt 工具栏，负责模式、预览缩放、Send to Chat、运行脚本、Open In、保存状态与关闭；文件名由活动 Pane 的外层标题承载。Markdown、reStructuredText、HTML 与 SVG 显示 code/eye 胶囊，默认 Source，可切换 Preview；普通源码显示 code/lock 胶囊，默认可编辑，可就地锁定。预览专用类型不显示无效模式开关。Markdown 由固定版本 `swift-markdown` 解析 GFM 后在禁用 JavaScript、禁用网络的 `WKWebView` 中展示；HTML/SVG 使用同一沙箱。源码由 HighlighterSwift/highlight.js 着色，同时保持原生 `NSTextView` 输入语义。图片使用可缩放 `NSScrollView`，PDF 使用 PDFKit，Office/媒体/字体交给 Quick Look，二进制使用 `NSTableView` 按可见行生成有界 hex。可信 Agent transcript 只复用已发现历史的解析结果，并提供 Resume/Fork；任意 JSONL 不会自行升级为会话。
 
@@ -114,6 +124,27 @@ File Browser Pane（`FileBrowserViewController`）列表下方内嵌 `FileBrowse
 Pane 通过目标文件父目录的 vnode 事件检查 `contentModificationDate`，同时覆盖原位写入和 atomic replace；只有目录监听无法建立时才回退为带 tolerance 的一秒检测。没有本地改动时自动重载；存在 dirty 内容时显示 `Modified on Disk`，由用户从源码右键或 Web 预览的 Reload 明确确认后才丢弃内存内容。保存继续使用 `DocumentBuffer` 原子替换，读取只接受普通、非符号链接文件，编辑缓冲上限仍为 10 MiB；超大或二进制预览只读取有界前缀。
 
 活动 Pane 是 Editor / Preview 时，`⌘F`、命令面板与标题菜单的“查找”由 `AppModel.toggleFind` / `presentFind` 经 `fileFindRequested` 按 Pane ID 转给该 File Pane，不打开终端查找栏。`FilePaneFindBar` 插在工具栏与内容区之间，每次查找都从当前内容树重新解析目标（`FilePaneFindTarget`），Source/Preview 切换后自动作用于新视图：源码 `NSTextView` 由 `AsterCore.DocumentTextSearch` 以 UTF-16 区间计算全部匹配（支持区分大小写和正则，零长度正则匹配跳过，最多 1 万处），选中、滚动并显示系统查找指示器；Markdown/HTML/SVG 预览与 Agent transcript 用 `WKWebView.find`，WebKit 不给总数，只显示是否命中；PDF 用 PDFKit `findString` 并缓存结果。Web 与 PDF 不支持正则，开关置灰。图片、二进制和 Quick Look 富文档不提供查找。查找栏属于 Pane 运行态，不写入快照。
+
+### Files 预览槽
+
+右侧 Files 页的行为对齐 yazi：选中即预览，Enter 才真正打开。入口是 `DetailsFilesPreviewCoordinator`（`Sources/Aster/DetailsPanel/`），策略落在 `TerminalTabItem+PreviewSlot.swift`。
+
+- **一个可复用的槽。** 单击或 ↑/↓（j/k）选中文件，就把它显示在中间区域唯一的「预览槽」Pane 里，原地换内容；焦点留在 Files。第一次没有槽时，在活动 Pane 右侧拆出一个，但不改变活动 Pane（切换活动 Pane 会让详情面板重置，并把 Files 根目录换成文件父目录）。槽的描述符写入 Files 当前浏览根目录作为工作目录，原因相同。
+- **只预览普通文件。** 选中目录不改变预览；符号链接和特殊文件跳过（`FileDocumentPreload.load` 对非普通文件返回 `nil`，沿用「特殊文件不得打开或预读」）。别的 Pane 已打开同一文件时预览什么都不做，避免两份内容不一致。右键只定位菜单行，不触发预览。远端投影标签（`remoteTabID != nil`）与远端 Files 页不支持预览槽（v1）。
+- **槽以只读方式展示。** 可编辑类型（`supportsEditing`）按 `.editor` 只读 Source 显示，其余按 `.preview`；类型规则与 `.automatic` 一致。File Pane 工具栏状态显示「预览 · 回车固定」，槽即使不是活动 Pane 也不褪色（`ActivePaneHostView.isPreviewSlot`）。
+- **固定。** Enter / 双击调用 `pinPreviewSlot`：槽变成普通 Pane，可编辑类型解锁，并获得焦点；下一次选中会新开一个槽。槽被关闭、拖成独立标签、解锁、或有未保存内容时，`validPreviewSlotPaneID` 一律视其为已固定，Files 不会再覆盖它。把别的内容显式放进槽（`replaceActivePane`）同样让它脱离槽身份。槽里文件被移入废纸篓时，槽随之关闭（槽只读且无改动，不会弹保存确认）。
+- **槽身份只存在于运行态。** `previewSlotPaneID` 不进快照；快照来自 `layout`，重启后该 Pane 按普通 Pane 恢复。
+
+性能约束，保证按住 ↓ 时预览跟着滚动而不卡输入：
+
+- 读取与分类在主线程之外完成。`FileDocumentPreload`（AsterCore）在后台做 lstat、前缀类型判定和文本读取（上限与 `DocumentBuffer.load` 同为 10 MiB），只把值类型结果交回主线程；`WorkspacePaneRuntime` 收到预读结果后跳过主线程上的前缀读取和 `DocumentBuffer.load`。
+- 按键重复节流为 120 ms，带尾部提交：重复按键最多每 120 ms 提交一次，最后一次选中一定会提交。单击与单次按键不等待。
+- 每次选中变化递增 `generation` 并取消上一个 `Task`；迟到或已取消的结果、以及标签已切换的结果直接丢弃。
+- LRU 缓存最多 12 项、文本合计 16 MiB，命中时仍比对修改时间与大小，变化即重读。
+- 首次创建槽会改变分屏结构，鼠标仍按着时重建会让按下的视图收不到 mouseUp，因此协调器等鼠标松开（最多约 2 秒）再提交；已有槽的原地换内容不受影响。
+- 原地换内容不重建工作区：`replacePaneContentInPlace` 保留 Pane ID 与树位置，期间置 `isUpdatingLayoutInPlace`，`WorkspaceView` 据此跳过整树 `refresh()`，只由 `paneContentReplaced` 替换该叶子的 `FilePaneViewController`。细节见 [AppKit 界面架构](appkit-interface.md)。`layout` 仍保持 `@Published`，控制桥与画中画依赖它感知描述符变化。
+
+键盘模型与焦点规则见 [Inspector Details Panel](details-panel-domain.md)。
 
 ### File Pane 工具栏与右键
 
@@ -201,6 +232,8 @@ Otty 的 Quick Look 只显式设置背景与外观；Aster 自有 HTML 正文色
 `AsterTerminalView` 在点击发生时读取当前终端单元格的 OSC 8 payload，以精确区分显式链接和同值普通文字；`InlineURLDetector` 补充 SwiftTerm 固定 scheme 列表之外的 `scheme://`。自定义 URL 跨物理行时，会在可见区内按占满右边界的连续行重建，最多 8 行和 4096 字节；超出边界时拒绝截断打开。预览文字与实际打开共用 `TargetResolver` 和 Session 当前可信本地 CWD，因此相对路径、`~/`、`file:` 与行列后缀会显示成可核对的绝对路径；远端主机 OSC 7 不会被伪装成本机路径。底部预览使用独立圆角 badge：浅色外观固定为半透明黑底白字，深色外观反转为半透明白底黑字，只跟随系统明暗外观，不读取终端主题或 ANSI 颜色。Ghostty 主引擎下 `link-url` 固定关闭，普通文字 URL 与路径只有 Aster 一条通道：`TerminalInlineTargetScanner`（AsterCore）逐行切出 URL（`scheme://`、`mailto:`）与路径 token（绝对、`~/`、`./`、相对以及 `Makefile` 这类裸文件名，剥离 `@` 前缀、旗标、尾随句读，只接受 `:line[:column]` 形态的冒号）；`GhosttySurfaceView+Links` 把候选映射回终端列（含宽字符第二列），URL 按 `LinkSchemePolicy` 过滤，路径经 Session 提供的 `linkPathValidator`（`TerminalTargetOpenCoordinator.fileTargetExists`，按当前可信本地 CWD 解析后 stat）确认存在才采信，Command 按住期间结果有界缓存，CWD 变化即作废。Command 按下时扫描整个视口，用不参与命中测试的 `GhosttyLinkUnderlineOverlay`（zPosition 高于 CAMetalLayer）画实线下划线，输出、滚动、尺寸变化合并重扫，松开或指针离开即清除；Command 状态取自事件本身而非全局修饰键，便于合成事件测试。Command 悬停时手形指针由 Aster 设置；修饰键按下时立即按窗口当前指针位置重算命中，即使鼠标静止也显示手形。AppKit 在 `NSCursor.set()` 或视图层级变化后会自行合成 `cursorUpdate` 事件，其 `modifierFlags` 在 Command 按住时也为空，因此 `cursorUpdate` 只按当前状态重施指针形状，绝不作为修饰键状态来源（否则按下约 30ms 后下划线与手形即被清空，而预览仍在）。底部预览徽章为紧凑规格：28pt 高、12pt 等宽字；宽度按 cell 尺寸计算并禁用省略号，只有地址超过 Pane 可用宽度才中间截断。Ghostty 的 mouse_shape 在悬停期间只记录不应用，悬停结束后恢复。Command 点击在 mouseDown 锁定归属，命中判断与手形相同（OSC 8 原生命中优先，其次 Aster 侧识别）：命中时整次点击归 Aster，PRESS 与 RELEASE 都不交给 Ghostty；抬起时仍按着 Command 且位移不超过 4pt 才以主队列异步方式打开，拖出阈值则在按下位置补发 PRESS，交还 Ghostty 拖选。未命中的点击照常交给 Ghostty，OSC 8 仍可经原生 `open_url` 进入同一协调器，Aster 不在抬起时再识别一次。必须在按下时拦截：开启鼠标上报的程序（如 Claude Code 全屏）从 SGR 上报里看不出 Command（协议不编码 Super），识别到 Ghostty 后会把点击当作打开请求、自行打开链接；点击若同时交给程序，浏览器会在 Aster 的确认框之前打开。预览仍是双来源：OSC 8 由 Ghostty `mouse_over_link` 原生上报并优先显示，普通文字目标由 Aster 侧识别；原生空清除信号只清原生预览并立刻按最近指针位置补一次 Aster 侧识别；badge layer 显式抬高 zPosition。`TerminalTargetOpenCoordinator` 负责终端目标；Files 的系统 Open 在再次 stat 后沿用同一特殊文件拒绝与可执行确认规则。控制页分别保存链接、文件与文件夹目的地：本地普通文件和目录选择 Aster 时由所属 `WorkspaceTab` 新建 Editor / File Browser Pane，HTTP(S) URL 新建 Web Pane，系统目的地继续交给 LaunchServices。Web Pane 的快照与 Recipe 只接受带 host 的 HTTP(S) URL，不开放脚本桥、本地文件或自定义协议；自定义应用只保存显示名和 bundle ID，每次使用时由 LaunchServices 重新定位，不固化可能失效的 `.app` 路径。SSH 远端文件由详情面板的远端模式单独承载，见下面的「远端文件与传输边界」与 [Inspector Details Panel](details-panel-domain.md)。
 
 解析失败、用户取消或系统无对应应用均返回失败且不写例外。外部网站、非标准 scheme 与可执行目标的“始终允许”分别绑定 host、scheme 和文件路径/设备/inode/大小/修改时间签名；可执行文件发生替换或修改后旧授权不再匹配。特殊文件直接拒绝，配置导入统一剥离这些本机授权。测试位于 `FileDocumentTests.swift`、`WorkspaceFileActionServiceTests.swift`、`FilePaneViewControllerTests.swift`、`WorkspaceDetailsPanelTests.swift`、`DetectedTargetTests.swift`、`AppKitMigrationTests.swift` 和 `WorkspaceBehaviorTests.swift`。
+
+Files 预览槽的验证入口：`FileDocumentPreloadTests`（后台预读的分类、特殊文件与超大文件）、`FilesPreviewSlotTests`（建槽不抢活动 Pane、原地换内容、同文件与远端标签）、`FilesPreviewSlotPinningTests`（关闭、拖走、解锁即失效与固定）、`DetailsFilesKeyboardTests`（按键到命令的翻译与树导航）、`DetailsFilesPreviewCoordinatorTests`（节流、过期结果作废、缓存命中与失效）、`WorkspacePreviewSlotSwapTests`（原地换内容不整树重建、焦点不被抢走）。
 
 ### 远端文件与传输边界
 

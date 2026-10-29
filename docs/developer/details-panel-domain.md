@@ -70,6 +70,31 @@ Content / Inspector 之间绘制 1pt 分隔线，使用 `interface.border`（含
 只做有界只读 I/O；`AsterCore` 只解析进程、端口、命令时间线和文档结构。视图不得直接
 读取进程、扫描会话历史或执行 shell。
 
+## Files 键盘浏览与预览
+
+本地 Files 页是 yazi 式的「光标 + 预览」：选中行就是光标，选中文件即在中间的预览槽里显示（槽的规则见 [文件、链接与 File Pane 领域](files-and-links-domain.md) 的「Files 预览槽」）。远端 Files 页不预览，选中行变化不触发任何 Pane 改动。
+
+键盘由 `DetailsFilesTableView` 接管：`DetailsFilesKeyCommand.command` 把按键翻译成命令，`DetailsFilesNavigation.resolve` 是纯函数，据当前行与深度算出移动、展开或折叠，控制器只执行结果。表格关闭 type-select（`allowsTypeSelect = false`），否则 j/k/h/l 会被当成输入即跳转。
+
+| 按键 | 动作 |
+| --- | --- |
+| `↑` `↓` / `k` `j` | 移动选中行；没有选中行时先落到第一行 |
+| `→` / `l` | 展开目录；已展开则进入第一个子项 |
+| `←` / `h` | 折叠已展开的目录；否则跳到父目录行 |
+| `Return` | 固定预览（打开文件）；目录则展开或折叠；符号链接在 Finder 中显示 |
+| `Space` | 展开或折叠目录；文件上无动作，仍吞掉按键避免系统提示音 |
+| `/` | 聚焦 Find |
+| `.` | 切换是否列出隐藏项，与眼睛按钮共用同一处理 |
+| `Esc` | 把键盘焦点还给活动 Pane |
+
+带 `⌘` / `⌃` / `⌥` 的组合键一律不拦截，交给菜单与系统快捷键。到头的移动命令也吞掉按键，不触发提示音。Find 框里 `↓` / `Return` 进入列表并选中第一行；框为空时 `Esc` 回到列表，有内容时 `Esc` 仍由系统清空搜索词。
+
+**焦点规则。** 预览不得抢走 Files 的键盘焦点：建槽时 `split(activate: false)` 不改变活动 Pane，换内容时只替换该叶子的视图；Enter / 双击固定后才把焦点交给槽 Pane。行内的文件名按钮 `refusesFirstResponder`，单击转发为选中整行并让表格成为 first responder，否则 j/k 会落进按钮。详情面板控制器跨 `refresh()` 复用，`WorkspaceViewController.refresh()` 重建前记下焦点是否在详情面板内（Files 表格，或 Find 框的 field editor 所属搜索框），重建后恢复，而不是一律交给终端。
+
+**选中行外观。** `DetailsFilesSelectionRowView` 自绘圆角底色：表格是 first responder 时用强调色（22%），失焦时用淡墨色（8%），文字保持正常配色不反白。
+
+**触发与节流。** 程序化选中（树刷新后按路径恢复、右键定位）置 `isProgrammaticFilesSelection`，不触发预览；树重建后按 `selectedFilePath` 而不是行号恢复选中，找不到就清空。选中事件按来源分两类：点击和单次按键立即提交，按住方向键（`isARepeat`）节流为每 120 ms 一次且保证最后一次提交。切页、切 Pane 或收起面板调用 `filesPreview.cancel()` 作废进行中的请求。
+
 ## 远端模式：服务器文件与服务器监控
 
 本分支给 Files 与 Info 两页加了远端模式：Pane 连在远端时，Files 列远端当前目录，Info 换成
@@ -209,4 +234,4 @@ socket、监控数值变化、集成安装幂等、上传下载无残留、特�
 ## 测试与验收
 
 验收至少覆盖树根/端口去重、运行中命令、真实 JSON 行号、嵌套 transcript prompt、Pane
-身份丢弃、Info 定时取消以及终端输入焦点保持。
+身份丢弃、Info 定时取消以及终端输入焦点保持。Files 键盘与预览由 `DetailsFilesKeyboardTests`（按键翻译与树导航）和 `DetailsFilesPreviewCoordinatorTests`（节流、过期作废、缓存）覆盖；槽的原地替换与固定见 `FilesPreviewSlotTests`、`FilesPreviewSlotPinningTests` 与 `WorkspacePreviewSlotSwapTests`。

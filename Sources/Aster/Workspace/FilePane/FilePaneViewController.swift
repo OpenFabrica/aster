@@ -132,7 +132,12 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     runtime.descriptor.resourcePath.map { URL(fileURLWithPath: $0) }
   }
 
+  /// 判定文件呈现类型。Files 预览槽已在后台预读过时直接沿用，避免主线程再读 64 KB 前缀。
   private func classifyDocument() {
+    if let preloaded = runtime.preloadedPresentationKind {
+      presentationKind = preloaded
+      return
+    }
     guard let fileURL else { return }
     let prefix = readPrefix(of: fileURL, maximumBytes: Self.classificationPrefixBytes)
     let trustedProvider = model.agentHistories.first(where: {
@@ -212,6 +217,8 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
       self?.observedDocumentError = error
       self?.updateToolbar()
     }.store(in: &cancellables)
+    tab?.previewSlotChanged.sink { [weak self] _ in self?.updateToolbar() }
+      .store(in: &cancellables)
     model.fileFindRequested.sink { [weak self] request in
       guard let self, request.paneID == runtime.id else { return }
       toggleFindBar(forceVisible: !request.toggle)
@@ -237,6 +244,8 @@ final class FilePaneViewController: NSViewController, WKNavigationDelegate {
     let status: String?
     if let error = observedDocumentError { status = error }
     else if reportedExternalConflict { status = L("磁盘文件已修改") }
+    // Files 预览槽：提示这是会被下一次选中替换的临时预览，Enter / 双击可固定。
+    else if let tab, tab.previewSlotPaneID == runtime.id { status = L("预览 · 回车固定") }
     else { status = nil }
     toolbarView?.update(editable: presentationKind.supportsEditing && !observedReadOnly && !showingPreview,
       dirty: observedDirty, statusText: status)

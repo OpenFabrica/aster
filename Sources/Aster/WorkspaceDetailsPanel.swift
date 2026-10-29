@@ -161,7 +161,15 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
   private weak var filesSortButton: NSButton?
   private weak var filesShowHiddenButton: NSButton?
   private weak var filesEmptyLabel: NSTextField?
-  private let filesTable = NSTableView()
+  private let filesTable = DetailsFilesTableView()
+  /// Files 选中 → 预览槽的调度（后台预读、长按节流、过期作废）。
+  private lazy var filesPreview = DetailsFilesPreviewCoordinator(model: model)
+  /// 程序化选中（刷新后恢复、右键命中）期间为 true，此时不触发预览。
+  private var isProgrammaticFilesSelection = false
+  /// 当前选中行的路径；目录监听刷新后按路径恢复，避免行号错位选到别的文件。
+  private var selectedFilePath: String?
+  /// Files 表格里按 Esc：请求工作区把键盘焦点还给活动 Pane。
+  var onRequestFocusActivePane: (() -> Void)?
   private var fileTree: [FileTreeItem] = []
   private var visibleFileRows: [FileRow] = []
   private var pendingFileSelectionPath: String?
@@ -672,6 +680,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       dismissGitDiffPreview()
     case .files:
       filesTask?.cancel()
+      filesPreview.cancel()
       filesNeedsRefresh = true
       filesWatchRefreshTask?.cancel()
       filesWatchers.removeAll()
@@ -704,6 +713,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
         self.gitInspectedAt = nil
         self.dismissGitDiffPreview()
         self.filesTask?.cancel()
+        self.filesPreview.cancel()
         self.filesDirectory = nil
         self.requestedFilesDirectory = nil
         self.outlineTask?.cancel()
@@ -1787,12 +1797,7 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     let showHidden = ActionButton(
       symbol: filesShowHidden ? "eye" : "eye.slash",
       bezelStyle: .accessoryBarAction
-    ) { [weak self] in
-      guard let self else { return }
-      self.filesShowHidden.toggle()
-      self.updateFilesShowHiddenButton()
-      self.refreshFiles(directory: self.requestedFilesDirectory)
-    }
+    ) { [weak self] in self?.toggleFilesShowHidden() }
     showHidden.isBordered = false
     showHidden.identifier = NSUserInterfaceItemIdentifier("details-files-show-hidden")
     filesShowHiddenButton = showHidden
@@ -1815,9 +1820,11 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     filesTable.style = .plain
     filesTable.rowHeight = InterfaceScale.length(24)
     filesTable.intercellSpacing = .zero
-    filesTable.selectionHighlightStyle = .none
+    // 选中行就是 yazi 的光标：用自绘圆角底色显示，见 `DetailsFilesSelectionRowView`。
+    filesTable.selectionHighlightStyle = .regular
     filesTable.dataSource = self
     filesTable.delegate = self
+    filesTable.onCommand = { [weak self] command in self?.handleFilesCommand(command) ?? false }
     let filesMenu = NSMenu()
     filesMenu.delegate = self
     filesTable.menu = filesMenu
@@ -1940,6 +1947,8 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     var filtered = fileTree
     if !filesQuery.isEmpty { filtered = filterFileTree(filtered, query: filesQuery) }
     visibleFileRows = flattenFileTree(filtered, honoringCollapse: filesQuery.isEmpty)
+    // reloadData 保留的是旧行号；树变化后按路径重新定位选中行，找不到就清空选中。
+    isProgrammaticFilesSelection = true
     filesTable.reloadData()
     if let pendingFileSelectionPath,
       let row = visibleFileRows.firstIndex(where: { $0.item.node.path == pendingFileSelectionPath })
@@ -1947,7 +1956,16 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       filesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
       filesTable.scrollRowToVisible(row)
       self.pendingFileSelectionPath = nil
+    } else if let selectedFilePath,
+      let row = visibleFileRows.firstIndex(where: { $0.item.node.path == selectedFilePath })
+    {
+      filesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+    } else {
+      filesTable.deselectAll(nil)
     }
+    isProgrammaticFilesSelection = false
+    selectedFilePath = visibleFileRows.indices.contains(filesTable.selectedRow)
+      ? visibleFileRows[filesTable.selectedRow].item.node.path : nil
     filesSortButton?.toolTip = filesDirectoriesFirst
       ? L("目录优先（点击切换为按名称）") : L("按名称（点击切换为目录优先）")
     updateFilesShowHiddenButton()
@@ -1962,6 +1980,25 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     } else {
       empty.isHidden = true
     }
+  }
+
+  func tableViewSelectionDidChange(_ notification: Notification) {
+    guard notification.object as? NSTableView === filesTable else { return }
+    filesSelectionDidChange()
+  }
+
+  /// 只有 Files 表格使用自绘选中行；其它表格保持默认行视图。
+  func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+    guard tableView === filesTable else { return nil }
+    let identifier = NSUserInterfaceItemIdentifier("details-files-selection-row")
+    if let reused = tableView.makeView(withIdentifier: identifier, owner: self)
+      as? DetailsFilesSelectionRowView
+    {
+      return reused
+    }
+    let rowView = DetailsFilesSelectionRowView()
+    rowView.identifier = identifier
+    return rowView
   }
 
   func numberOfRows(in tableView: NSTableView) -> Int {
@@ -2068,7 +2105,88 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
       NSWorkspace.shared.activateFileViewerSelecting([url])
       return
     }
-    _ = model.openResource(url, mode: .automatic, placement: .split(.right))
+    // Enter 与双击共用：固定预览槽里的这个文件，而不是每次新拆一个分屏。
+    filesPreview.pin(url, browsingRoot: filesBrowsingRoot)
+  }
+
+  /// 把键盘焦点交给 Files 表格；需要时选中第一行（会触发预览）。
+  fileprivate func focusFilesTable(selectingFirstRow: Bool) -> Bool {
+    guard filesTable.window != nil, view.window?.makeFirstResponder(filesTable) == true else {
+      return false
+    }
+    if selectingFirstRow, filesTable.selectedRow < 0, !visibleFileRows.isEmpty {
+      filesTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+      filesTable.scrollRowToVisible(0)
+    }
+    return true
+  }
+
+  /// Files 当前浏览的根目录；写入预览槽描述符，保证点进预览 Pane 后 Files 树不跳。
+  private var filesBrowsingRoot: String? { requestedFilesDirectory ?? filesDirectory }
+
+  /// 切换是否列出隐藏项（工具条眼睛按钮与 `.` 键共用）。
+  private func toggleFilesShowHidden() {
+    filesShowHidden.toggle()
+    updateFilesShowHiddenButton()
+    refreshFiles(directory: requestedFilesDirectory)
+  }
+
+  /// Files 选中行变化：用户选中文件时预览，目录只作废进行中的预览请求。
+  private func filesSelectionDidChange() {
+    let row = filesTable.selectedRow
+    let node = visibleFileRows.indices.contains(row) ? visibleFileRows[row].item.node : nil
+    selectedFilePath = node?.path
+    guard !isProgrammaticFilesSelection, !sectionsAwaitingPaneRefresh.contains(.files),
+      !remoteOverrides(.files)
+    else { return }
+    let event = NSApp.currentEvent
+    let trigger: DetailsFilesPreviewCoordinator.Trigger = event?.type == .keyDown
+      ? .key(isRepeat: event?.isARepeat ?? false) : .click
+    let previewable = node.map { !$0.isDirectory && !$0.isSymbolicLink } ?? false
+    filesPreview.selectionChanged(
+      to: previewable ? node.map { URL(fileURLWithPath: $0.path) } : nil,
+      browsingRoot: filesBrowsingRoot,
+      trigger: trigger
+    )
+  }
+
+  /// 执行 Files 表格的键盘命令；移动类命令即使到头也吞掉按键，避免系统提示音。
+  private func handleFilesCommand(_ command: DetailsFilesKeyCommand) -> Bool {
+    switch command {
+    case .focusFind:
+      guard let field = filesSearchField else { return false }
+      return view.window?.makeFirstResponder(field) ?? false
+    case .toggleHidden:
+      toggleFilesShowHidden()
+      return true
+    case .returnFocus:
+      onRequestFocusActivePane?()
+      return true
+    case .activate:
+      let row = filesTable.selectedRow
+      guard visibleFileRows.indices.contains(row) else { return false }
+      openFileNode(visibleFileRows[row].item.node)
+      return true
+    case .moveUp, .moveDown, .expandOrDescend, .collapseOrAscend, .toggleDirectory:
+      let rows = visibleFileRows.map { row in
+        DetailsFilesNavigationRow(
+          path: row.item.node.path,
+          depth: row.depth,
+          isExpandable: row.item.node.isDirectory && !row.item.node.isSymbolicLink,
+          isExpanded: expandedPaths.contains(row.item.node.path))
+      }
+      let selected = filesTable.selectedRow >= 0 ? filesTable.selectedRow : nil
+      switch DetailsFilesNavigation.resolve(rows: rows, selected: selected, command: command) {
+      case .select(let index):
+        filesTable.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        filesTable.scrollRowToVisible(index)
+      case .expand(let path), .collapse(let path):
+        toggleDirectoryExpansion(path)
+      case .none:
+        break
+      }
+      return true
+    }
   }
 
   /// 根据右键命中行即时生成菜单，避免树刷新后仍引用失效节点。
@@ -2077,7 +2195,11 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     menu.removeAllItems()
     let row = filesTable.clickedRow >= 0 ? filesTable.clickedRow : filesTable.selectedRow
     guard visibleFileRows.indices.contains(row) else { return }
+    // 右键只为菜单定位行，不应顺带换掉预览槽的内容。
+    isProgrammaticFilesSelection = true
     filesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+    isProgrammaticFilesSelection = false
+    selectedFilePath = visibleFileRows[row].item.node.path
     populateFilesContextMenu(menu, node: visibleFileRows[row].item.node)
   }
 
@@ -2257,6 +2379,13 @@ final class DetailsPanelViewController: NSViewController, NSTableViewDataSource,
     guard alert.runModal() == .alertFirstButtonReturn else { return }
     do {
       _ = try fileActionService.moveToTrash(source)
+      // 预览槽只是临时查看，文件进了废纸篓就没有再显示的意义；槽只读且无改动，关闭不会弹确认。
+      if let tab = model.selectedTab, let slotURL = tab.previewSlotFileURL,
+        let slotID = tab.validPreviewSlotPaneID(),
+        WorkspaceRelativePath.make(target: slotURL, relativeTo: source) != nil
+      {
+        tab.closePane(id: slotID)
+      }
       expandedPaths = expandedPaths.filter {
         WorkspaceRelativePath.make(target: URL(fileURLWithPath: $0), relativeTo: source) == nil
       }
@@ -3111,6 +3240,20 @@ extension DetailsPanelViewController: NSSearchFieldDelegate {
     filesQuery = field.stringValue
     rebuildFilesContent()
   }
+
+  /// Find 框里 ↓ / Enter 进入结果列表并选中第一行；框为空时 Esc 回到列表。
+  /// 有内容时 Esc 仍交给系统清空搜索词。
+  func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+    guard control === filesSearchField else { return false }
+    switch selector {
+    case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.insertNewline(_:)):
+      return focusFilesTable(selectingFirstRow: true)
+    case #selector(NSResponder.cancelOperation(_:)) where control.stringValue.isEmpty:
+      return focusFilesTable(selectingFirstRow: false)
+    default:
+      return false
+    }
+  }
 }
 
 /// Git 变更行悬停后出现的动作集合。行视图只负责显示与转发，命令构造和安全校验都留在
@@ -3628,9 +3771,33 @@ final class PointingHandButton: NSButton {
   /// 文件项用双击才触发：详情面板的列表是浏览用的，单击打开会在滚动、选中或想点行尾
   /// 图标时误开 Pane。双击的第一次点击 `clickCount` 是 1，直接拦掉即可。
   var activatesOnDoubleClickOnly = false
+  /// 单击交给所在表格选中整行（Files 的光标），双击仍按按钮动作处理。按钮本身会吞掉
+  /// mouseDown，不转发的话点文件名选不中行，预览也不会跟着走。
+  var forwardsSingleClickToEnclosingTable = false
 
   override func resetCursorRects() {
     addCursorRect(bounds, cursor: .pointingHand)
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    guard forwardsSingleClickToEnclosingTable, event.clickCount < 2,
+      let table = enclosingTableView(), table.row(for: self) >= 0
+    else {
+      super.mouseDown(with: event)
+      return
+    }
+    window?.makeFirstResponder(table)
+    table.selectRowIndexes(IndexSet(integer: table.row(for: self)), byExtendingSelection: false)
+  }
+
+  /// 沿 superview 链找到所在的表格；不在表格里时返回 nil。
+  private func enclosingTableView() -> NSTableView? {
+    var current = superview
+    while let view = current {
+      if let table = view as? NSTableView { return table }
+      current = view.superview
+    }
+    return nil
   }
 
   override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
@@ -3932,6 +4099,9 @@ private final class DetailsFileRowView: HoverHighlightRowView {
     fileButton.imagePosition = .noImage
     fileButton.lineBreakMode = .byTruncatingTail
     fileButton.activatesOnDoubleClickOnly = true
+    fileButton.forwardsSingleClickToEnclosingTable = true
+    // 键盘焦点始终留在表格上，j/k 等按键才不会落到按钮里。
+    fileButton.refusesFirstResponder = true
     fileButton.target = self
     fileButton.action = #selector(openItem)
     fileButton.translatesAutoresizingMaskIntoConstraints = false

@@ -147,6 +147,10 @@ final class WorkspaceViewController: NSViewController {
   /// 详情面板在同一标签的常规状态刷新与收起/重开之间保持实例稳定，避免 Files 树和
   /// 搜索框先被销毁再创建。切换标签后按新 Tab ID 替换，防止订阅继续指向旧标签。
   private var detailsPanelController: DetailsPanelViewController?
+  /// 当前视图树里的文件 Pane 控制器；预览槽局部换内容时据此摘下旧控制器。
+  private var filePaneControllers: [UUID: FilePaneViewController] = [:]
+  /// 上次整树刷新后活动 Pane 是否变过；决定刷新时是否把焦点还给详情面板。
+  private var activePaneChangedSinceRefresh = false
   private var detailsPanelTabID: UUID?
   /// 主窗口左、中、右三个语义区域的统一布局边界。详情显隐和宽度更新都只作用在
   /// 这里，不重建中栏里的终端视图或递归 Pane 树。
@@ -349,6 +353,10 @@ final class WorkspaceViewController: NSViewController {
     }
     let details = DetailsPanelViewController(model: model, preferences: preferences)
     details.pluginPanels = extensionHost
+    details.onRequestFocusActivePane = { [weak self] in
+      guard let self, let tab = self.model.selectedTab else { return }
+      self.focusActivePane(in: tab)
+    }
     detailsPanelController = details
     detailsPanelTabID = selectedTabID
     return details
@@ -964,6 +972,11 @@ final class WorkspaceViewController: NSViewController {
     let previousDockResponder = (view.window?.firstResponder as? NSView).flatMap {
       agentHostDocks.paneID(containing: $0) == nil ? nil : $0
     }
+    // 焦点在右侧详情面板（Files 表格、Find 框）时同理：面板控制器跨刷新复用，重新接入后
+    // 把焦点还给它，否则 Files 预览槽第一次拆分就会把正在浏览的键盘焦点抢到终端。
+    // 本轮刷新前活动 Pane 变了（新拆分、显式打开）时焦点应交给新 Pane，不能留在面板里。
+    let previousDetailsResponder = activePaneChangedSinceRefresh ? nil : focusedDetailsPanelResponder()
+    activePaneChangedSinceRefresh = false
     if !model.isOpenQuicklyPresented { openQuicklyController?.invalidateTargets() }
     observeTabs()
     // `refresh()` 会替换整个布局；详情控制器本身仍按当前 Tab 缓存，重建后的 Panel
@@ -973,6 +986,7 @@ final class WorkspaceViewController: NSViewController {
     workspaceTitlePopover = nil
     retainedObjects.removeAll()
     paneHosts.removeAll()
+    filePaneControllers.removeAll()
     editorTextViews.removeAll()
     tabRowsByID.removeAll(keepingCapacity: true)
     // 设置控制器跨展示复用，保留分类、搜索和滚动位置；只重建工作区临时子控制器。
@@ -1106,6 +1120,10 @@ final class WorkspaceViewController: NSViewController {
       let window = view.window, responder.window === window
     {
       restoredTerminalFocus = window.makeFirstResponder(responder)
+    } else if !blocksTerminalFocus, let responder = previousDetailsResponder,
+      let window = view.window, responder.window === window
+    {
+      restoredTerminalFocus = window.makeFirstResponder(responder)
     } else {
       restoredTerminalFocus = false
     }
@@ -1133,7 +1151,23 @@ final class WorkspaceViewController: NSViewController {
     tabSubscriptions.removeAll()
     for tab in model.tabs {
       tab.objectWillChange
-        .sink { [weak self] _ in self?.scheduleRefresh() }
+        .sink { [weak self, weak tab] _ in
+          // 预览槽原地换内容时布局仍会发布，但只需替换一个叶子，见 `paneContentReplaced`。
+          guard tab?.isUpdatingLayoutInPlace != true else { return }
+          self?.scheduleRefresh()
+        }
+        .store(in: &tabSubscriptions)
+      tab.paneContentReplaced
+        .sink { [weak self, weak tab] paneID in
+          guard let self, let tab, tab.id == self.model.selectedTabID else { return }
+          self.replaceFilePaneContent(paneID: paneID, in: tab)
+        }
+        .store(in: &tabSubscriptions)
+      tab.previewSlotChanged
+        .sink { [weak self, weak tab] slotID in
+          guard let self, let tab, tab.id == self.model.selectedTabID else { return }
+          for (paneID, host) in self.paneHosts { host.isPreviewSlot = paneID == slotID }
+        }
         .store(in: &tabSubscriptions)
       for runtime in tab.runtimes.values {
         // Terminal 的只读态会改变终端 HUD，仍需刷新；File Pane 自己就地更新编辑器和
@@ -1148,6 +1182,7 @@ final class WorkspaceViewController: NSViewController {
       tab.activePaneChanged
         .sink { [weak self, weak tab] _ in
           guard let self, let tab, tab.id == self.model.selectedTabID else { return }
+          self.activePaneChangedSinceRefresh = true
           self.updatePaneActivationOverlays(in: tab)
           self.installExtensionActivePaneBar()
           self.focusActivePane(in: tab)
@@ -2663,6 +2698,70 @@ final class WorkspaceViewController: NSViewController {
     }
   }
 
+  /// 建文件 Pane 控制器并登记到当前视图树；整树重建与预览槽局部换内容共用。
+  private func makeFilePaneController(
+    runtime: WorkspacePaneRuntime, tab: TerminalTabItem
+  ) -> FilePaneViewController {
+    let controller = FilePaneViewController(
+      runtime: runtime,
+      tab: tab,
+      model: model,
+      preferences: preferences,
+      renderer: fileRenderer
+    )
+    addChild(controller)
+    retainedObjects.append(controller)
+    filePaneControllers[runtime.id] = controller
+    let paneID = runtime.id
+    // 源码文本视图在 loadView 中创建，先加载视图再登记，跳转行号才找得到它。
+    _ = controller.view
+    editorTextViews[paneID] = controller.sourceTextView
+    controller.onSourceTextViewChanged = { [weak self] textView in
+      self?.editorTextViews[paneID] = textView
+    }
+    return controller
+  }
+
+  /// Files 预览槽原地换文件：只替换该叶子里的文件控制器，host、顶条、扩展条与其它
+  /// Pane 的视图（终端、WebKit）全部保留，避免按住 ↓ 浏览时整树重建与焦点被抢。
+  private func replaceFilePaneContent(paneID: UUID, in tab: TerminalTabItem) {
+    guard let host = paneHosts[paneID], let runtime = tab.runtime(for: paneID),
+      [.editor, .preview].contains(runtime.descriptor.kind)
+    else {
+      scheduleRefresh()
+      return
+    }
+    let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: host) == true
+    if let old = filePaneControllers.removeValue(forKey: paneID) {
+      old.removeFromParent()
+      retainedObjects.removeAll { $0 === old }
+    }
+    // 动态主题色要在当前外观上下文中解析成 CGColor，与整树重建时的处理一致。
+    var controller: FilePaneViewController?
+    view.effectiveAppearance.performAsCurrentDrawingAppearance {
+      controller = makeFilePaneController(runtime: runtime, tab: tab)
+    }
+    guard let controller else { return }
+    host.replaceContent(controller.view)
+    host.isPreviewSlot = tab.previewSlotPaneID == paneID
+    if hadFocus { view.window?.makeFirstResponder(host.preferredKeyView ?? host) }
+  }
+
+  /// 当前键盘焦点若在右侧详情面板内，返回应在重建后恢复焦点的视图。Find 框编辑时
+  /// first responder 是窗口共享的 field editor，恢复对象改为它所属的搜索框。
+  private func focusedDetailsPanelResponder() -> NSView? {
+    guard let detailsView = detailsPanelController?.viewIfLoaded,
+      let responder = view.window?.firstResponder as? NSView
+    else { return nil }
+    var target = responder
+    if let editor = responder as? NSTextView, editor.isFieldEditor,
+      let control = editor.delegate as? NSView
+    {
+      target = control
+    }
+    return target.isDescendant(of: detailsView) ? target : nil
+  }
+
   /// 按 Pane 类型建叶子视图（终端、文件、网页、工具），套上统一的 Pane 外框。
   private func makePaneLeaf(_ descriptor: PaneDescriptor, tab: TerminalTabItem) -> NSView {
     guard let runtime = tab.runtime(for: descriptor.id) else {
@@ -2671,8 +2770,9 @@ final class WorkspaceViewController: NSViewController {
     let host = ActivePaneHostView(
       paneID: descriptor.id,
       isActive: tab.activePaneID == descriptor.id,
-      onExternalDrop: { [weak self, weak tab, weak runtime] pasteboard, zone in
-        guard let self, let tab, let runtime else { return false }
+      onExternalDrop: { [weak self, weak tab] pasteboard, zone in
+        // 每次现取运行态：预览槽原地换内容后，叶子里的旧 runtime 已被替换。
+        guard let self, let tab, let runtime = tab.runtime(for: descriptor.id) else { return false }
         return self.handleExternalDrop(
           pasteboard,
           zone: zone,
@@ -2688,22 +2788,8 @@ final class WorkspaceViewController: NSViewController {
     switch descriptor.kind {
     case .terminal: content = makeTerminalPane(runtime, tab: tab)
     case .editor, .preview:
-      let controller = FilePaneViewController(
-        runtime: runtime,
-        tab: tab,
-        model: model,
-        preferences: preferences,
-        renderer: fileRenderer
-      )
-      addChild(controller)
-      retainedObjects.append(controller)
-      content = controller.view
-      if let textView = controller.sourceTextView {
-        editorTextViews[runtime.id] = textView
-      }
-      controller.onSourceTextViewChanged = { [weak self] textView in
-        self?.editorTextViews[runtime.id] = textView
-      }
+      content = makeFilePaneController(runtime: runtime, tab: tab).view
+      host.isPreviewSlot = tab.previewSlotPaneID == descriptor.id
     case .fileBrowser:
       let controller = FileBrowserViewController(runtime: runtime, tab: tab, model: model)
       addChild(controller)

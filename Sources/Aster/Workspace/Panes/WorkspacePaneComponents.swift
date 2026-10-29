@@ -528,10 +528,18 @@ final class ActivePaneHostView: NSView {
   var isActivePane: Bool {
     didSet { applyActivationAppearance() }
   }
+  /// 是否是 Files 预览槽。预览槽本来就不会成为活动 Pane（焦点留在 Files），褪色会让
+  /// 正在浏览的内容一直发灰，因此预览槽始终按聚焦外观显示。
+  var isPreviewSlot = false {
+    didSet {
+      guard isPreviewSlot != oldValue else { return }
+      applyActivationAppearance()
+    }
+  }
 
   /// 把当前焦点状态落到内容视图透明度上；拖动把手与底部附件不参与褪色。
   private func applyActivationAppearance() {
-    contentView?.alphaValue = isActivePane ? 1 : Self.inactiveContentAlpha
+    contentView?.alphaValue = isActivePane || isPreviewSlot ? 1 : Self.inactiveContentAlpha
   }
 
   init(
@@ -555,8 +563,28 @@ final class ActivePaneHostView: NSView {
   /// 而不是压在内容之上。
   func installContent(_ view: NSView) {
     addSubview(view)
+    pinContent(view)
+  }
+
+  /// 原地替换 Pane 主体内容（Files 预览槽换文件）。新内容插在旧内容的层级位置，
+  /// 顶条控件、扩展条与底部附件保持原样，不需要重建整个 host。
+  func replaceContent(_ view: NSView) {
+    let old = contentView
+    if let old, old.superview === self {
+      addSubview(view, positioned: .above, relativeTo: old)
+      old.removeFromSuperview()
+    } else {
+      addSubview(view, positioned: .below, relativeTo: nil)
+    }
+    pinContent(view)
+  }
+
+  /// 给主体内容建左右与顶部约束，并接上底部链和顶条间距。
+  private func pinContent(_ view: NSView) {
     view.translatesAutoresizingMaskIntoConstraints = false
-    let top = view.topAnchor.constraint(equalTo: topAnchor)
+    // 替换内容时顶条控件已装好，新内容要沿用让出的顶部间距。
+    let top = view.topAnchor.constraint(
+      equalTo: topAnchor, constant: chromeInsetApplied ? Self.chromeContentInset : 0)
     NSLayoutConstraint.activate([
       view.leadingAnchor.constraint(equalTo: leadingAnchor),
       view.trailingAnchor.constraint(equalTo: trailingAnchor),
