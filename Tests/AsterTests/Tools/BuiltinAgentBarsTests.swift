@@ -157,7 +157,7 @@ func codexBarReportsBoundSession() throws {
   #expect((missing["items"] as? [Any])?.isEmpty == true)
 }
 
-@Test("Claude Code 速率条：同一条回复多行只算一次，增量统计累计输出，没绑定 ID 时按目录回退")
+@Test("Claude Code 速率条：同一条回复多行只算一次，增量统计累计输入 / 输出，没绑定 ID 时按目录回退")
 func claudeBarReportsBoundSessionIncrementally() throws {
   guard pythonAvailable() else { return }
   let config = try temporaryDirectory("claudebar")
@@ -188,7 +188,7 @@ func claudeBarReportsBoundSessionIncrementally() throws {
   let prompt: (TimeInterval) -> [String: Any] = { offset in
     ["type": "user", "uuid": UUID().uuidString, "timestamp": iso(offset)]
   }
-  // 第一条回复 m1 写了两行（思考 + 文字），以最后一行的 300 为准；用时 30s − 20s = 10s → 出 30/s。
+  // 第一条回复 m1 写了两行（思考 + 文字），以最后一行的 300 为准；用时 30s − 20s = 10s → 出 30/s；新输入 2 + 1000 = 1002 → 入 100/s。
   try jsonl([prompt(-30), reply("m1", 120, -25), reply("m1", 300, -20)]).write(to: file)
   let environment = [
     "ASTER_AGENT": "claudeCode", "CLAUDE_CONFIG_DIR": config.path, "ASTER_PLUGIN_DATA": data.path,
@@ -199,12 +199,12 @@ func claudeBarReportsBoundSessionIncrementally() throws {
   let first = texts(try runBar("aster.claudebar", script: "bin/claudebar.sh", stdin: bound, environment: environment))
   #expect(first["model"] == "test-1 · high")
   #expect(first["status"] == "待输入")
-  #expect(first["rate"] == "出 30/s")
+  #expect(first["rate"] == "入 100/s · 出 30/s")
   #expect(first["context"] == "上下文 10.0k")
-  #expect(first["total"] == "累计出 300")
+  #expect(first["total"] == "累计 1.0k / 300")
   #expect(FileManager.default.fileExists(atPath: data.appendingPathComponent("sessions/\(sessionID).json").path))
 
-  // 追加第二条回复与一行子代理往来：累计 300 + 200，子代理不算。
+  // 追加第二条回复与一行子代理往来：累计输出 300 + 200、新输入 1002 × 2，子代理不算。
   let handle = try FileHandle(forWritingTo: file)
   try handle.seekToEnd()
   var sidechain = reply("s1", 9999, -5)
@@ -212,14 +212,14 @@ func claudeBarReportsBoundSessionIncrementally() throws {
   try handle.write(contentsOf: jsonl([prompt(-10), reply("m2", 200, -6), sidechain]))
   try handle.close()
   let second = texts(try runBar("aster.claudebar", script: "bin/claudebar.sh", stdin: bound, environment: environment))
-  #expect(second["total"] == "累计出 500")
-  #expect(second["rate"] == "出 50/s")
+  #expect(second["total"] == "累计 2.0k / 500")
+  #expect(second["rate"] == "入 250/s · 出 50/s")
 
   // 没绑定会话 ID：按编码后的目录名找最近写入的会话。
   let unbound: [String: Any] = [
     "context": ["agent": ["provider": "claudeCode", "state": "processing"], "workingDirectory": cwd]
   ]
   let fallback = try runBar("aster.claudebar", script: "bin/claudebar.sh", stdin: unbound, environment: environment)
-  #expect(texts(fallback)["status"] == "进行中" && texts(fallback)["total"] == "累计出 500")
+  #expect(texts(fallback)["status"] == "进行中" && texts(fallback)["total"] == "累计 2.0k / 500")
   #expect(fallback["ttl"] as? Int == 5)
 }

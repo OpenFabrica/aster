@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code 速率条：读这个 Pane 绑定的 Claude Code 会话记录，输出模型、状态、输出速率、上下文与累计（Aster bar 协议）。
+"""Claude Code 速率条：读这个 Pane 绑定的 Claude Code 会话记录，输出模型、状态、输入 / 输出速率、上下文与累计（Aster bar 协议）。
 
 会话记录是 `$CLAUDE_CONFIG_DIR/projects/<编码目录>/<session-id>.jsonl`。累计值按偏移量增量统计，
 进度存在 `$ASTER_PLUGIN_DATA/sessions/<id>.json`，每次只读新增的行。
@@ -17,7 +17,7 @@ IDLE_SECONDS = 60 * 60
 # 没有数据目录（无法增量）时最多读尾部这么多字节。
 TAIL_LIMIT = 8 * 1024 * 1024
 # 进度文件版本；结构变了就整份重算。
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 SESSION_ID = re.compile(r"^[0-9A-Za-z_-]{1,128}$")
 # Claude Code 写的顶层 timestamp 紧跟在 uuid 后面，优先认这个位置，工具结果里嵌套的 timestamp 不会被误取；
 # 键顺序不同的记录退回第一个 timestamp。
@@ -85,20 +85,28 @@ def find_session(projects, session_id, cwd, now):
 
 
 class Tally:
-    """增量统计：累计输出、最近一条回复的输出与用时、最近一次请求的上下文大小。
+    """增量统计：累计输入 / 输出、最近一条回复的输入 / 输出与用时、最近一次请求的上下文大小。
+
+    「输入」指新处理的输入（`input_tokens` + `cache_creation_input_tokens`）；缓存读取每次请求都会把整个上下文
+    再读一遍，当成输入速率会大得离谱，所以单独累计、只放进提示。
 
     同一条回复的多个内容块各写一行、带同一个 `message.id`，用量以最后一行为准，
     所以按「连续相同 id」合并；回复的起点是它第一行之前那一行的时间（用户输入或工具结果）。
     """
 
-    FIELDS = ("output_total", "message_id", "message_output", "message_start", "message_end",
+    FIELDS = ("output_total", "input_total", "cache_read_total", "message_id", "message_output",
+              "message_input", "message_cache_read", "message_start", "message_end",
               "context", "model", "effort", "previous_at", "updated_at")
 
     def __init__(self, saved=None):
         saved = saved or {}
         self.output_total = 0
+        self.input_total = 0
+        self.cache_read_total = 0
         self.message_id = None
         self.message_output = 0
+        self.message_input = 0
+        self.message_cache_read = 0
         self.message_start = None
         self.message_end = None
         self.context = 0
@@ -140,6 +148,9 @@ class Tally:
             return at
         try:
             output = int(usage.get("output_tokens") or 0)
+            new_input = (int(usage.get("input_tokens") or 0)
+                         + int(usage.get("cache_creation_input_tokens") or 0))
+            cache_read = int(usage.get("cache_read_input_tokens") or 0)
             context = sum(int(usage.get(key) or 0) for key in
                           ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
         except (TypeError, ValueError):
@@ -147,11 +158,17 @@ class Tally:
         identifier = message.get("id")
         if identifier and identifier == self.message_id:
             self.output_total += output - self.message_output
+            self.input_total += new_input - self.message_input
+            self.cache_read_total += cache_read - self.message_cache_read
         else:
             self.output_total += output
+            self.input_total += new_input
+            self.cache_read_total += cache_read
             self.message_id = identifier
             self.message_start = self.previous_at
         self.message_output = output
+        self.message_input = new_input
+        self.message_cache_read = cache_read
         self.message_end = at
         if context:
             self.context = context
@@ -162,13 +179,13 @@ class Tally:
         return at
 
     def rate(self):
-        """最近一条回复的输出速率与用时；算不出返回 None。"""
+        """最近一条回复的（输入速率, 输出速率, 用时）；算不出返回 None。"""
         if self.message_start is None or self.message_end is None:
             return None
         seconds = self.message_end - self.message_start
         if seconds < 0.5 or self.message_output <= 0:
             return None
-        return self.message_output / seconds, seconds
+        return self.message_input / seconds, self.message_output / seconds, seconds
 
 
 def read_complete_lines(path, offset):
@@ -259,14 +276,18 @@ def main():
     }, {"id": "status", "text": status, "color": color}]
     rate = tally.rate()
     if rate:
-        per_second, seconds = rate
+        input_rate, output_rate, seconds = rate
         items.append({
             "id": "rate",
-            "text": t(f"出 {compact(per_second)}/s", f"out {compact(per_second)}/s"),
+            "text": t(f"入 {compact(input_rate)}/s · 出 {compact(output_rate)}/s",
+                      f"in {compact(input_rate)}/s · out {compact(output_rate)}/s"),
             "icon": "speedometer",
             "color": "accent",
-            "tooltip": t(f"最近一条回复：输出 {tally.message_output} token，用时 {seconds:.1f}s（含思考与工具调用的生成）",
-                         f"Latest reply: {tally.message_output} output tokens in {seconds:.1f}s"),
+            "tooltip": t(
+                f"最近一条回复：新输入 {tally.message_input} token（另读缓存 {compact(tally.message_cache_read)}），"
+                f"输出 {tally.message_output} token，用时 {seconds:.1f}s（含思考与工具调用的生成）",
+                f"Latest reply: {tally.message_input} new input tokens (plus {compact(tally.message_cache_read)} "
+                f"read from cache), {tally.message_output} output tokens in {seconds:.1f}s"),
         })
     if tally.context:
         items.append({
@@ -277,9 +298,13 @@ def main():
         })
     items.append({
         "id": "total",
-        "text": t(f"累计出 {compact(tally.output_total)}", f"total out {compact(tally.output_total)}"),
+        "text": t(f"累计 {compact(tally.input_total)} / {compact(tally.output_total)}",
+                  f"total {compact(tally.input_total)} / {compact(tally.output_total)}"),
         "color": "secondary",
-        "tooltip": t("这个会话累计输出 token（不含子代理）", "Total output tokens of this session (excluding subagents)"),
+        "tooltip": t(
+            f"这个会话累计新输入 / 输出 token（不含子代理）；另读缓存 {compact(tally.cache_read_total)}",
+            f"Total new input / output tokens of this session (excluding subagents); "
+            f"plus {compact(tally.cache_read_total)} read from cache"),
     })
     items.append({"id": "refresh", "icon": "arrow.clockwise", "tooltip": t("立即刷新", "Refresh now"),
                   "onClick": {"type": "refresh"}})

@@ -177,7 +177,7 @@ v1 范围：
 | `aster.color` | HEX 3/4/6/8、rgb(a)/hsl(a)（含 CSS4 空格写法）、裸 `r, g, b`、颜色名；WCAG 对比度 | `#` + 3/4/6/8 位、不带 `#` 且含字母的 6 位、`rgb(`/`hsl(` 开头 | `clipboard.write` |
 | `aster.gitbar` | 示例：`activePane.bottom` 状态条（跟着当前 Pane 走），显示分支、ahead / behind、脏文件数；没有功能和网页，见「界面扩展」 | — | `exec`、`clipboard.write`、`terminal.insert` |
 | `aster.codexbar` | `pane.bottom` 状态条：运行 Codex 的 Pane 显示该会话的模型 · 思考等级、状态、最近用量区间的输入 / 输出速率、累计；见「内置 Agent 速率条」 | — | `exec`、`clipboard.write` |
-| `aster.claudebar` | `pane.bottom` 状态条：运行 Claude Code 的 Pane 显示该会话的模型 · 思考等级、状态、最近一条回复的输出速率、上下文大小、累计输出 | — | `exec`、`clipboard.write` |
+| `aster.claudebar` | `pane.bottom` 状态条：运行 Claude Code 的 Pane 显示该会话的模型 · 思考等级、状态、最近一条回复的输入 / 输出速率、上下文大小、累计输入 / 输出 | — | `exec`、`clipboard.write` |
 | `aster.sysbar` | `window.bottom` 状态条：本机 CPU、GPU、温度、风扇、内存（已用 / 总量）、数据卷剩余空间、Wi-Fi / 以太网上下行速率、电池；脚本只用系统命令，不需要 Python，温度与风扇由同目录的 C 读取器 `aster-sensors` 提供；见「内置系统状态条」 | — | `exec` |
 | `aster.password` | 随机密码：`crypto.getRandomValues` 拒绝采样；默认规则 + 自定义规则；用途属性（默认几项 + 自定义，全部选填）；复制即记历史 | —（只靠关键词） | `clipboard.write` |
 
@@ -682,9 +682,10 @@ aster.AsterError                    // 错误类型，便于 instanceof 判断
   （上限 8 MiB）读到有设置、两次 `token_count` 和任务状态为止；速率是相邻两次累计用量之差除以间隔（「最近一个用量区间」
   的均值，不是逐秒实时值）。
 - **Claude Code**（`$CLAUDE_CONFIG_DIR/projects/<目录名>/<id>.jsonl`，目录名是 cwd 里非字母数字换成 `-`）：同一条回复的
-  多个内容块各写一行、共用 `message.id`，用量以最后一行为准；`isSidechain` 行（子代理）不计。输出速率 = 最近一条回复的
-  输出 token ÷（最后一行时间 − 回复前一行的时间）；上下文 = 最近一次请求的 `input + cache_creation + cache_read`。
-  累计输出按偏移量增量统计，进度写在 `$ASTER_PLUGIN_DATA/sessions/<id>.json`（文件变小或版本不符就重算），
+  多个内容块各写一行、共用 `message.id`，用量以最后一行为准；`isSidechain` 行（子代理）不计。输入 / 输出速率 = 最近一条回复的
+  token ÷（最后一行时间 − 回复前一行的时间）；输入只算新处理的（`input + cache_creation`），缓存读取每次请求都把整个上下文
+  再读一遍，当速率会大得离谱，所以只在提示里累计显示；上下文 = 最近一次请求的 `input + cache_creation + cache_read`。
+  累计输入 / 输出按偏移量增量统计，进度写在 `$ASTER_PLUGIN_DATA/sessions/<id>.json`（文件变小或版本不符 `CACHE_VERSION` 就重算），
   只用正则取非回复行的时间，大会话也快。
 - 状态优先用 stdin 里 Aster 的 `agent.state`（`processing` 进行中、`awaitingInput` 等待确认、其它待输入）；进行中 `ttl` 5，
   否则 30。点击模型项复制会话 ID。文案按 `ASTER_LOCALE` 选中文或英文。
