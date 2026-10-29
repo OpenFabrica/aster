@@ -2319,6 +2319,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   /// 屏幕 working·blocked 证据时要撤销，避免普通 shell 标题把 Pane 永久标成 Agent。
   private var agentProviderIsTitleEvidenceOnly = false
   private var foregroundPollTask: Task<Void, Never>?
+  /// 受管终端重新附加后找回已运行 Agent 的任务；见 `recoverRunningForegroundAgent`。
+  private var managedAgentRecoveryTask: Task<Void, Never>?
   /// 诊断 seam：true 仅表示尚未取得权威 Shell Integration、仍需周期探测前台进程。
   /// UI 不依赖该值；回归测试用它防止 Ghostty 已有 OSC 133 时重新引入空闲轮询。
   var isUsingForegroundPollingFallback: Bool { foregroundPollTask != nil }
@@ -2613,6 +2615,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     // 远端受管 Pane 的 cwd 属于远端机器，绑定成功那一刻起就不能再当本机路径用，
     // 不必等远端 Shell 的第一条 OSC 7。
     if remoteManagedMachineLabel != nil { currentWorkingDirectoryIsLocal = false }
+    // 本机受管终端可能在 App 重启前就已经在跑 Agent：绑定后补识别一次。
+    if reference != nil, isLocalManagedTerminal { recoverRunningForegroundAgent() }
   }
 
   /// 标记受管终端创建/对账失败；该 Pane 只显示错误，不启动本地 Shell。
@@ -4735,6 +4739,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     pendingManagedTakeover = true
     let restarted = restart()
     if !restarted { pendingManagedTakeover = false }
+    // 分离期间发生的命令开始标记不会重放：重新附加后补识别正在运行的 Agent。
+    if restarted { recoverRunningForegroundAgent() }
     return restarted
   }
 
@@ -4756,6 +4762,8 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     let ghostty = ghosttyView
     ghosttyView = nil
     ghosttyShellProcessIdentifier = nil
+    managedAgentRecoveryTask?.cancel()
+    managedAgentRecoveryTask = nil
     // 刻意保留 terminalHostView：重新附加时 `restart()` 在原容器里重建 surface，
     // 不需要工作区重建整棵视图树。
     targetOpenCoordinator = nil
@@ -5103,9 +5111,41 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     }
   }
 
+  /// 找回已经在运行的 Agent：App 重启或重新附加受管终端后，Aster 没见过命令的开始标记
+  /// （OSC 133;C 在断开期间发出），按命令首词、标题与 hook 都识别不了，速率条等就一直不显示。
+  /// 这里按前台进程 argv 补识别；间隔里 Shell 集成事件先到（已有命令或 provider）就不再干预。
+  /// `delays` 给测试注入短间隔。
+  func recoverRunningForegroundAgent(delays: [Duration] = [.seconds(1), .seconds(3), .seconds(10)]) {
+    managedAgentRecoveryTask?.cancel()
+    managedAgentRecoveryTask = Task { @MainActor [weak self] in
+      for delay in delays {
+        try? await Task.sleep(for: delay)
+        guard !Task.isCancelled, let self else { return }
+        if self.activeAgentProvider != nil || self.hasRunningCommand { break }
+        guard let argv = self.foregroundCommandArguments(),
+          let provider = AgentProvider.detect(commandTokens: argv)
+        else { continue }
+        // 命令确实在前台运行，只是开始标记没被看到：先置位，再走与探针相同的采用流程。
+        self.hasRunningCommand = true
+        self.adoptForegroundAgentProvider(provider)
+        break
+      }
+      self?.managedAgentRecoveryTask = nil
+    }
+  }
+
   /// 前台命令（不是登录 Shell 本身）的 argv；没有前台命令或读不到时返回 nil。
   private func foregroundCommandArguments() -> [String]? {
     if let foregroundCommandArgumentsOverride { return foregroundCommandArgumentsOverride() }
+    // 本机受管终端：Ghostty surface 的前台进程是显示桥，不是用户命令；改用服务端上报的 Shell pid 问内核。
+    if isLocalManagedTerminal {
+      guard let managedTerminal,
+        let shell = ManagedTerminalCoordinatorRegistry.coordinator(for: managedTerminal)
+          .shellProcessIdentifier(for: managedTerminal),
+        let foreground = ProcessForegroundGroupReader.foregroundGroup(of: shell), foreground != shell
+      else { return nil }
+      return ProcessArgumentsReader.arguments(of: foreground)
+    }
     let foreground: Int32?
     let shell: Int32?
     if let ghosttyView {

@@ -118,3 +118,40 @@ func processArgumentsReadsOwnProcess() {
   #expect(arguments?.first == CommandLine.arguments.first)
   #expect(ProcessArgumentsReader.arguments(of: -1) == nil)
 }
+
+@Test("没见过命令开始标记（重启 App 后重新附加）时，按前台进程 argv 找回正在运行的 Agent")
+@MainActor
+func recoverRunningAgentFromForegroundArgv() async throws {
+  let (session, _, cleanup) = try makeSession()
+  defer { cleanup() }
+  // 没有任何 Shell integration 事件：hasRunningCommand 与 provider 都是初始值。
+  #expect(session.activeAgentProvider == nil && !session.hasRunningCommand)
+  session.foregroundCommandArgumentsOverride = { ["node", "/opt/homebrew/bin/codex"] }
+  session.recoverRunningForegroundAgent(delays: [.milliseconds(10)])
+  try await waitUntil { session.activeAgentProvider == .codex }
+  #expect(session.activeAgentProvider == .codex)
+  #expect(session.hasRunningCommand)
+}
+
+@Test("找回 Agent：前台不是 Agent、或命令事件已先到时不干预")
+@MainActor
+func recoverRunningAgentLeavesOtherStatesAlone() async throws {
+  let (session, view, cleanup) = try makeSession()
+  defer { cleanup() }
+  // 前台是普通命令：什么都不改。
+  session.foregroundCommandArgumentsOverride = { ["vim", "notes.txt"] }
+  session.recoverRunningForegroundAgent(delays: [.milliseconds(10), .milliseconds(10)])
+  try await Task.sleep(for: .milliseconds(100))
+  #expect(session.activeAgentProvider == nil && !session.hasRunningCommand)
+
+  // 命令事件与 hook 先到并已精确识别出 Claude：argv 即使指向 Codex 也不改写。
+  startCommand(view, "cx")
+  try await waitUntil { session.hasRunningCommand }
+  session.receiveAgentTerminalDirective(
+    AgentTerminalDirective(provider: .claudeCode, signal: .processing, sessionID: "claude-1"))
+  #expect(session.activeAgentProvider == .claudeCode)
+  session.foregroundCommandArgumentsOverride = { ["node", "/opt/homebrew/bin/codex"] }
+  session.recoverRunningForegroundAgent(delays: [.milliseconds(10)])
+  try await Task.sleep(for: .milliseconds(100))
+  #expect(session.activeAgentProvider == .claudeCode)
+}
