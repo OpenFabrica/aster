@@ -95,6 +95,8 @@ Aster.app                                ← 最后，不加 --deep
 
 **ad-hoc 分支刻意不加 `--options runtime`**。开启 hardened runtime 等同开启 Library Validation，而 ad-hoc 签名没有 Team ID，dyld 会拒绝加载同为 ad-hoc 的 `Sparkle.framework`。这是必须刻意维持的性质，不要「顺手统一」两个分支。
 
+**本地包默认用 Developer ID 签名、不公证**。没设置 `ASTER_SIGN_IDENTITY` 时，`build-app.sh` 用 `security find-identity -v -p codesigning` 取第一张 `Developer ID Application` 证书，走 hardened runtime 分支，但用 `--timestamp=none`（离线也能打包）；找不到证书才退回 ad-hoc，`ASTER_SIGN_IDENTITY=-` 强制 ad-hoc。原因：ad-hoc 签名的指定要求（designated requirement）只是 cdhash，每次打包都变，TCC 与钥匙串把新包当成另一个程序，「App 管理」「辅助功能」等隐私权限和钥匙串的「始终允许」都要重新授予；Developer ID 的指定要求是「bundle ID + 团队 ID」，重新打包、与正式版互换都保留。从 ad-hoc 包第一次换到 Developer ID 包时要再授权一次。不带安全时间戳的包不能公证，所以公证与发版仍要求显式设置 `ASTER_SIGN_IDENTITY`（`build-dmg.sh`、`release.sh` 都会检查）。钥匙串里有多张 Developer ID 证书时，用 `ASTER_SIGN_IDENTITY` 指定。
+
 非沙箱应用其实不需要 XPC Services，删掉可省约 1.5MB 并少两层签名。这里选择保留：与上游文档命令逐条对齐，将来若要沙箱化零改动。
 
 ## EdDSA 密钥

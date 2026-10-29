@@ -16,6 +16,8 @@
 - `io.local.aster-terminal.dev`：开发版。`scripts/build-app.sh` 不再写入这个 ID，本地 `-dev` 包与正式版同一身份；手动把包的 bundle ID 改成它，才会以开发版身份运行。
 - 不在 App 包里（`swift run`、`.build/debug/aster-cli`、测试宿主）：开发版，碰不到正式版数据。
 
+本地包默认用钥匙串里的 Developer ID 证书签名（不公证），指定要求是「bundle ID + 团队 ID」，所以重新打包、和正式版互换后，系统隐私权限与钥匙串授权都保留；ad-hoc 签名每次打包都变，需要重新授权。规则见 [软件更新](software-update.md)「打包与逐层签名」。
+
 设置页安装的 `/usr/local/bin/aster` 是指向包内 `aster-cli` 的符号链接，同样按包认身份，连到对应的控制 socket。
 
 ## 按身份分开的数据

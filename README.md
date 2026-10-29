@@ -84,8 +84,10 @@ from a pinned revision; `build-app.sh` runs it automatically. See
 `Vendor/Ghostty/README.md` for provenance, ABI risk, and the update procedure.
 SwiftTerm remains as a local target only for legacy-adapter regression tests during the
 migration; it is not part of the product terminal view tree.
-The default build uses local ad-hoc signing, suitable for installing on your own
-machine; for distribution, provide a Developer ID via
+By default the build signs with the first "Developer ID Application" certificate in your
+keychain (without notarization), so macOS keeps privacy permissions such as App Management
+and Accessibility across rebuilds; without such a certificate it falls back to ad-hoc
+signing, and `ASTER_SIGN_IDENTITY=-` forces ad-hoc. For distribution, provide a Developer ID via
 `ASTER_SIGN_IDENTITY="Developer ID Application: ..."` and a notarization profile via
 `ASTER_NOTARY_PROFILE`, then cut a release with `./scripts/release.sh`.
 Run tests through `./scripts/test.sh`, not bare `swift test`: the test host lives

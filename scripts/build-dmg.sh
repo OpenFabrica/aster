@@ -4,7 +4,8 @@ set -euo pipefail
 PROJECT_DIR="${0:A:h:h}"
 APP_DIR="$PROJECT_DIR/dist/Aster.app"
 # 签名身份与公证 profile 都经环境变量注入。ASTER_SIGN_IDENTITY 会传给内层
-# build-app.sh——整条 DMG 流程必须带它，缺变量重跑会把已签好的 App 重签回 ad-hoc。
+# build-app.sh——整条 DMG 流程必须带它：缺变量时内层按本地包签名（自动选 Developer ID、
+# 不带安全时间戳），这样的 App 不能拿去公证，DMG 本体也不签名。
 SIGN_IDENTITY="${ASTER_SIGN_IDENTITY:--}"
 NOTARY_PROFILE="${ASTER_NOTARY_PROFILE:-}"
 NOTARY_KEY="${ASTER_NOTARY_KEY:-}"

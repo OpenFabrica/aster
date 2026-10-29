@@ -284,7 +284,23 @@ for SPEC in \
 done
 
 iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/AsterIcon.icns"
-SIGN_IDENTITY="${ASTER_SIGN_IDENTITY:--}"
+# 签名身份：显式设置了 ASTER_SIGN_IDENTITY 就用它（"-" 强制 ad-hoc）；没设置时自动选钥匙串里第一张
+# Developer ID Application 证书，找不到（别人的机器）才退回 ad-hoc。
+# 本地包也要用固定的 Developer ID：ad-hoc 签名的指定要求只是 cdhash，每次打包都变，系统把新包当成
+# 另一个程序，「App 管理」「辅助功能」等隐私权限和钥匙串的「始终允许」都得重新给；Developer ID 按
+# 「团队 ID + bundle ID」认，重新打包、和正式版互换都保留。
+if [[ -n "${ASTER_SIGN_IDENTITY:-}" ]]; then
+  SIGN_IDENTITY="$ASTER_SIGN_IDENTITY"
+  TIMESTAMP=(--timestamp)
+else
+  SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -F'"' '/"Developer ID Application: / { print $2; exit }')
+  SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+  # 自动选中的身份只给本地包用（公证与发版都要求显式设置 ASTER_SIGN_IDENTITY），
+  # 不要安全时间戳：离线也能打包，也不必每层签名都等 Apple 的时间戳服务。
+  TIMESTAMP=(--timestamp=none)
+fi
+echo "Signing identity: $SIGN_IDENTITY" >&2
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   # ad-hoc 分支刻意不加 --options runtime。开启 hardened runtime 等同开启 Library
   # Validation，而 ad-hoc 签名没有 Team ID，dyld 会拒绝加载同为 ad-hoc 的
@@ -293,10 +309,10 @@ if [[ "$SIGN_IDENTITY" == "-" ]]; then
   SIGN_KEEP_ENTITLEMENTS=("${SIGN[@]}")
 else
   # 公证要求每一个嵌套可执行文件都带 Developer ID + hardened runtime + 安全时间戳。
-  SIGN=(codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY")
+  SIGN=(codesign --force --options runtime "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY")
   # Downloader.xpc 自带 entitlements（沙箱形态下使用），重签必须原样保留。参数与其它
   # 目标不同，这正是不能用 --deep 一把梭的直接原因。
-  SIGN_KEEP_ENTITLEMENTS=(codesign --force --options runtime --timestamp \
+  SIGN_KEEP_ENTITLEMENTS=(codesign --force --options runtime "${TIMESTAMP[@]}" \
     --preserve-metadata=entitlements --sign "$SIGN_IDENTITY")
 fi
 
