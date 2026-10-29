@@ -100,11 +100,17 @@ func newManagedPaneNeverLaunchesLocalShellTwin() async throws {
   #expect(!session.managedLaunchPending)
   // surface 的子进程必须是显示桥：布局记下的受管终端就是用户实际在用的那一个。
   let surfaceChild = try #require(session.processIdentifier)
-  // 读取时桥可能还没 exec，argv 仍是 `/bin/sh -c "<aster-session> terminal attach …"`，按整条命令判断。
-  let command = (ProcessArgumentsReader.arguments(of: surfaceChild) ?? []).joined(separator: " ")
+  // surface 已建立时子进程可能尚未 exec，KERN_PROCARGS2 暂时读不到 argv；
+  // 等参数可观察后再判定。中间的 `/bin/sh -c "<aster-session> terminal attach …"` 同样有效。
+  var command = ""
+  for _ in 0..<150 {
+    command = (ProcessArgumentsReader.arguments(of: surfaceChild) ?? []).joined(separator: " ")
+    if command.contains("aster-session") && command.contains("attach") { break }
+    try await Task.sleep(for: .milliseconds(20))
+  }
   #expect(
     command.contains("aster-session") && command.contains("attach"),
-    "surface 子进程不是显示桥：\(command)")
+    "surface 子进程不是显示桥：pid=\(surfaceChild)，argv=\(command)，状态=\(session.lifecycleState)，错误=\(String(describing: session.startupError))")
   session.stop(immediately: true)
 }
 

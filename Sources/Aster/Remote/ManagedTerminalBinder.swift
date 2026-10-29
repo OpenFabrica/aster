@@ -56,8 +56,9 @@ enum ManagedTerminalBinder {
     // 下一轮 runloop 的，几乎总是早于一次 SSH 对账往返完成。实测结果就是：远端投影出来的
     // Pane 挂着一个本机 Shell，显示桥 `ssh … terminal attach` 从头到尾没启动过
     // （P4 §6.8 里「ps 采样不到 terminal attach」的根因）。
-    // 引用本身来自服务端权威快照或持久化布局，同步采信它是安全的：对账失败会走
-    // `markManagedFailure` 明确报错，不会退化成一个未标识的本机 Shell。
+    // 引用先同步保存，但显示桥必须等异步对账完成：本机服务可能正在升级交接，
+    // 提前附加会连到旧服务，交接关闭连接后就以 ServiceDisconnected 停在分离态。
+    // 对账失败会走 `markManagedFailure` 明确报错，不会退化成本机 Shell。
     if let existing = descriptor.managedTerminal { session.bindManagedTerminal(existing) }
     // 要新建受管终端时同理：创建是异步的，surface 先挂上就会起一个本机 Shell，用户在里面
     // 工作，布局却记下另一个从没用过的受管终端（重启后附加回去的是它，目录停在创建时）。
@@ -69,7 +70,9 @@ enum ManagedTerminalBinder {
         isLocal: coordinator.machineProfileID == MachineProfile.localProfileID,
         endpointIsExplicit: coordinator.endpointIsExplicit,
         localManagedEnabled: localAutoManagePolicy())
-    if createsManagedTerminal { session.beginPendingManagedLaunch() }
+    if descriptor.managedTerminal != nil || createsManagedTerminal {
+      session.beginPendingManagedLaunch()
+    }
     // 绑定要么查服务端真实状态、要么创建远端终端，两者在 P3 都可能是 SSH 往返。
     // 必须异步执行：在 MainActor 上同步等待会让新建 Pane 时整个界面随网络延迟卡住。
     Task { @MainActor in
@@ -87,6 +90,8 @@ enum ManagedTerminalBinder {
     shell: String,
     onBind: @escaping (ManagedTerminalReference) -> Void
   ) async {
+    // 新建与恢复都在服务身份及终端状态确认后放行；失败时也要移除占位并呈现错误。
+    defer { session.completePendingManagedLaunch() }
     let coordinator = ManagedTerminalCoordinatorRegistry.coordinator(for: descriptor.managedTerminal)
 
     if let existing = descriptor.managedTerminal {
@@ -115,9 +120,6 @@ enum ManagedTerminalBinder {
 
     // 旧布局的非受管 Pane 保持原样，等待显式迁移；本机默认原生 PTY，见 shouldAutoManage。
     guard createsManagedTerminal else { return }
-    // 无论成败都要结束等待：成功换上显示桥，失败显示错误卡。
-    defer { session.completePendingManagedLaunch() }
-
     // cwd 与 Shell 属于**执行机器**：协调器是 SSH 传输时，本机 Pane 目录与本机 `$SHELL`
     // 在远端都可能不存在（修 §6.9）。两条路径共用同一个入口，不再各拼一份。
     let launch = ManagedTerminalLaunchSpec.resolve(

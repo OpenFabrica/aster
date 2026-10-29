@@ -125,7 +125,7 @@ flowchart LR
 
 ### 实时交接（`server upgrade`）
 
-App 启动时连接服务在任何 Pane 挂上显示桥之前，所以交接发生时没有显示桥需要重连；交接完成后各 Pane 照常对账（`persistedServerEpoch` 传 nil，终端 ID 在交接中保持不变）并附加到新服务。`server upgrade`（`SessionRuntime/src/service_upgrade.zig`）的顺序：
+App 启动时，`ManagedTerminalBinder` 同步保存恢复 Pane 的受管引用，并用 `beginPendingManagedLaunch` 阻止视图树提前启动显示桥。期间 `ManagedTerminalLoadingView` 显示转圈和“正在恢复终端…”（全新受管终端为“正在启动终端…”），完成时移除。服务检查、升级交接与终端对账完成后，统一由 `completePendingManagedLaunch` 原位挂载显示桥；失败则呈现错误卡，等待期间关闭的 Pane 不再启动桥。否则恢复视图会先附加旧服务，交接关闭旧连接后以 `ServiceDisconnected` 退出并停在“已分离”。对账时 `persistedServerEpoch` 传 nil，终端 ID 在交接中保持不变。回归用例 `restoredManagedPaneWaitsForServiceHandoffBeforeLaunchingBridge` 用可控交接门闩、真实服务与 Ghostty surface 验证启动顺序、原 PID、恢复画面及实际输入。`server upgrade`（`SessionRuntime/src/service_upgrade.zig`）的顺序：
 
 1. 读旧服务状态：构建号与本二进制相同就不做事（`--force` 例外，测试与手动重新交接用）；不支持 `live_handoff` 直接报错。
 2. 以只读观察者身份抓下每个运行中终端的完整画面（`terminal_attach.captureSnapshot`，与客户端附加时收到的第一份快照相同），写成种子文件 `<state>/<name>/handoff-seed/<terminalID>.seed`（0600，文件头带旧服务 epoch，见 `handoff_seed.zig`）。
@@ -133,6 +133,8 @@ App 启动时连接服务在任何 Pane 挂上显示桥之前，所以交接发�
 4. 新服务收到 PTY、核对进程存活后**立刻确认**，然后才去拿服务锁；旧服务收到确认后排空回复、退出、释放锁。以前新服务先拿锁再确认，两边互等到 5 秒超时，旧服务杀掉新服务继续运行——交接从未成功过。确认写失败时新服务直接退出，旧服务超时后收回 PTY，不会出现两个服务读同一个 PTY。
 5. 新服务按 PTY 自身的窗口尺寸（`TIOCGWINSZ`）建 VT，在首次读取 PTY 之前写入画面：v2 信封（`handoff.envelope_version`）在 JSON 之后按终端附带「画面快照 + 旧服务尚未写进 PTY 的输入」，精确无缝；v1 旧服务（交接代码修复之前的所有版本）不带画面，改用第 2 步的种子，并把这些 PTY 的行数临时减一再改回，促使前台程序整屏重画，补上抓种子到旧服务停止读取之间那一小段输出（只改行数不改列数，避免 Codex 这类内联界面按新宽度重排）。种子用完即删，epoch 不符的旧种子不会被采用。
 6. `server upgrade` 等到 epoch 变化，确认原来运行中的终端在新服务里全部仍在运行，输出 `server_upgrade` JSON。
+
+交接成功后，旧实例通过 `Session.relinquishAfterHandoff` 一次性交出 PID、PTY 和进程回收责任，并关闭自己的退出监听 FD，再释放 VT 与元数据。不能只把 PID / master 设为 -1：`scope_cleanup` 仍认为回收未完成，析构会固定等待 2 秒，报 `ProcessCleanupTimedOut` 且保留记录，新服务一直等旧服务释放锁。`python3 SessionRuntime/tests/handoff_cleanup.py <aster-session>` 验证首次交接及已接管终端再次交接，原 PID 存活且旧服务没有清理超时。同机单终端实测从约 2118 ms 降到 215–221 ms；这是隔离测试耗时，不代表所有历史量或机器负载。运行中的旧版本要完成一次交接后才具备修复，首次从旧服务升级仍可能经历原有清理等待。
 
 被接管的终端不再是服务的子进程：退出经 kqueue（macOS）/ pidfd（Linux）检测，结束请求直接发信号；它们还能再次交接。v1 旧服务交接给自身可执行文件路径上的二进制（忽略 `binary` 参数），App 替换后那就是新版；若 App 换了安装位置导致交出去的仍不是自带的那份，`ensureCurrentServer` 会对已支持 `binary` 参数的新服务再交接一次。端到端验证：`SessionRuntime/tests/live_handoff.py <新二进制> [<旧二进制>]`（PID 与几何保持、输出连续、画面与回滚历史恢复、交接后可输入、接管后可结束、连续两次交接、非法 `binary` 被拒），`scripts/test-runtime.sh` 设 `ASTER_HANDOFF_OLD_BINARY` 时再跑一遍 v1 兼容路径；App 侧见 `ManagedSessionServerBuildTests` 与 `ManagedServerRestartPromptTests`。
 

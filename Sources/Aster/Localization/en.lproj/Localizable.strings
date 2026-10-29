@@ -2844,3 +2844,5 @@
 "在窗口底部显示本机的 CPU、GPU、温度、风扇、内存、磁盘、网络与电池" = "Shows this Mac’s CPU, GPU, temperature, fans, memory, disk, network, and battery at the bottom of the window";
 "系统状态" = "System Status";
 "预览 · 回车固定" = "Preview · Return to Keep";
+"正在恢复终端…" = "Restoring terminal…";
+"正在启动终端…" = "Starting terminal…";

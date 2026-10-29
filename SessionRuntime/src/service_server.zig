@@ -171,11 +171,10 @@ fn runInitialized(allocator: std.mem.Allocator, instance: *Instance, name: []con
                                 reactor.waitWithWake(instance, dc.read(), 5, wake) catch break;
                             }
                         }
-                        // Invalidate pool entries so deinit won't double-close them.
-                        // Also don't kill the child processes — they belong to the new service.
+                        // 同时交出进程回收责任；只清 PID/FD 会让 scope cleanup 白等 2 秒，
+                        // 旧服务一直持锁，新服务就无法完成启动。
                         for (pool.entries.items) |*entry| {
-                            entry.session.process.master = -1;
-                            entry.session.process.pid = -1;
+                            entry.session.relinquishAfterHandoff();
                         }
                         return;
                     }
@@ -413,8 +412,7 @@ fn runWithAdoptedState(allocator: std.mem.Allocator, parent: std.fs.Dir, name: [
                             }
                         }
                         for (pool.entries.items) |*entry| {
-                            entry.session.process.master = -1;
-                            entry.session.process.pid = -1;
+                            entry.session.relinquishAfterHandoff();
                         }
                         return;
                     }

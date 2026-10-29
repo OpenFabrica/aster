@@ -2550,8 +2550,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   private(set) var managedFailure: String?
   /// 本次关闭的语义。分离只释放客户端资源并保留服务端进程；结束才终止远端进程。
   var managedDisposition: ManagedTerminalDisposition = .terminated
-  /// 新 Pane 正在等后台服务创建受管终端。期间不起本地 Shell：否则用户一直在本地 Shell 里
-  /// 工作，布局却记下另一个从没用过的受管终端，重启 App 后附加回去的是它（目录、进程都不对）。
+  /// 等待受管终端创建或恢复对账，期间显示状态提示，不启动本地 Shell 或提前附加旧服务。
   private(set) var managedLaunchPending = false
   /// 等待期间有人要焦点（新建标签）；surface 建好后补交。
   private var focusRequestedWhileManagedLaunchPending = false
@@ -2625,7 +2624,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     if reference != nil, isLocalManagedTerminal { recoverRunningForegroundAgent() }
   }
 
-  /// 进入「等受管终端创建」：之后的 `makeTerminalHost` 只给占位，不启动任何进程。
+  /// 等待受管终端创建或恢复对账：之后的 `makeTerminalHost` 只给占位，不启动任何进程。
   /// 必须在首次挂载前调用，与 `bindManagedTerminal` 的约束相同。
   func beginPendingManagedLaunch() {
     managedLaunchPending = true
@@ -2638,6 +2637,7 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
   func completePendingManagedLaunch() {
     guard managedLaunchPending else { return }
     managedLaunchPending = false
+    ManagedTerminalLoadingView.remove(from: terminalHostView)
     let wantsFocus = focusRequestedWhileManagedLaunchPending
     focusRequestedWhileManagedLaunchPending = false
     guard lifecycleState != .stopping, ghosttyView == nil, let preferences, let terminalHostView
@@ -3696,18 +3696,17 @@ final class TerminalSession: NSObject, ObservableObject, Identifiable {
     // 标签切换、主题刷新），此时绝不能顺手新建 surface：那会立刻拉起一个新的显示桥，
     // 让刚刚经 CLI 或菜单完成的“分离”被自动重新附加，分离形同无效。重新附加只走
     // 用户显式的 `reattachManagedTerminal()`。
-    // 等受管终端创建期间同样只给占位，见 `managedLaunchPending`。
+    // 等受管终端创建或恢复对账期间同样只给占位，见 `managedLaunchPending`。
     if (isManagedTerminal && lifecycleState == .detached) || managedLaunchPending {
       self.preferences = preferences
-      if let terminalHostView {
-        terminalHostView.layer?.backgroundColor = preferences.terminalCanvasBackgroundColor.cgColor
-        return terminalHostView
+      let host = terminalHostView ?? NSView()
+      host.wantsLayer = true
+      host.layer?.backgroundColor = preferences.terminalCanvasBackgroundColor.cgColor
+      terminalHostView = host
+      if managedLaunchPending {
+        ManagedTerminalLoadingView.show(in: host, restoring: managedTerminal != nil)
       }
-      let placeholder = NSView()
-      placeholder.wantsLayer = true
-      placeholder.layer?.backgroundColor = preferences.terminalCanvasBackgroundColor.cgColor
-      terminalHostView = placeholder
-      return placeholder
+      return host
     }
     let terminal = makeGhosttyTerminalView(preferences: preferences)
     if let terminalHostView {

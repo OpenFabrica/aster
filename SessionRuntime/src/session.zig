@@ -137,6 +137,18 @@ pub const Session = struct {
         try self.pollExit();
     }
 
+    /// 仅在交接已确认、旧实例的 PTY FD 已关闭后调用。进程回收责任已转给新服务，
+    /// 旧 Session 析构只释放 VT 与元数据，不能再尝试终止或等待原进程。
+    pub fn relinquishAfterHandoff(self: *Session) void {
+        self.process.master = -1;
+        self.process.pid = -1;
+        self.cleanup_complete = true;
+        if (self.exit_watch_fd >= 0) {
+            scope.closeWatch(self.exit_watch_fd);
+            self.exit_watch_fd = -1;
+        }
+    }
+
     /// Legacy compatibility wrapper. P1 owners should use tryDestroy so failure
     /// can retain the record. A failed fallback deliberately retains ownership.
     pub fn destroy(self: *Session) void {
