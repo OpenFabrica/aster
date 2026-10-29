@@ -1,5 +1,5 @@
 // `aster mcp` 的协议处理器：把 MCP 的 initialize / tools/list / tools/call 映射到
-// `host.*` 控制方法。纯逻辑，不做 IO；控制调用由调用方注入，便于单测。
+// `host.*`、`session.snapshot` 与 `tool.*` 控制方法。纯逻辑，不做 IO；控制调用由调用方注入，便于单测。
 import Foundation
 
 /// App 不可达（socket 连不上、拉起后仍无响应）。注入的控制调用用它与服务端错误区分。
@@ -26,12 +26,20 @@ public struct AgentHostMCPTools: Sendable {
 
   public let sessionKey: String
   public let callerPane: String?
+  /// MCP server 进程的工作目录（通常是 agent 的项目目录）；`run_plugin_tool` 没给 cwd 时用它。
+  public let workingDirectory: String?
   /// initialize 时记录的客户端名（已清洗）。
   public private(set) var clientName: String?
 
-  /// `callerPane` 不合法（过长、含控制字符）时直接丢弃：环境变量坏了不该让每次调用都失败。
-  public init(sessionKey: String, callerPane: String?) {
+  /// `callerPane` 不合法（过长、含控制字符）时直接丢弃：环境变量坏了不该让每次调用都失败；
+  /// `workingDirectory` 同理，不是合法绝对路径就当没有。
+  public init(sessionKey: String, callerPane: String?, workingDirectory: String? = nil) {
     self.sessionKey = sessionKey
+    if let workingDirectory, (try? ToolRunParams(id: "x/y", cwd: workingDirectory).validate()) != nil {
+      self.workingDirectory = workingDirectory
+    } else {
+      self.workingDirectory = nil
+    }
     if let callerPane, !callerPane.isEmpty,
       (try? AgentHostCaller(session: "x", callerPane: callerPane).validate()) != nil
     {
@@ -111,7 +119,8 @@ public struct AgentHostMCPTools: Sendable {
       let request = try controlRequest(
         tool: name, arguments: arguments, agentSession: Self.agentSessionID(fromMeta: params?["_meta"]))
       let result = try call(request.method, request.params)
-      return AgentHostMCPRendering.success(tool: name, result: result)
+      return AgentHostMCPRendering.success(
+        tool: name, result: try projectedResult(tool: name, arguments: AgentHostMCPArguments.object(arguments), result: result))
     } catch let error as AgentHostMCPArgumentError {
       return AgentHostMCPRendering.error("invalid arguments: \(error.message)")
     } catch let error as AsterControlError {
@@ -162,8 +171,49 @@ public struct AgentHostMCPTools: Sendable {
     case AgentHostMCPToolCatalog.Name.hostClose:
       let params = HostCloseParams(host: try AgentHostMCPArguments.requiredString(arguments, "host"), agent: caller)
       return (AgentHostControlMethod.hostClose.rawValue, try encode(params))
+    case AgentHostMCPToolCatalog.Name.listTabs, AgentHostMCPToolCatalog.Name.listPanes:
+      // 列表取整份快照、在本地筛选（见 projectedResult）；这里先校验筛选参数，坏参数不连 socket。
+      _ = try layoutSelector(arguments, tool: tool)
+      return (AsterControlMethod.sessionSnapshot.rawValue, .object([:]))
+    case AgentHostMCPToolCatalog.Name.listPluginTools:
+      let query = AgentHostMCPArguments.optionalString(
+        arguments, "query", maximumBytes: ToolControlLimits.maximumQueryBytes)
+      return (ToolControlMethod.toolList.rawValue, try encode(ToolListParams(query: query)))
+    case AgentHostMCPToolCatalog.Name.runPluginTool:
+      let cwd = try AgentHostMCPArguments.optionalIdentifier(arguments, "cwd", maximumBytes: ToolControlLimits.maximumPathBytes)
+      let params = ToolRunParams(
+        id: try AgentHostMCPArguments.requiredString(arguments, "id"),
+        input: try AgentHostMCPArguments.optionalRawString(arguments, "input"),
+        cwd: cwd ?? workingDirectory)
+      return (ToolControlMethod.toolRun.rawValue, try encode(params))
     default:
       throw AgentHostMCPArgumentError("unknown tool: \(tool)")
+    }
+  }
+
+  /// list_tabs 的 `window` / list_panes 的 `tab`：可省略；`current` 换成调用者自己的 Pane，
+  /// 没有调用者 Pane 时保留 `current`，由快照投影退回焦点 Pane。
+  func layoutSelector(_ arguments: [String: JSONValue], tool: String) throws -> String? {
+    let key = tool == AgentHostMCPToolCatalog.Name.listTabs ? "window" : "tab"
+    guard let selector = try AgentHostMCPArguments.optionalIdentifier(arguments, key, maximumBytes: 128) else {
+      return nil
+    }
+    return selector == "current" ? (callerPane ?? selector) : selector
+  }
+
+  /// 需要在本地加工的结果：列表工具把 `session.snapshot` 投影成标签或 Pane 列表；其余原样返回。
+  func projectedResult(tool: String, arguments: [String: JSONValue], result: JSONValue) throws -> JSONValue {
+    switch tool {
+    case AgentHostMCPToolCatalog.Name.listTabs:
+      let snapshot = try result.decoded(as: SessionSnapshot.self)
+      let tabs = try SessionLayoutListing.tabs(in: snapshot, window: try layoutSelector(arguments, tool: tool))
+      return try JSONValue(encoding: SessionLayoutListing.TabListResult(tabs: tabs))
+    case AgentHostMCPToolCatalog.Name.listPanes:
+      let snapshot = try result.decoded(as: SessionSnapshot.self)
+      let panes = try SessionLayoutListing.panes(in: snapshot, tab: try layoutSelector(arguments, tool: tool))
+      return try JSONValue(encoding: SessionLayoutListing.PaneListResult(panes: panes))
+    default:
+      return result
     }
   }
 
@@ -229,6 +279,29 @@ enum AgentHostMCPArguments {
     guard let value = arguments[key], !value.isNull else {
       throw AgentHostMCPArgumentError("missing required argument: \(key)")
     }
+    guard let raw = value.stringValue else { throw AgentHostMCPArgumentError("\(key) must be a string") }
+    return raw
+  }
+
+  /// 可选的标识符（选择器、路径）：缺省或 null 为 nil；给了就按 `requiredString` 的规则严格校验，
+  /// 只是长度上限可调（路径比主机名长）。
+  static func optionalIdentifier(_ arguments: [String: JSONValue], _ key: String, maximumBytes: Int) throws -> String? {
+    guard let value = arguments[key], !value.isNull else { return nil }
+    guard let raw = value.stringValue else { throw AgentHostMCPArgumentError("\(key) must be a string") }
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    guard trimmed.utf8.count <= maximumBytes else {
+      throw AgentHostMCPArgumentError("\(key) is too long (max \(maximumBytes) bytes)")
+    }
+    guard !trimmed.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else {
+      throw AgentHostMCPArgumentError("\(key) must not contain control characters")
+    }
+    return trimmed
+  }
+
+  /// 可选的原样字符串（交给插件的输入）：不 trim、不清洗，大小由协议层校验。
+  static func optionalRawString(_ arguments: [String: JSONValue], _ key: String) throws -> String? {
+    guard let value = arguments[key], !value.isNull else { return nil }
     guard let raw = value.stringValue else { throw AgentHostMCPArgumentError("\(key) must be a string") }
     return raw
   }

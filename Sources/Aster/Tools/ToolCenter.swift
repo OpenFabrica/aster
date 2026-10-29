@@ -413,23 +413,33 @@ final class ToolCenter: ToolManaging {
   /// 重建启动器目录：停用的插件不列；图标取功能图标，没有再用插件图标。内置网页插件用翻译后的标题，
   /// 搜索与「识别到」的标签也就跟原生内置工具一样随界面语言变化。
   private func rebuildCatalog() {
-    var entries: [ToolCatalogEntry] = []
-    for record in records where status(of: record) != .disabled {
-      let manifest = displayManifest(of: record)
-      for feature in manifest.features {
-        entries.append(
-          ToolCatalogEntry(
-            pluginID: record.id, pluginName: manifest.name, pluginVersion: manifest.version,
-            source: record.source, feature: feature,
-            iconPath: record.featureIconPaths[feature.code] ?? record.iconPath, hasUI: manifest.ui != nil))
-      }
-    }
+    let entries = records.filter { status(of: $0) != .disabled }.flatMap(catalogEntries(of:))
     catalog = entries
     entriesByID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     // 搜索接口是主线程同步调用，第一次搜索要为每个标题做拼音转换。目录变化后在后台先搜一次，
     // 把归一化结果写进 ToolSearchText 的全局缓存（有锁），用户第一次打字时就不再卡这一下。
     Task.detached(priority: .utility) {
       _ = ToolMatcher.search("a", entries: entries, usage: ToolUsageStats(), now: Date(), limit: 1)
+    }
+  }
+
+  /// 一个插件的全部功能条目：图标取功能图标，没有再用插件图标；标题用显示清单（内置网页插件已翻译）。
+  private func catalogEntries(of record: ToolPluginRecord) -> [ToolCatalogEntry] {
+    let manifest = displayManifest(of: record)
+    return manifest.features.map { feature in
+      ToolCatalogEntry(
+        pluginID: record.id, pluginName: manifest.name, pluginVersion: manifest.version,
+        source: record.source, feature: feature,
+        iconPath: record.featureIconPaths[feature.code] ?? record.iconPath, hasUI: manifest.ui != nil)
+    }
+  }
+
+  /// 控制协议（`tool.list` / `tool.run`）看到的全部功能，含停用插件，每条带插件当前状态。
+  /// `catalog` 不列停用插件；agent 需要知道「有这个工具但被停用了」才能提示用户，所以这里从插件记录现算。
+  func controlEntries() -> [ToolControlEntry] {
+    records.flatMap { record in
+      let status = status(of: record)
+      return catalogEntries(of: record).map { ToolControlEntry(entry: $0, status: status) }
     }
   }
 

@@ -43,6 +43,8 @@ final class AsterControlDispatcher {
   var workspaceContextProvider: (@MainActor () -> WorkspaceControlContext)?
   /// `host.exec` 等 agent 远程执行方法的服务；nil 表示取 `AgentHostService.shared`，测试注入替身。
   var agentHostService: AgentHostService?
+  /// `tool.*` 插件命令方法的工具中心；nil 表示取 `ToolCenter.shared`，测试注入替身。
+  var toolControlProvider: (any ToolControlProviding)?
 
   init(
     bridge: AsterControlBridge, version: String,
@@ -72,6 +74,7 @@ final class AsterControlDispatcher {
       if let response = handleHostMethod(request) { return response }
       if let response = await handleAgentHostMethod(request, client: client) { return response }
       if let response = await handleWorkspaceMethod(request) { return response }
+      if let response = await handleToolMethod(request, client: client) { return response }
       let method = try request.resolvedMethod()
       let result = try await dispatch(method, request: request, client: client)
       return AsterControlResponse(id: request.id, result: result)

@@ -16,7 +16,10 @@ v1 范围：
 - 工具 Pane：工具可开成工作区分屏。v1 **不持久化**工具 Pane（见「工具 Pane」）。
 
 不在 v1：终端/文件右键「用工具处理」、系统服务菜单、`aster tool` CLI、复制后推荐、Inspector 固定、
-读取最后一条命令输出、`.asterplugin` 打包、插件 backend 进程、MCP 暴露、插件索引。
+读取最后一条命令输出、`.asterplugin` 打包、插件 backend 进程、插件索引。
+
+MCP 暴露已经实现：`aster mcp` 的 `list_plugin_tools` / `run_plugin_tool` 经控制协议 `tool.list` / `tool.run`
+列出并无界面地运行插件命令，见「控制协议：tool.list / tool.run」。
 
 ## 模块与归属
 
@@ -228,6 +231,40 @@ v1 范围：
   `SETSIGDEF`/`SETSIGMASK`；只给父进程一端设非阻塞，stdin 写端设 `NOSIGPIPE`。poll 循环放在 GCD 线程，不占协作线程池。
   超时、取消、输出超限走同一流程。用 `waitid(WNOWAIT)` 先看不收：主进程退出 200 ms 后，仍握着输出管道的后代进程
   一起结束，避免后台子进程让工具一直「运行中」。
+
+## 控制协议：tool.list / tool.run
+
+外部调用方（`aster mcp` 的 `list_plugin_tools` / `run_plugin_tool`）经控制 socket 列出插件命令，并无界面地运行。
+协议类型在 `Sources/AsterCore/Tools/ToolControlProtocol.swift`，App 侧在 `Sources/Aster/Control/ToolControlCommands.swift`，
+在 `AsterControlDispatcher.handle` 里先于 `resolvedMethod()` 拦截（`AsterControlMethod` 是封闭枚举）。
+依赖经 `ToolControlProviding` 注入：生产取 `ToolCenter.shared`，测试注入替身。
+
+- `tool.list`，参数 `{"query"?: string}`（≤ 256 字节）。返回 `{"tools": [...]}`，每条：
+  `id`（`<pluginID>/<code>`）、`plugin_id`、`plugin_name`、`title`、`subtitle`、`keywords`、`kind`（`script` / `builtin` / `ui`）、
+  `output`（脚本的输出方式，非脚本为 null）、`status`（`ready` / `disabled` / `needs_approval`）、`runnable`、
+  `unavailable_reason`（不可运行时给 agent 看的英文短句）。来源是 `ToolCenter.controlEntries()`：和启动器目录同一套
+  条目，但**包含停用插件**，agent 才能提示用户「有这个工具，只是停用了」。`query` 非空时用启动器的 `ToolMatcher`
+  筛选排序，不传使用记录、不记使用次数；空查询按目录顺序全部返回。
+- `tool.run`，参数 `{"id": string, "input"?: string, "cwd"?: string}`。`input` ≤ 256 KiB；`cwd` 必须是绝对路径，
+  不存在或省略时用用户主目录。返回 `{"id", "output", "text"?, "items"?, "truncated", "duration_ms"}`：
+  `output` 为 `text` 看 `text`，`list` 看 `items`（与脚本 list 输出同形），`none` 只表示已完成。`text` 超过 512 KiB
+  按 UTF-8 字符边界截断并置 `truncated`。
+- 可运行规则（`runnable == true`）：插件状态为 `ready`，且
+  - `script` 动作的输出是 `text`、`list` 或 `none`；`terminal`（开新终端标签）不可运行；
+  - `builtin` 动作的处理器能给出 `BuiltinTextTools.inlineResult`：`timestamp`、`base64`、`url`、`hash`（只出 SHA-256）；
+    `json`、`ports`、`uuid`、`stickies` 是原生界面工具，不可运行；
+  - `ui`（网页界面）不可运行。
+- 运行流程：脚本先 `prepareToRun`（用户插件重算摘要，文件变了就转成需要确认并拒绝），再取 `runtimeInfo`，
+  在后台 `ScriptToolRunner.makeInvocation` + `run`，与启动器运行同一套环境、超时与输出上限；`stdin` 收到 `input`，
+  `ASTER_CWD` 是 `cwd`。脚本运行占用该连接的一个等待名额（每连接最多 4 个）。连接关闭时取消进程组。
+  不调用 `recordUse`：agent 调用不影响启动器排序。
+- 错误码：id 不存在 → `not_found`；`ui` / `terminal` / 原生界面工具、插件停用、需要确认、内置转换处理不了输入 →
+  `invalid_params`（message 写明原因与用户该做什么）；脚本超时 → `timeout`；其它脚本失败（退出码非 0、启动失败、
+  list 输出格式不对、输出超限）→ `internal_error`，message 带 `ScriptToolError` 的可读文案（含 stderr 摘要）。
+- **不弹授权**：需要确认的插件直接报错，提示用户在 Aster 里打开一次该工具确认权限。后台 agent 触发的弹窗
+  容易被用户顺手点掉，授权必须是用户主动打开工具时做出的决定。
+- **不走 IPC 写门禁**：「允许发送按键」管的是往用户的 Pane 里打字；插件是用户已安装并确认过权限的程序，
+  运行它不触碰任何 Pane，所以 `tool.run` 不受这个开关约束。插件能做什么由它已授权的权限决定，与调用方无关。
 
 ## 网页工具
 
@@ -803,7 +840,7 @@ Swift 的 `L("…")` 新文案写入 `l10n-work/*.json`（`key → {en, ja, fr, 
 只跑定向用例：`./scripts/test.sh --filter <name>`。覆盖：清单校验（每条拒绝规则）、匹配与拼音、信任状态机、
 摘要、脚本协议解析与上限、桥接参数与授权、内置转换；scheme handler 路径越界、桥接未授权拒绝、脚本超时与
 输出上限、插件扫描与无效清单、容错解码与快照剔除工具 Pane、设置桥快照与动作；加密存储的密文格式、密钥丢失与预埋条目、
-剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）、`aster.sysbar` 脚本（预置网速基准，`BuiltinSysbarTests`）、`pane.header` 顶部条与挂载（`PaneHeaderBarTests`）。
+剪贴板机密标记（`ToolSecureStorageTests`）；界面扩展：视图清单校验、bar 协议解析、调度与退避、点击动作门禁、挂载点复用、设置桥视图动作、`aster.gitbar` 脚本（临时 git 仓库）、`aster.codexbar` / `aster.claudebar` 脚本（假会话记录，`BuiltinAgentBarsTests`）、`aster.sysbar` 脚本（预置网速基准，`BuiltinSysbarTests`）、`pane.header` 顶部条与挂载（`PaneHeaderBarTests`）；控制协议 `tool.list` / `tool.run` 的可运行判定、筛选、拒绝与真实脚本运行（`ToolControlCommands`）。
 
 ## 独立工具窗口
 

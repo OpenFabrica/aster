@@ -133,6 +133,7 @@ socket（目录 `0700`、socket `0600`，`accept` 后用 `getpeereid` 校验对�
 | `tab.focus` / `tab.rename` | 否 | 切到标签并前置窗口；固定标签名，`title` 为空时恢复自动标题 |
 | `events.subscribe` / `events.wait` | 否 | 长连接推送 / 阻塞等下一条事件（`after_sequence` 补漏） |
 | `notification.show` | 是 | 系统通知（标题 256 字节、正文 1 KiB，剥离控制字符） |
+| `tool.list` / `tool.run` | 否 | 列出插件命令、无界面运行一条插件命令（规则见 [工具箱与插件](tools-and-plugins.md)） |
 | `workflow.execute` | 是 | 旧 `aster open/view/edit/watch/jump/learn/ignore/pane run|exec|capture` 语法桥接到 `WorkflowCLIParser`，返回 `{stdout, stderr, exit_code}` |
 
 **结构方法**（`pane.split` / `pane.close` / `tab.*`，实现在 `Control/LayoutControlCommands.swift`）：
@@ -142,6 +143,13 @@ socket（目录 `0700`、socket `0600`，`accept` 后用 `getpeereid` 校验对�
 结构变更是服务端事务，请求返回时新 ID 还不存在，`pane.split` / `tab.new` 只带 `window_id`，调用方用
 `pane.created` 事件或 `session.snapshot` 取结果。`tab` 字段接受标签短 ID，也接受标签里任意 pane 的 selector。
 CLI 侧 `pane close` / `tab close` 必须显式给目标或 `--current`，不靠 `ASTER_PANE_ID` 兜底。
+
+**列表命令**（`aster pane list` / `aster tab list`，MCP `list_panes` / `list_tabs`）不新增控制方法：
+客户端取 `session.snapshot`，用 `AsterCore/SessionLayoutListing.swift` 投影与筛选，旧版 App 也能用。
+范围参数接受短 ID、范围内任意 pane 的 ID 或 agent 名，以及 `current`（CLI 与 MCP 先换成
+`ASTER_PANE_ID`，没有时退回焦点 pane）；快照里没有 UUID，`p_<UUID>` 形态在 CLI 解析时就拒绝。
+`aster pane -h` / `aster tab -h`（或只写组名）打印 `AsterCLIArguments.paneUsage` / `tabUsage`，
+总帮助嵌入同一份文本；旧语法子命令（`pane run|exec|capture`、`tab badge`）的 `-h` 不拦截。
 
 **ID 与 selector**：窗口 `w1`、标签 `w1:t2`、pane `w1:p5` 是稳定短 ID，由
 `ControlIdentityRegistry` 分配、只增不复用，标签跨窗口转移后旧 ID 仍作为别名可用。`target`/`pane`
@@ -230,6 +238,7 @@ printf '{"id":2,"method":"pane.read","params":{"pane":"current","lines":20}}\n' 
 - **入口。** CLI `aster host exec|wait|read|interrupt|close|open|terminals`（`Sources/AsterCLI/HostExecCommands.swift`；
   `--` 之后的词原样作为命令，未完成时 stderr 一行 JSON 并以退出码 75 退出）；`aster mcp`（`MCPCommand.swift`，
   stdio MCP server，工具 `list_hosts`、`host_exec`、`host_wait`、`host_read`、`host_interrupt`、`host_close`，
+  另有只读的 `list_tabs`、`list_panes` 与插件命令 `list_plugin_tools`、`run_plugin_tool`，
   目录在 `AgentHostMCPToolCatalog.swift`；Codex 沙箱多半连不上控制 socket，MCP 是它的主路径）。
 - **审计。** 每次执行、授权变化与总开关改动都追加到 `~/Library/Application Support/Aster/audit/agent-hosts-YYYY-MM.jsonl`
   （保留 13 个月，命令先脱敏、从不记录输出内容）；设置「主机」分类里的「Agent 访问」可分页查看。

@@ -12,6 +12,10 @@ public enum AgentHostMCPToolCatalog {
     public static let hostRead = "host_read"
     public static let hostInterrupt = "host_interrupt"
     public static let hostClose = "host_close"
+    public static let listTabs = "list_tabs"
+    public static let listPanes = "list_panes"
+    public static let listPluginTools = "list_plugin_tools"
+    public static let runPluginTool = "run_plugin_tool"
   }
 
   /// 单次等待的秒数区间。上限 50 s：Codex 默认 tool_timeout_sec 是 60 s，留 10 s 余量给连接与渲染。
@@ -21,13 +25,16 @@ public enum AgentHostMCPToolCatalog {
   /// 合法工具名集合，分发前做白名单校验。
   public static let names: Set<String> = [
     Name.listHosts, Name.hostExec, Name.hostWait, Name.hostRead, Name.hostInterrupt, Name.hostClose,
+    Name.listTabs, Name.listPanes, Name.listPluginTools, Name.runPluginTool,
   ]
 
   /// `initialize` 结果里的 `instructions`：一段总览，帮客户端决定何时启用这组工具。
   public static let instructions =
     "Aster lets you run shell commands on the user's saved SSH hosts through a persistent terminal "
     + "that the user can watch and control. Call list_hosts first, then host_exec. Each host access "
-    + "is approved by the user in Aster; never ask the user for passwords or keys."
+    + "is approved by the user in Aster; never ask the user for passwords or keys. "
+    + "You can also list the terminal tabs and panes open in Aster (list_tabs, list_panes), and run "
+    + "the user's Aster plugin commands without opening their UI (list_plugin_tools, then run_plugin_tool)."
 
   private static let hostProperty: JSONValue = .object([
     "type": "string",
@@ -124,6 +131,75 @@ public enum AgentHostMCPToolCatalog {
         properties: ["host": hostProperty],
         required: ["host"],
         annotations: ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true]),
+      tool(
+        name: Name.listTabs, title: "List Aster tabs",
+        description:
+          "List the terminal tabs open in the Aster app: tab id (w1:t2), window id, pane count and title. "
+          + "* marks the selected tab of each window; window_focused marks the focused window. Use the "
+          + "tab id with list_panes, or with the aster CLI (aster tab focus <tab>).",
+        properties: [
+          "window": .object([
+            "type": "string",
+            "description": .string(
+              "Only list tabs of this window: a window id (w1), or any tab or pane id inside it, or "
+              + "current for your own window. Omit to list every window."),
+          ])
+        ],
+        required: [],
+        annotations: ["readOnlyHint": true, "openWorldHint": false]),
+      tool(
+        name: Name.listPanes, title: "List Aster panes",
+        description:
+          "List the panes open in the Aster app: pane id (w1:p3), tab id, kind, the agent or foreground "
+          + "command running in it, and its working directory. * marks the focused pane of each tab. "
+          + "Use the pane id with the aster CLI (aster pane read <pane>).",
+        properties: [
+          "tab": .object([
+            "type": "string",
+            "description": .string(
+              "Only list panes of this tab: a tab id (w1:t2), any pane id or agent name inside it, or "
+              + "current for your own tab. Omit to list every pane."),
+          ])
+        ],
+        required: [],
+        annotations: ["readOnlyHint": true, "openWorldHint": false]),
+      tool(
+        name: Name.listPluginTools, title: "List Aster plugin commands",
+        description:
+          "List the commands of the plugins installed in Aster (built-in and user plugins): id, title, "
+          + "plugin, kind, and whether run_plugin_tool can run it. Commands with a web UI or that open "
+          + "a terminal tab can only be used inside Aster; plugins that are disabled or need approval "
+          + "cannot run until the user handles them in Aster.",
+        properties: [
+          "query": .object([
+            "type": "string",
+            "description": "Optional search words matched against titles, keywords and plugin names.",
+          ])
+        ],
+        required: [],
+        annotations: ["readOnlyHint": true, "openWorldHint": false]),
+      tool(
+        name: Name.runPluginTool, title: "Run an Aster plugin command",
+        description:
+          "Run a plugin command from list_plugin_tools without opening its UI and return its output "
+          + "(text, a list of items, or just done). Script commands are the user's approved plugin "
+          + "programs; they get the input on stdin and run for at most 60 seconds.",
+        properties: [
+          "id": .object([
+            "type": "string",
+            "description": "Command id as returned by list_plugin_tools (<plugin id>/<command code>).",
+          ]),
+          "input": .object([
+            "type": "string",
+            "description": "Text to process (for example a timestamp, a JWT, or a URL). Optional.",
+          ]),
+          "cwd": .object([
+            "type": "string",
+            "description": "Absolute working directory for script commands. Defaults to your own working directory.",
+          ]),
+        ],
+        required: ["id"],
+        annotations: ["readOnlyHint": false, "destructiveHint": false, "openWorldHint": true]),
     ]
   }
 

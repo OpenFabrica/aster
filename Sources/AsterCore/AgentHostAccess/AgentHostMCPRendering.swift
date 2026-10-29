@@ -19,6 +19,16 @@ enum AgentHostMCPRendering {
       text = (try? result.decoded(as: HostReadResult.self)).map(readResult) ?? rawJSON(result)
     case AgentHostMCPToolCatalog.Name.hostClose:
       text = "Closed the agent terminal on this host."
+    case AgentHostMCPToolCatalog.Name.listTabs:
+      text = (try? result.decoded(as: SessionLayoutListing.TabListResult.self))
+        .map { SessionLayoutListing.renderTabs($0.tabs) } ?? rawJSON(result)
+    case AgentHostMCPToolCatalog.Name.listPanes:
+      text = (try? result.decoded(as: SessionLayoutListing.PaneListResult.self))
+        .map { SessionLayoutListing.renderPanes($0.panes) } ?? rawJSON(result)
+    case AgentHostMCPToolCatalog.Name.listPluginTools:
+      text = (try? result.decoded(as: ToolListResult.self)).map(pluginToolList) ?? rawJSON(result)
+    case AgentHostMCPToolCatalog.Name.runPluginTool:
+      text = (try? result.decoded(as: ToolRunResult.self)).map(pluginToolRun) ?? rawJSON(result)
     default:
       text = rawJSON(result)
     }
@@ -80,6 +90,45 @@ enum AgentHostMCPRendering {
     return lines.joined(separator: "\n")
   }
 
+  /// 插件命令列表：一行一条，`id — 标题 (插件)`，后接种类与能否运行；不能运行时给出原因。
+  static func pluginToolList(_ result: ToolListResult) -> String {
+    guard !result.tools.isEmpty else { return "No plugin commands match." }
+    return result.tools.map { tool in
+      var line = "- \(tool.id) — \(tool.title) (\(tool.pluginName))"
+      line += " · " + ([tool.kind.rawValue] + [tool.output].compactMap { $0 }).joined(separator: "/")
+      if tool.runnable {
+        line += " · runnable"
+      } else {
+        line += " · not runnable"
+        if let reason = tool.unavailableReason, !reason.isEmpty { line += ": \(reason)" }
+      }
+      if let subtitle = tool.subtitle, !subtitle.isEmpty { line += "\n  \(subtitle)" }
+      return line
+    }.joined(separator: "\n")
+  }
+
+  /// 插件命令结果：首行「输出方式 · 耗时」，再接文本（围栏）或列表项；`none` 只报完成。
+  static func pluginToolRun(_ result: ToolRunResult) -> String {
+    var lines = ["\(result.output) · duration \(seconds(result.durationMs))"]
+    switch result.output {
+    case "list":
+      let items = result.items ?? []
+      if items.isEmpty { lines.append("(no items)") }
+      for item in items {
+        var line = "- \(item.title)"
+        if let subtitle = item.subtitle, !subtitle.isEmpty { line += " — \(subtitle)" }
+        if let value = item.value, value != item.title { line += "\n  value: \(value)" }
+        lines.append(line)
+      }
+    case "none":
+      lines.append("Done.")
+    default:
+      if result.truncated { lines.append("(output truncated)") }
+      lines.append(fenced(result.text ?? ""))
+    }
+    return lines.joined(separator: "\n")
+  }
+
   // MARK: - 错误
 
   /// 服务端错误：`code: message`，再附一行可执行的下一步建议。
@@ -120,6 +169,15 @@ enum AgentHostMCPRendering {
     case .terminalEnded:
       return "The agent terminal for this host has ended. Call host_exec again to open a new one "
         + "(shell state was lost)."
+    case .methodNotFound
+    where tool == AgentHostMCPToolCatalog.Name.listPluginTools || tool == AgentHostMCPToolCatalog.Name.runPluginTool:
+      return "This version of the Aster app does not support plugin commands yet; ask the user to update Aster."
+    case .notFound where tool == AgentHostMCPToolCatalog.Name.runPluginTool:
+      return "Call list_plugin_tools and pass an exact command id."
+    case .notFound where tool == AgentHostMCPToolCatalog.Name.listTabs:
+      return "Call list_tabs without a window to see every window."
+    case .notFound where tool == AgentHostMCPToolCatalog.Name.listPanes:
+      return "Call list_tabs to get valid tab ids, or list_panes without a tab."
     case .notFound where tool == AgentHostMCPToolCatalog.Name.hostWait:
       return "The command_id is unknown or expired. Use host_read to inspect the terminal, or run the "
         + "command again."

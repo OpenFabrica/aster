@@ -338,6 +338,11 @@ command_id；排队已满 `limit_exceeded`。终端总数上限 8，每个有效
   `$ASTER_PANE_ID`，`agent_session` 取每次 tools/call 的 `_meta.sessionId`（Codex）。工具：`list_hosts`、`host_exec`（`timeout_seconds` 1–50，默认 40）、`host_wait`、
   `host_read`、`host_interrupt`、`host_close`。结果是文本（状态行 + 代码块输出）加 `structuredContent`；
   错误是 `isError: true` 的工具结果，带按错误码给出的下一步提示。
+  同一个 server 还暴露与主机无关的工具：`list_tabs`（参数 `window`）、`list_panes`（参数 `tab`）取
+  `session.snapshot`，按 `SessionLayoutListing` 在本地筛选，与 `aster tab list` / `aster pane list` 同一份投影；
+  `current` 换成 `$ASTER_PANE_ID`。`list_plugin_tools` / `run_plugin_tool` 映射到 `tool.list` / `tool.run`
+  （规则见 [工具箱与插件](tools-and-plugins.md)），`run_plugin_tool` 没给 `cwd` 时用 MCP 进程的工作目录，
+  客户端超时 = 脚本最长 60 s + 15 s；旧版 App 回 `method_not_found` 时提示用户升级。
 - 设置里的「安装到 Claude Code / Codex」：执行 `claude mcp add --scope user aster -- <aster> mcp` /
   `codex mcp add aster -- <aster> mcp`（先 remove 再 add，便于覆盖旧路径）。`<aster>` **只能**是 PATH 里的
   `aster` 稳定 symlink（`AgentHostMCPInstallService.stableCommandPath`），没装时先由 `AsterCLIInstaller` 装上；

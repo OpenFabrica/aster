@@ -71,7 +71,10 @@ struct AgentHostMCPToolsTests {
     var tools = makeTools()
     let list = try #require(tools.handle(request("tools/list")) { _, _ in .null }?.result?["tools"]?.arrayValue)
     #expect(list.compactMap { $0["name"]?.stringValue }
-      == ["list_hosts", "host_exec", "host_wait", "host_read", "host_interrupt", "host_close"])
+      == [
+        "list_hosts", "host_exec", "host_wait", "host_read", "host_interrupt", "host_close", "list_tabs", "list_panes",
+        "list_plugin_tools", "run_plugin_tool",
+      ])
     let byName = Dictionary(uniqueKeysWithValues: list.map { ($0["name"]?.stringValue ?? "", $0) })
     #expect(byName["list_hosts"]?["annotations"]?["readOnlyHint"] == true)
     #expect(byName["host_exec"]?["annotations"]?["destructiveHint"] == true)

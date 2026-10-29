@@ -22,7 +22,8 @@ enum MCPCommand {
     // 会话键在进程启动时生成一次：同一个 MCP server 进程（即同一个 agent 会话）的调用
     // 共用授权与终端；新进程是新会话，需要重新批准。
     var tools = AgentHostMCPTools(
-      sessionKey: "mcp:\(UUID().uuidString.lowercased())", callerPane: environment["ASTER_PANE_ID"])
+      sessionKey: "mcp:\(UUID().uuidString.lowercased())", callerPane: environment["ASTER_PANE_ID"],
+      workingDirectory: FileManager.default.currentDirectoryPath)
     let decoder = JSONDecoder()
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -58,8 +59,9 @@ enum MCPCommand {
     }
   }
 
-  /// 客户端等待上限：exec / wait / open 按 `timeout_ms` 推算，其余用默认值。
+  /// 客户端等待上限：exec / wait / open 按 `timeout_ms` 推算，插件命令按脚本最长运行时间，其余用默认值。
   static func clientTimeout(method: String, params: JSONValue) -> TimeInterval {
+    if method == ToolControlMethod.toolRun.rawValue { return ScriptToolProtocol.maximumTimeout + 15 }
     let waiting: Set<String> = [
       AgentHostControlMethod.hostExec.rawValue, AgentHostControlMethod.hostWait.rawValue,
       AgentHostControlMethod.hostOpen.rawValue,
