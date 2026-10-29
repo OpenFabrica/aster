@@ -230,7 +230,7 @@ final class ManagedTerminalCoordinator {
     return identity
   }
 
-  /// 一次真正的连接：后台握手；旧服务仍有终端在运行时先问用户，同意才替换。
+  /// 一次真正的连接：后台握手；旧服务仍有终端在运行时先实时交接，交接不了才问用户，同意才替换。
   private func performConnect() async -> SessionServerIdentity? {
     guard let endpoint else {
       connectionState = .disabled
@@ -239,6 +239,12 @@ final class ManagedTerminalCoordinator {
     connectionState = .connecting
     let client = self.client
     var outcome = await Self.detached { try Self.establish(client, endpoint) }
+    // 旧服务有终端在运行时会先实时交接；没交接成功才落到下面的询问，原因留进诊断日志。
+    if case .success(let attachment) = outcome, let reason = attachment.liveHandoffFailure {
+      DiagnosticsCenter.shared.record(
+        "managed.live_handoff_failed", level: .warning, category: .terminal,
+        attributes: ["reason": String(reason.prefix(200))])
+    }
     // 用户回答之前不放行对账：其它 Pane 都在等这次连接，不会先挂到马上要停的旧服务上。
     if case .success(let attachment) = outcome, attachment.outdatedRunningTerminals > 0,
       !outdatedServerPromptAnswered, let local = client as? LocalManagedSessionClient

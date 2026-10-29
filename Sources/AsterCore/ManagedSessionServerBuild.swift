@@ -62,9 +62,14 @@ public struct ManagedServerAttachment: Equatable, Sendable {
   /// 服务比 App 自带的二进制旧、又有终端在运行时，为运行中的终端数；否则为 0。
   /// 大于 0 时不能静默替换：替换会结束这些终端，由调用方先问用户。
   public var outdatedRunningTerminals: Int
+  /// 有终端在运行却没能实时交接时的原因（旧服务不支持、交接失败）；交接成功或无需交接时为 nil。
+  public var liveHandoffFailure: String?
 
-  public init(identity: SessionServerIdentity, outdatedRunningTerminals: Int = 0) {
+  public init(
+    identity: SessionServerIdentity, outdatedRunningTerminals: Int = 0, liveHandoffFailure: String? = nil
+  ) {
     self.identity = identity
     self.outdatedRunningTerminals = outdatedRunningTerminals
+    self.liveHandoffFailure = liveHandoffFailure
   }
 }

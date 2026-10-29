@@ -119,9 +119,22 @@ flowchart LR
 本机服务同样会活过 App 升级，运行中的进程仍是旧二进制，新修复不生效。`scripts/build-session-runtime.sh` 把运行时源码（含未提交改动）与 VT 产物键的摘要作为构建号写进二进制（`-Dbuild-id`），`aster-session --version` 末尾多出 `build=<id>`，`server.status` 返回 `build` 字段。只看源码不看二进制：重新签名、只改 App 时构建号不变，不会无谓提示。App 连接时（同一个 `ensureCurrentServer`）用 `--version` 读自带二进制的构建号（`ManagedSessionServerBuild`，按文件大小与修改时间缓存），与服务报的比较：
 - 一致，或 App 侧读不到构建号（不在 git 工作区里的构建）：照常附加。
 - 不一致（加入构建号之前的服务不报构建号，也算不一致）且没有终端在运行：直接替换，用户无感。
-- 不一致且有终端在运行：不动服务，`ManagedServerAttachment.outdatedRunningTerminals` 带回运行中的终端数。协调器弹窗（`ManagedServerRestartPrompt`）说明重启会结束几个终端；选「现在重启」才替换，旧终端按冷重启对账，选「以后再说」本次运行不再问，下次启动再问。
+- 不一致且有终端在运行：实时交接（`LocalManagedSessionClient.upgradeServer` → `aster-session server upgrade`），终端进程、PID、画面与回滚历史都保留，用户无感。只有旧服务不支持 `live_handoff` 或交接失败时（旧服务此时原样继续运行），才由 `ManagedServerAttachment.outdatedRunningTerminals` 带回运行中的终端数、`liveHandoffFailure` 带回原因（写进诊断日志 `managed.live_handoff_failed`），协调器弹窗（`ManagedServerRestartPrompt`）说明重启会结束几个终端；选「现在重启」才替换，旧终端按冷重启对账，选「以后再说」本次运行不再问，下次启动再问。
 
-启动时每个恢复的 Pane 都会并发对账，`ManagedTerminalCoordinator.connectAsync` 因此只保留一次进行中的连接，其余调用等它的结果：提示只弹一次，用户回答前不会有 Pane 挂到马上要停的旧服务上，两次并发替换也不会互相停掉对方刚起的服务。关闭路径的同步 `connect()` 不弹窗，旧服务有终端在运行时照常附加。服务端已有实验性的实时交接（`server.handoff`，PTY 文件描述符经 SCM_RIGHTS 转给新服务），但 VT 状态不随之转移、App 侧显示桥也没有接上重连，暂不用于升级。
+启动时每个恢复的 Pane 都会并发对账，`ManagedTerminalCoordinator.connectAsync` 因此只保留一次进行中的连接，其余调用等它的结果：提示只弹一次，用户回答前不会有 Pane 挂到马上要停的旧服务上，两次并发替换也不会互相停掉对方刚起的服务。关闭路径的同步 `connect()` 不弹窗，旧服务有终端在运行时照常附加。
+
+### 实时交接（`server upgrade`）
+
+App 启动时连接服务在任何 Pane 挂上显示桥之前，所以交接发生时没有显示桥需要重连；交接完成后各 Pane 照常对账（`persistedServerEpoch` 传 nil，终端 ID 在交接中保持不变）并附加到新服务。`server upgrade`（`SessionRuntime/src/service_upgrade.zig`）的顺序：
+
+1. 读旧服务状态：构建号与本二进制相同就不做事（`--force` 例外，测试与手动重新交接用）；不支持 `live_handoff` 直接报错。
+2. 以只读观察者身份抓下每个运行中终端的完整画面（`terminal_attach.captureSnapshot`，与客户端附加时收到的第一份快照相同），写成种子文件 `<state>/<name>/handoff-seed/<terminalID>.seed`（0600，文件头带旧服务 epoch，见 `handoff_seed.zig`）。
+3. 发 `server.handoff`，参数 `binary` 指定交给本二进制（必须是当前用户或 root 的绝对路径可执行文件）。旧服务 fork/exec 新二进制 `server serve … --takeover-fd`，经 SCM_RIGHTS 交出全部 PTY 主端，发送状态信封后阻塞等待确认。
+4. 新服务收到 PTY、核对进程存活后**立刻确认**，然后才去拿服务锁；旧服务收到确认后排空回复、退出、释放锁。以前新服务先拿锁再确认，两边互等到 5 秒超时，旧服务杀掉新服务继续运行——交接从未成功过。确认写失败时新服务直接退出，旧服务超时后收回 PTY，不会出现两个服务读同一个 PTY。
+5. 新服务按 PTY 自身的窗口尺寸（`TIOCGWINSZ`）建 VT，在首次读取 PTY 之前写入画面：v2 信封（`handoff.envelope_version`）在 JSON 之后按终端附带「画面快照 + 旧服务尚未写进 PTY 的输入」，精确无缝；v1 旧服务（交接代码修复之前的所有版本）不带画面，改用第 2 步的种子，并把这些 PTY 的行数临时减一再改回，促使前台程序整屏重画，补上抓种子到旧服务停止读取之间那一小段输出（只改行数不改列数，避免 Codex 这类内联界面按新宽度重排）。种子用完即删，epoch 不符的旧种子不会被采用。
+6. `server upgrade` 等到 epoch 变化，确认原来运行中的终端在新服务里全部仍在运行，输出 `server_upgrade` JSON。
+
+被接管的终端不再是服务的子进程：退出经 kqueue（macOS）/ pidfd（Linux）检测，结束请求直接发信号；它们还能再次交接。v1 旧服务交接给自身可执行文件路径上的二进制（忽略 `binary` 参数），App 替换后那就是新版；若 App 换了安装位置导致交出去的仍不是自带的那份，`ensureCurrentServer` 会对已支持 `binary` 参数的新服务再交接一次。端到端验证：`SessionRuntime/tests/live_handoff.py <新二进制> [<旧二进制>]`（PID 与几何保持、输出连续、画面与回滚历史恢复、交接后可输入、接管后可结束、连续两次交接、非法 `binary` 被拒），`scripts/test-runtime.sh` 设 `ASTER_HANDOFF_OLD_BINARY` 时再跑一遍 v1 兼容路径；App 侧见 `ManagedSessionServerBuildTests` 与 `ManagedServerRestartPromptTests`。
 
 ## 4. 生命周期和交互合同
 

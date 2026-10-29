@@ -150,6 +150,12 @@ public enum ManagedSessionCommand {
     ["server", "stop", endpoint.stateParentPath, endpoint.sessionName]
   }
 
+  /// `server upgrade <state-parent> <name>`：把运行中的旧服务实时交接给这份二进制，
+  /// 终端进程、PID 与画面都保留。
+  public static func serverUpgrade(_ endpoint: ManagedSessionEndpoint) -> [String] {
+    ["server", "upgrade", endpoint.stateParentPath, endpoint.sessionName]
+  }
+
   /// `server replace <state-parent> <name>`：查询替换影响（受影响终端列表）。
   /// 真正的替换由客户端编排（stop → install → start），不是服务端原子操作。
   public static func serverReplace(_ endpoint: ManagedSessionEndpoint) -> [String] {
@@ -403,7 +409,8 @@ public struct LocalManagedSessionClient: ManagedSessionClient {
   /// 终端也一样坏。此时只能停掉旧服务再起新服务，旧会话里的终端随之结束。
   ///
   /// 服务也会活过 App 升级，运行的仍是旧二进制。构建号不同且没有终端在运行时直接替换；
-  /// 有终端在运行时不动服务，把运行中的终端数放进结果，由调用方问用户。
+  /// 有终端在运行时实时交接给新二进制（`upgradeServer`），终端不中断。旧服务不支持交接
+  /// 或交接失败时旧服务原样继续运行，把运行中的终端数与失败原因放进结果，由调用方问用户。
   /// 只在本机 App 里调用：从 SSH 登进本机时审计会话本来就不同，不能拿来替换服务。
   ///
   /// - Parameter bundledBuild: App 自带二进制的构建号；nil 表示未知，不比较构建号。
@@ -422,8 +429,50 @@ public struct LocalManagedSessionClient: ManagedSessionClient {
     }
     let running = try listTerminals(endpoint).filter { $0.state == .running }.count
     guard running > 0 else { return ManagedServerAttachment(identity: try replaceServer(endpoint)) }
-    return ManagedServerAttachment(identity: identity, outdatedRunningTerminals: running)
+    guard identity.capabilities.contains("live_handoff") else {
+      return ManagedServerAttachment(
+        identity: identity, outdatedRunningTerminals: running,
+        liveHandoffFailure: "live_handoff unsupported")
+    }
+    do {
+      // v1 旧服务交接给自身路径上的二进制；App 搬过安装位置时那份不一定是自带的这份，
+      // 此时新服务已经支持指定二进制，再交接一次即可。
+      var upgraded = try upgradeServer(endpoint)
+      if ManagedSessionServerBuild.isOutdated(server: upgraded.build, bundled: bundledBuild) {
+        upgraded = try upgradeServer(endpoint)
+      }
+      guard !ManagedSessionServerBuild.isOutdated(server: upgraded.build, bundled: bundledBuild) else {
+        return ManagedServerAttachment(
+          identity: upgraded, outdatedRunningTerminals: running,
+          liveHandoffFailure: "handed over to build \(upgraded.build ?? "unknown")")
+      }
+      return ManagedServerAttachment(identity: upgraded)
+    } catch {
+      return ManagedServerAttachment(
+        identity: try serverStatus(endpoint), outdatedRunningTerminals: running,
+        liveHandoffFailure: String(describing: error))
+    }
   }
+
+  /// 把正在运行的服务实时交接给 `endpoint.binaryPath`（`server upgrade`）：终端进程、PID、
+  /// 画面与回滚历史都保留，返回新服务身份。旧服务不支持或交接失败时抛错，旧服务在确认
+  /// 接管之前失败会收回 PTY 继续运行，终端不受影响。
+  public func upgradeServer(_ endpoint: ManagedSessionEndpoint) throws -> SessionServerIdentity {
+    // 交接要先抓每个终端的画面，再等新服务接管；比普通控制命令慢，单独放宽超时。
+    let output = try executeStructured(
+      binaryPath: endpoint.binaryPath, arguments: ManagedSessionCommand.serverUpgrade(endpoint),
+      timeout: max(timeout, Self.upgradeTimeout))
+    guard let data = output.data(using: .utf8),
+      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { throw ManagedSessionError.malformedReply("server upgrade") }
+    guard json["type"] as? String == "server_upgrade" else {
+      throw ManagedSessionError.commandFailed(status: 1, output: json["code"] as? String ?? output)
+    }
+    return try serverStatus(endpoint)
+  }
+
+  /// `server upgrade` 的等待上限：抓画面（每终端最多 10 秒）加等待接管（20 秒）。
+  static let upgradeTimeout: TimeInterval = 60
 
   /// 停掉当前服务，再用 `endpoint.binaryPath` 起一个新服务，返回新服务身份。
   /// 旧服务里的终端全部结束；调用方负责事先确认这是可以接受的。
@@ -508,6 +557,13 @@ public struct LocalManagedSessionClient: ManagedSessionClient {
   /// stdout 只承载协议输出，诊断在 stderr；两者分开读取避免互相污染，也避免管道
   /// 写满导致子进程阻塞。
   public func executeStructured(binaryPath: String, arguments: [String]) throws -> String {
+    try executeStructured(binaryPath: binaryPath, arguments: arguments, timeout: timeout)
+  }
+
+  /// 同上，单独指定超时（`server upgrade` 比普通控制命令慢）。
+  public func executeStructured(
+    binaryPath: String, arguments: [String], timeout: TimeInterval
+  ) throws -> String {
     guard FileManager.default.isExecutableFile(atPath: binaryPath) else {
       throw ManagedSessionError.runtimeUnavailable(binaryPath)
     }
