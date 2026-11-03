@@ -3,6 +3,41 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.29</title>
+            <pubDate>Tue, 03 Nov 2026 17:02:15 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>48</sparkle:version>
+            <sparkle:shortVersionString>0.6.29</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 新功能
+
+- **刘海区（Dynamic Island）**：刘海区可显示 Agent 活动与完成提醒、计时器、日历、音乐、通知收件箱、文件架和系统状态；别的终端里运行的 Claude Code 与 Codex 也会显示在岛上。外观可跟随应用或固定浅色、深色。
+- **AI 助手面板**：连接主机后，右侧面板可用本机已安装的 Claude Code 或 Codex 协助处理主机问题。命令在你当前的终端里运行，需要批准的操作以对话内审批卡确认，改文件前留有可还原的快照。
+- **主机管理**：主机页重新设计，支持备注、收藏、搜索、批量操作、在线状态和资源占用；新增端口转发、测试连接、登录脚本（Expect / Send），可从 Xshell、FinalShell、MobaXterm、SecureCRT 和 Tabby 导入主机。
+- **SFTP 文件管理**：原生 SSH 标签的 Files 页改用 SFTP，支持文件操作、传输队列和用编辑器打开；连上后 Files 跟随 `cd` 切换目录。
+- **SSH 会话状态条**：原生 SSH Pane 顶部显示连接状态与延迟，AI 正在运行时可直接停止。
+- **系统功能**：设置中新增「功能」分类，可按需安装或卸载：保持唤醒、剪贴板历史、窗口布局与切换、鼠标与键盘增强、音频混音与输出切换、外接屏亮度、清理与卸载 App、端口管理等。
+- **菜单栏常驻与应用锁**：菜单栏图标左键打开面板、右键打开菜单；关闭全部窗口后 Aster 在后台继续运行。按 ⌃⌘L 锁定 Aster，可用 Touch ID 解锁。
+- **系统状态与用量**：系统状态条每一项可点开详情面板；AI 用量浮动窗改为随内容调整高度，并按 Agent 区分颜色和折算 API 花费。
+- **侧栏与 Outline**：侧栏标签悬停显示标题与工作目录，Agent 标签显示任务名和运行状态；Outline 按目录分组，悬停提问可预览内容。
+- **工具与 MCP**：工具面板支持悬浮球入口；MCP 的 `pane_read` 可等待输出，`pane_send` 支持命名按键。
+
+## 修复
+
+- 修复合盖休眠时 Aster 被系统结束的问题。
+- 修复 Claude Code 运行时画面错位，以及非法 UTF-8 让受管终端画面冻住的问题。
+- 修复恢复会话时可能接上别的 Pane 正在使用的 Agent 会话。
+- 修复开着菜单栏图标时关闭窗口仍直接退出。
+- 修复只开启 ecdh 算法的堡垒机无法连接。
+- 修复 Command 链接跨行识别，以及 Outline 详情和图片预览的若干问题。
+- 后台终端连接断开后自动恢复，结束失败时可重试。
+- 标签切换与主题取色更快。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.29/Aster-0.6.29.dmg" length="59946732" type="application/octet-stream" sparkle:edSignature="ZmHyRa3kWn9IdjehOgi1xewbfwQlt9fHHNx9OSsjLcEnM894oyRsZoRzh0Jag68y1KrQgwUr0JcN8B3wmAcJBQ=="/>
+        </item>
+        <item>
             <title>0.6.28</title>
             <pubDate>Fri, 30 Oct 2026 00:51:04 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -125,21 +160,6 @@
   - agent 终端在前台时按 ⌘W，只收起这个终端，不再关掉工作区的活动 Pane。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.25/Aster-0.6.25.dmg" length="43123255" type="application/octet-stream" sparkle:edSignature="PCaA1eJzp0ActJl28WEGG1MYn/JZ7sCNAfM4es6ouCBiGp/8CrNw3m+vDjVkd/Ku9lJOWKuQSEoQPWmDtEjtAw=="/>
-        </item>
-        <item>
-            <title>0.6.24</title>
-            <pubDate>Wed, 21 Oct 2026 12:35:35 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>43</sparkle:version>
-            <sparkle:shortVersionString>0.6.24</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 修复
-
-- **agent 运行带网址的命令时 Aster 不再闪退**：Claude Code、Codex 等 agent 在 SSH 主机上执行命令时，如果命令里有 `http://127.0.0.1:${PORT}/healthz` 这种带变量的网址，Aster 会在记录审计日志时直接退出。在终端里自己敲以这类网址开头的命令，也可能触发同样的退出。现在这些命令都能正常运行和记录。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.24/Aster-0.6.24.dmg" length="42392773" type="application/octet-stream" sparkle:edSignature="GHXvGNa827fxkKCtCji3n1GdcuDqNaxdCPK46Pw5k8E06oKCZF7Xnu7N6udxju4O1bEPRNpy5zWXaJXXVr4oBw=="/>
         </item>
     </channel>
 </rss>
