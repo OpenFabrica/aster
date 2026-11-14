@@ -3,6 +3,34 @@
     <channel>
         <title>Aster</title>
         <item>
+            <title>0.6.31</title>
+            <pubDate>Sat, 14 Nov 2026 19:23:39 +0800</pubDate>
+            <link>https://github.com/OpenFabrica/aster</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50</sparkle:version>
+            <sparkle:shortVersionString>0.6.31</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 新功能
+
+- **会话图片预览**：本机 Claude Code 或 Codex 会话出现图片后，终端右上角显示扇形缩略图，点开可切换浏览，点图片用「快速查看」看原图。
+- **Pane 端口条**：终端 Pane 底部列出其中程序正在监听的端口，可在浏览器打开、复制地址或停止；Agent 需要预览本机网页时由 Aster 只读托管文件夹（MCP `serve_start`），关掉 Pane 自动停止。
+- **收件箱**：侧栏顶部常驻收件箱铃铛；状态行显示 Agent 的实时活动，一轮结束后回到「已完成，未读」，Agent 图标使用各自的品牌色。
+- **计划文档入口**：本机 Claude Code 会话产出计划文件后，标题栏右侧出现入口，点击直接打开。
+- **主题**：新增 Acrylic Dark 等主题，并支持导入其他终端的配色；主题选择器改为按明暗分组的缩略卡片，预览主题时窗口外观跟着切换明暗。设置侧栏改用系统原生玻璃底。
+
+## 修复
+
+- 修复持续输出或 Agent 工作期间光标乱闪，并调整光标高度与粗细。
+- 终端网格垂直居中，Pane 底部不再空出一整行。
+- 修复浅色玻璃主题与 Acrylic Dark 侧栏发白、着色过重的问题。
+- 修复 Agent 退出后速率条仍然显示。
+- 修复刘海区 Claude 额度卡片只显示一种周额度。
+- 修复图片预览卡片大小随图片宽高比跳动。
+]]></description>
+            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.31/Aster-0.6.31.dmg" length="62707768" type="application/octet-stream" sparkle:edSignature="7yKFaZOiWXEA0KHPl7jEVwwA0Vv8aPLI7kq7GchL3uv9RrdpV1w/hwGSwdIO8ltgBurmw41sRuQ03/pVykQBCw=="/>
+        </item>
+        <item>
             <title>0.6.30</title>
             <pubDate>Wed, 11 Nov 2026 21:41:49 +0800</pubDate>
             <link>https://github.com/OpenFabrica/aster</link>
@@ -134,40 +162,6 @@
 - **主机管理**：布局更整齐，已知主机列表分页显示。
 ]]></description>
             <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.27/Aster-0.6.27.dmg" length="44847147" type="application/octet-stream" sparkle:edSignature="b6LpnCfkhWI4dLescHIsbOd0lS1EXJFMgr69XTa8217xpAtxD4O8MnP2dvdX47oHm5mkgfMG+kOdsLxuw83vCA=="/>
-        </item>
-        <item>
-            <title>0.6.26</title>
-            <pubDate>Mon, 26 Oct 2026 09:22:53 +0800</pubDate>
-            <link>https://github.com/OpenFabrica/aster</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/OpenFabrica/aster/releases</sparkle:fullReleaseNotesLink>
-            <sparkle:version>45</sparkle:version>
-            <sparkle:shortVersionString>0.6.26</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 新功能
-
-- **自动补全换成新引擎**：补全规则重新整理，来源包括内置 CLI 规格（711 条）、Shell 别名与 PATH、文件和目录、当前目录的历史命令和 README。Git 分支、npm/pnpm/yarn/bun 脚本、Make、Cargo、SSH 主机等候选在后台只读获取，不执行任何项目脚本。
-  - 接受键可选 `Tab`、`Tab + 右方向键`、单独右方向键、`Control + Space` 或关闭，默认 `Tab`。
-  - 候选面板可选关闭、自动、Esc 或 Option + Esc，默认 Esc。Tab 不再自动选中首项，先用上下键选，再按 Tab 或 Return。
-  - 设置里可以查看补全数据库并立即更新，也可以按类别「清除我的数据」。
-  - **注意**：学习数据从空库重新开始，旧数据已备份但不导入。剪贴板建议、失败后的纠错建议、Agent 恢复命令置顶这几项暂时没有接入新引擎。
-- **Pane 菜单重做**：点击顶部目录胶囊打开新的圆角菜单，鼠标移上去就展开子菜单，不用再点。
-  - Git 菜单直接执行操作：Push/Pull 先确认，Fetch 显示进度并可取消，创建分支、Merge/Rebase 先让你选分支。
-  - 「通知与权限」在同一标签的分屏间共享，可分别开关声音、通知、徽标、防休眠和鼠标捕获。
-  - 「关于此 Pane」显示 Pane ID、命令、打开时间和设备。
-- **文件 Pane 更紧凑好用**：
-  - 工具栏变紧凑，窄分屏只显示图标；新增「打开方式」，可在访达中显示、复制路径或用别的应用打开。
-  - 源码右键菜单提供剪切、复制、粘贴、撤销、语法选择和「发送到 Chat」。
-  - 「发送到 Chat」携带选区和行范围，包含未保存的编辑；可以预填到已有 Agent 或终端，也可以新建 Agent 会话，始终由你确认发送。
-  - 本地 `.sh` 文件显示运行按钮，在新终端里执行磁盘上的版本。
-  - 自动换行和行号移到「设置 → 编辑器」。源码字体跟随终端字体，图片和文字预览可缩放。
-
-## 修复
-
-- **Codex 的主机终端也能停靠到 Pane**：Codex 调用远程主机时，终端原来总是浮窗，也停靠不回去。现在 Aster 按 Codex 的会话 ID 找到调用它的 Pane。需要先在设置里装好 Codex 的 Agent 集成。
-- **没有调用方 Pane 时不再显示无效按钮**：agent 主机终端是独立窗口且找不到调用它的 Pane 时，标题栏不再露出点了没反应的「停靠到 Pane」按钮。
-]]></description>
-            <enclosure url="https://github.com/OpenFabrica/aster/releases/download/v0.6.26/Aster-0.6.26.dmg" length="43443496" type="application/octet-stream" sparkle:edSignature="r2LCKdv+FSVJ70A6XEdVolNry2x0e+y3kb41K3MXwx22Ce+0VHvR0LSTgJTW+iY9PBgd5n4jpMMYS0AiYr5CCQ=="/>
         </item>
     </channel>
 </rss>
